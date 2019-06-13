@@ -5,6 +5,7 @@
 
 #include "drake/manipulation/robot_plan_runner/robot_plans/joint_space_plan.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/contact_aware_plan.h"
 #include "drake/systems/framework/basic_vector.h"
 
 namespace drake {
@@ -15,23 +16,29 @@ using systems::BasicVector;
 using systems::kVectorValued;
 using robot_plans::PlanType;
 using robot_plans::PlanData;
-using robot_plans::JointSpacePlan;
-using robot_plans::TaskSpacePlan;
 
 RobotController::RobotController(PlanType plan_type, double control_period) :
   num_positions_(7), control_period_(control_period) {
   switch (plan_type) {
     case PlanType::kJointSpacePlan:
       this->set_name("JointSpaceController");
-      plan_ = std::make_unique<JointSpacePlan>();
+      plan_ = std::make_unique<robot_plans::JointSpacePlan>();
       break;
     case PlanType::kTaskSpacePlan:
       this->set_name("TaskSpaceController");
-      plan_ = std::make_unique<TaskSpacePlan>();
+      plan_ = std::make_unique<robot_plans::TaskSpacePlan>();
+      break;
+    case PlanType::kContactAwarePlan:
+      this->set_name("ContactAwareController");
+      plan_ = std::make_unique<robot_plans::ContactAwarePlan>();
       break;
     case PlanType::kEmptyPlan:
+      throw std::runtime_error(
+          "PlanType::kEmptyPlan cannot instantiate a controller system.");
       break;
     case PlanType::kLastElement:
+      throw std::runtime_error(
+          "PlanType::kLastElement cannot instantiate a controller system.");
       break;
   }
 

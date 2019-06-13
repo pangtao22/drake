@@ -22,7 +22,11 @@ class TaskSpacePlan : public PlanBase {
             EigenPtr<Eigen::VectorXd> q_cmd,
             EigenPtr<Eigen::VectorXd> tau_cmd) const override;
 
- private:
+ protected:
+  void UpdateDesiredTaskSpaceVelocity(
+      const Eigen::Ref<const Eigen::VectorXd>& q,
+      const Eigen::Ref<const Eigen::VectorXd>& v,
+      double t, const PlanData& plan_data) const;
   void UpdatePositionError(
       double t, const PlanData& plan_data,
       const Eigen::Ref<const Eigen::Vector3d>& p_WoQ_W) const;
@@ -33,14 +37,17 @@ class TaskSpacePlan : public PlanBase {
   multibody::FrameIndex task_frame_idx_;
   multibody::ModelInstanceIndex robot_model_;
   mutable std::unique_ptr<systems::Context<double>> plant_context_;
-  mutable Eigen::MatrixXd Jv_WTq_;
   mutable Eigen::Vector3d err_xyz_;
   mutable Eigen::Quaterniond Q_TTr_;
   mutable std::unique_ptr<Eigen::Vector3d> p_WoQ_W_t0_;
+  mutable Eigen::VectorXd x_dot_desired_;
+  mutable Eigen::MatrixXd Jv_WTq_;
 
   // gains
   const Eigen::Array3d kp_translation;
   const Eigen::Array3d kp_rotation;
+
+  const int task_dimension_;
 };
 
 }  // namespace robot_plans

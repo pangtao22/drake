@@ -67,11 +67,13 @@ drake_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":plan_base",
+        ":task_space_plan",
         "//common:find_resource",
         "//math:geometric_transform",
         "//multibody/parsing",
         "//multibody/plant",
+        "//solvers:mathematical_program_lite",
+        "//solvers:gurobi_solver",
     ],
 )
 

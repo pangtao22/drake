@@ -22,8 +22,13 @@ namespace robot_plans {
  * kLastElement is used to detect the end of this enum when it is looped
  * through.
  */
-enum class PlanType { kEmptyPlan, kTaskSpacePlan, kJointSpacePlan,
-    kLastElement };
+enum class PlanType {
+  kEmptyPlan,
+  kTaskSpacePlan,
+  kJointSpacePlan,
+  kContactAwarePlan,
+  kLastElement
+};
 
 struct PlanData {
   PlanType plan_type{PlanType::kEmptyPlan};
@@ -82,8 +87,11 @@ class PlanBase {
   PlanType get_plan_type() const { return plan_type_; };
 
  protected:
+  void set_plan_type(PlanType plan_type) { plan_type_ = plan_type; };
   const int num_positions_;
-  const PlanType plan_type_;
+
+ private:
+  PlanType plan_type_;
 };
 
 }  // namespace robot_plans

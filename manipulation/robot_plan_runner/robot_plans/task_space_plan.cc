@@ -1,5 +1,5 @@
-#include "drake/common/find_resource.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan.h"
+#include "drake/common/find_resource.h"
 #include "drake/multibody/parsing/parser.h"
 
 namespace drake {
@@ -19,7 +19,7 @@ TaskSpacePlan::TaskSpacePlan()
     : PlanBase(PlanType::kTaskSpacePlan, 7),
       plant_(std::make_unique<multibody::MultibodyPlant<double>>()),
       kp_translation(Eigen::Array3d(20, 20, 20)),
-      kp_rotation(Eigen::Array3d(10, 10, 10)) {
+      kp_rotation(Eigen::Array3d(10, 10, 10)), task_dimension_(6) {
   // Constructs MultibodyPlant of iiwa7, which is used for Jacobian
   // calculations.
   multibody::Parser parser(plant_.get());
@@ -31,7 +31,8 @@ TaskSpacePlan::TaskSpacePlan()
   plant_->Finalize();
   plant_context_ = plant_->CreateDefaultContext();
   task_frame_idx_ = plant_->GetFrameByName("iiwa_link_7").index();
-  Jv_WTq_.resize(6, num_positions_);
+  Jv_WTq_.resize(task_dimension_, num_positions_);
+  x_dot_desired_.resize(task_dimension_);
 };
 
 void TaskSpacePlan::UpdatePositionError(
@@ -49,16 +50,12 @@ void TaskSpacePlan::UpdateOrientationError(
     double t, const PlanData& plan_data, const Eigen::Quaterniond& Q_WT) const {
   const auto Q_WT_ref = plan_data.ee_data.value().ee_quat_traj.value(t);
   Q_TTr_ = Q_WT.inverse() * Q_WT_ref;
-}
+};
 
-void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
-                         const Eigen::Ref<const Eigen::VectorXd>& v,
-                         const Eigen::Ref<const Eigen::VectorXd>&,
-                         double control_period, double t,
-                         const PlanData& plan_data, EigenPtr<VectorXd> q_cmd,
-                         EigenPtr<VectorXd> tau_cmd) const {
-  DRAKE_THROW_UNLESS(plan_data.plan_type == this->get_plan_type());
-
+void TaskSpacePlan::UpdateDesiredTaskSpaceVelocity(
+    const Eigen::Ref<const Eigen::VectorXd>& q,
+    const Eigen::Ref<const Eigen::VectorXd>& v,
+    double t, const PlanData& plan_data) const {
   // Update q and v in plant_context_, which is owned by this class.
   plant_->SetPositions(plant_context_.get(), robot_model_, q);
   plant_->SetVelocities(plant_context_.get(), robot_model_, v);
@@ -78,15 +75,26 @@ void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
   this->UpdatePositionError(t, plan_data, p_WoQ_W);
   this->UpdateOrientationError(t, plan_data, Q_WT);
 
-  // Calculate output
-  Eigen::Matrix<double, 6, 1> v_desired;
-  v_desired.tail(3) = kp_translation * err_xyz_.array();
-  v_desired.head(3) = Q_WT * (kp_rotation * Q_TTr_.vec().array()).matrix();
+  // Update x_dot_desired.
+  x_dot_desired_.tail(3) = kp_translation * err_xyz_.array();
+  x_dot_desired_.head(3) = Q_WT * (kp_rotation * Q_TTr_.vec().array()).matrix();
+};
 
-  const Eigen::VectorXd q_dot_cmd =
+void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
+                         const Eigen::Ref<const Eigen::VectorXd>& v,
+                         const Eigen::Ref<const Eigen::VectorXd>&,
+                         double control_period, double t,
+                         const PlanData& plan_data, EigenPtr<VectorXd> q_cmd,
+                         EigenPtr<VectorXd> tau_cmd) const {
+  if(plan_data.plan_type != this->get_plan_type()) {
+    throw std::runtime_error("Mismatch between Plan and PlanData.");
+  }
+  this->UpdateDesiredTaskSpaceVelocity(q, v, t, plan_data);
+
+  const Eigen::VectorXd q_dot_desired =
       Jv_WTq_.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV)
-          .solve(v_desired);
-  *q_cmd = q + q_dot_cmd * control_period;
+          .solve(x_dot_desired_);
+  *q_cmd = q + q_dot_desired * control_period;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);
 };
 

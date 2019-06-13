@@ -22,8 +22,23 @@ using std::vector;
  * together with //examples/manipulation_station:mock_station_simulation
  */
 int test_task_space_plan() {
+  PlanData plan0;
+  plan0.plan_type = PlanType::kJointSpacePlan;
+
+  Eigen::VectorXd t_knots0(2);
+  t_knots0 << 0, 1;
+
+  Eigen::MatrixXd q_knots(7, 2);
+  q_knots.col(0) <<  0, 0.6, 0, -1.75, 0, 1.0, 0;
+  q_knots.col(1) <<  0, 0.6, 0, -1.75, 0, 1.0, 0;
+
+  auto qtraj = trajectories::PiecewisePolynomial<double>::ZeroOrderHold(
+      t_knots0, q_knots);
+
+  plan0.joint_traj = qtraj;
+
   PlanData plan1;
-  plan1.plan_type = PlanType::kTaskSpacePlan;
+  plan1.plan_type = PlanType::kContactAwarePlan;
 
   PlanData::EeData ee_data;
   ee_data.p_ToQ_T.setZero();
@@ -36,7 +51,7 @@ int test_task_space_plan() {
   xyz_knots.col(1) << 0, -0.1, 0;
   xyz_knots.col(2) << 0, -0.2, 0;
 
-  ee_data.ee_xyz_traj  = trajectories::PiecewisePolynomial<double>::Cubic(
+  ee_data.ee_xyz_traj = trajectories::PiecewisePolynomial<double>::Cubic(
       t_knots, xyz_knots, Eigen::VectorXd::Zero(3), Eigen::VectorXd::Zero(3));
 
   auto Q_WT = RollPitchYawd(0, 0.6 + 1.75 + 1, 0).ToQuaternion();
@@ -48,7 +63,7 @@ int test_task_space_plan() {
       trajectories::PiecewiseQuaternionSlerp<double>(t_knots_v, quaternions);
 
   plan1.ee_data = ee_data;
-  vector<PlanData> plan_list{plan1};
+  vector<PlanData> plan_list{plan0, plan1};
 
   // Construct plan runner hardware interface.
   auto plan_runner =
@@ -61,7 +76,6 @@ int test_task_space_plan() {
   plan_runner.Run();
 
   return 0;
-
 };
 
 }  // namespace
