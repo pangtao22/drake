@@ -94,9 +94,9 @@ void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
   }
   this->UpdateDesiredTaskSpaceVelocity(q, v, t, plan_data);
 
-  const Eigen::VectorXd q_dot_desired =
-      Jv_WTq_.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV)
-          .solve(x_dot_desired_);
+  auto svd = Jv_WTq_.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
+  svd.setThreshold(0.01);
+  const Eigen::VectorXd q_dot_desired = svd.solve(x_dot_desired_);
   *q_cmd = q + q_dot_desired * control_period;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);
 };
