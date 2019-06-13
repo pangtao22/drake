@@ -40,10 +40,15 @@ struct PlanData {
   struct EeData {
     // Coordinates of point Q expressed in frame T (task frame).
     Eigen::Vector3d p_ToQ_T;
+
     // Reference Cartesian coordinates of point Q in world frame relative to
     // the position of Q at the beginning of the plan:
     // p_WoQ_W_ref = ee_xyz_traj.value(t) + p_WoQ_W_t0
     trajectories::PiecewisePolynomial<double> ee_xyz_traj;
+
+    // Derivative of ee_xyz_traj.
+    trajectories::PiecewisePolynomial<double> ee_xyz_dot_traj;
+
     // Reference orientation (\in SO(3)) of frame T in world frame as a
     // quaternion: Q_WT_ref.
     trajectories::PiecewiseQuaternionSlerp<double> ee_quat_traj;
@@ -58,7 +63,7 @@ struct PlanData {
       //  are different.
       return ee_data.value().ee_xyz_traj.end_time();
     } else {
-      throw "invalid PlanData.";
+      throw std::runtime_error("invalid PlanData.");
     }
   };
 };

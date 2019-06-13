@@ -53,6 +53,7 @@ int test_task_space_plan() {
 
   ee_data.ee_xyz_traj = trajectories::PiecewisePolynomial<double>::Cubic(
       t_knots, xyz_knots, Eigen::VectorXd::Zero(3), Eigen::VectorXd::Zero(3));
+  ee_data.ee_xyz_dot_traj = ee_data.ee_xyz_traj.derivative(1);
 
   auto Q_WT = RollPitchYawd(0, 0.6 + 1.75 + 1, 0).ToQuaternion();
 
