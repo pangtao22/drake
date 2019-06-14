@@ -29,8 +29,8 @@ int test_task_space_plan() {
   t_knots0 << 0, 1;
 
   Eigen::MatrixXd q_knots(7, 2);
-  q_knots.col(0) <<  0, 0.6, 0, -1.75, 0, 1.0, 0;
-  q_knots.col(1) <<  0, 0.6, 0, -1.75, 0, 1.0, 0;
+  q_knots.col(0) <<  -0.474, 0.952, 0.059, -1.754, -0.114, 0.438, -0.337;
+  q_knots.col(1) = q_knots.col(0);
 
   auto qtraj = trajectories::PiecewisePolynomial<double>::ZeroOrderHold(
       t_knots0, q_knots);
@@ -55,7 +55,7 @@ int test_task_space_plan() {
       t_knots, xyz_knots, Eigen::VectorXd::Zero(3), Eigen::VectorXd::Zero(3));
   ee_data.ee_xyz_dot_traj = ee_data.ee_xyz_traj.derivative(1);
 
-  auto Q_WT = RollPitchYawd(0, 0.6 + 1.75 + 1, 0).ToQuaternion();
+  auto Q_WT = RollPitchYawd(0, M_PI, 0).ToQuaternion();
 
   vector<double> t_knots_v{0, 2.5, 5};
   vector<Eigen::Quaterniond> quaternions{Q_WT, Q_WT, Q_WT};
