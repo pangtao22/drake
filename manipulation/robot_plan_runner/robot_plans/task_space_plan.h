@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Eigen/Core>
+
 #include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
 #include "drake/multibody/plant/multibody_plant.h"
 

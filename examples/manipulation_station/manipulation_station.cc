@@ -905,7 +905,7 @@ void ManipulationStation<T>::AddDefaultWsg() {
   const multibody::Frame<T>& link7 =
       plant_->GetFrameByName("iiwa_link_7", iiwa_model_.model_instance);
   const RigidTransform<double> X_7G(RollPitchYaw<double>(M_PI_2, 0, M_PI_2),
-                                    Vector3d(0, 0, 0.114));
+                                    Vector3d(0, 0, 0.075));
   auto wsg_instance = internal::AddAndWeldModelFrom(
       sdf_path, "gripper", link7, "body", X_7G, plant_);
   RegisterWsgControllerModel(sdf_path, wsg_instance, link7,
