@@ -112,6 +112,21 @@ drake_cc_binary(
     ],
 )
 
+drake_cc_binary(
+    name = "run_contact_aware_plan",
+    srcs = ["run_contact_aware_plan.cc"],
+    deps = [
+        ":robot_plan_runner",
+        ":plan_sender",
+        "//math",
+        "//manipulation/robot_plan_runner/robot_plans",
+        "//systems/analysis:simulator",
+        "//systems/framework",
+        "//geometry:geometry_visualization",
+        "//examples/manipulation_station:manipulation_station",
+    ],
+)
+
 install_data()
 
 add_lint_tests()

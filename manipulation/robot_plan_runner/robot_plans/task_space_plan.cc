@@ -53,34 +53,11 @@ void TaskSpacePlan::UpdateOrientationError(
   Q_TTr_ = Q_WT.inverse() * Q_WT_ref;
 };
 
-void TaskSpacePlan::UpdateDesiredTaskSpaceVelocity(
+void TaskSpacePlan::UpdateKinematics(
     const Eigen::Ref<const Eigen::VectorXd>& q,
     const Eigen::Ref<const Eigen::VectorXd>& v, double t,
     const PlanData& plan_data) const {
-  // Update q and v in plant_context_, which is owned by this class.
-  plant_->SetPositions(plant_context_.get(), robot_model_, q);
-  plant_->SetVelocities(plant_context_.get(), robot_model_, v);
 
-  // Update Kinematics.
-  const auto T_WT =
-      plant_->CalcRelativeTransform(*plant_context_, plant_->world_frame(),
-                                    plant_->get_frame(task_frame_idx_));
-  const auto& p_ToQ_T = plan_data.ee_data.value().p_ToQ_T;
-  const auto p_WoQ_W = T_WT * p_ToQ_T;
-  const auto Q_WT = T_WT.rotation().ToQuaternion();
-
-  plant_->CalcFrameGeometricJacobianExpressedInWorld(
-      *plant_context_, plant_->get_frame(task_frame_idx_), p_ToQ_T, &Jv_WTq_);
-
-  // Update errors.
-  this->UpdatePositionError(t, plan_data, p_WoQ_W);
-  this->UpdateOrientationError(t, plan_data, Q_WT);
-
-  // Update x_dot_desired.
-  x_dot_desired_.tail(3) =
-      plan_data.ee_data.value().ee_xyz_dot_traj.value(t).array() +
-      kp_translation * err_xyz_.array();
-  x_dot_desired_.head(3) = Q_WT * (kp_rotation * Q_TTr_.vec().array()).matrix();
 };
 
 void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
@@ -92,7 +69,30 @@ void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
   if (plan_data.plan_type != this->get_plan_type()) {
     throw std::runtime_error("Mismatch between Plan and PlanData.");
   }
-  this->UpdateDesiredTaskSpaceVelocity(q, v, t, plan_data);
+
+  // Update q and v in plant_context_, which is owned by this class.
+  plant_->SetPositions(plant_context_.get(), robot_model_, q);
+  plant_->SetVelocities(plant_context_.get(), robot_model_, v);
+
+  // Update Kinematics.
+  const auto X_WT =
+      plant_->CalcRelativeTransform(*plant_context_, plant_->world_frame(),
+                                    plant_->get_frame(task_frame_idx_));
+  const auto& p_ToQ_T = plan_data.ee_data.value().p_ToQ_T;
+  const auto p_WoQ_W = X_WT * p_ToQ_T;
+  const auto Q_WT = X_WT.rotation().ToQuaternion();
+
+  plant_->CalcFrameGeometricJacobianExpressedInWorld(
+      *plant_context_, plant_->get_frame(task_frame_idx_), p_ToQ_T, &Jv_WTq_);
+
+  // Update errors.
+  this->UpdatePositionError(t, plan_data, p_WoQ_W);
+  this->UpdateOrientationError(t, plan_data, Q_WT);
+
+  // Update x_dot_desired.
+  x_dot_desired_.tail(3) = kp_translation * err_xyz_.array();
+    // plan_data.ee_data.value().ee_xyz_dot_traj.value(t).array() +
+  x_dot_desired_.head(3) = Q_WT * (kp_rotation * Q_TTr_.vec().array()).matrix();
 
   auto svd = Jv_WTq_.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
   svd.setThreshold(0.01);

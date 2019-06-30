@@ -28,22 +28,41 @@ ContactAwarePlan::ContactAwarePlan() : TaskSpacePlan() {
       Eigen::VectorXd::Zero(num_positions_), q_dot_desired_);
 };
 
-void ContactAwarePlan::Step(
-    const Eigen::Ref<const Eigen::VectorXd>& q,
-    const Eigen::Ref<const Eigen::VectorXd>& v,
-    const Eigen::Ref<const Eigen::VectorXd>&,
-    double control_period, double t, const PlanData& plan_data,
-    EigenPtr<Eigen::VectorXd> q_cmd,
-    EigenPtr<Eigen::VectorXd> tau_cmd) const {
-  if(plan_data.plan_type != this->get_plan_type()) {
+void ContactAwarePlan::UpdatePositionError(
+    double, const PlanData& plan_data,
+    const Eigen::Ref<const Eigen::Vector3d>& p_WoQ_W) const{
+  if (!p_WoQ_W_t0_) {
+    p_WoQ_W_t0_ = std::make_unique<Eigen::Vector3d>(p_WoQ_W);
+  }
+
+  const double t_final = plan_data.ee_data.value().ee_xyz_traj.end_time();
+  const auto p_WoQ_W_ref =
+      plan_data.ee_data.value().ee_xyz_traj.value(t_final) + *p_WoQ_W_t0_;
+  err_xyz_ = p_WoQ_W_ref - p_WoQ_W;
+
+  const double err_norm = p_WoQ_W_ref.norm();
+  const double err_norm_max = 0.05;
+  if(err_norm > err_norm_max) {
+    err_xyz_ *= err_norm_max / err_norm;
+  }
+}
+
+void ContactAwarePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
+                            const Eigen::Ref<const Eigen::VectorXd>& v,
+                            const Eigen::Ref<const Eigen::VectorXd>&,
+                            double control_period, double t,
+                            const PlanData& plan_data,
+                            EigenPtr<Eigen::VectorXd> q_cmd,
+                            EigenPtr<Eigen::VectorXd> tau_cmd) const {
+  if (plan_data.plan_type != this->get_plan_type()) {
     throw std::runtime_error("Mismatch between Plan and PlanData.");
   }
-  this->UpdateDesiredTaskSpaceVelocity(q, v, t, plan_data);
+  this->UpdateKinematics(q, v, t, plan_data);
 
   ee_task_constraint_->UpdateCoefficients(Jv_WTq_, x_dot_desired_);
   solver_.Solve(*prog_, {}, {}, prog_result_.get());
 
-  if(!prog_result_->is_success()) {
+  if (!prog_result_->is_success()) {
     throw std::runtime_error("Controller QP cannot be solved.");
   }
   auto q_dot_desired_value = prog_result_->GetSolution(q_dot_desired_);

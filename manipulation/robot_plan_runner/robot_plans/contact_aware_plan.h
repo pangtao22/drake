@@ -3,9 +3,9 @@
 #include <Eigen/Core>
 
 #include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan.h"
+#include "drake/solvers/gurobi_solver.h"
 #include "drake/solvers/mathematical_program.h"
 #include "drake/solvers/mathematical_program_result.h"
-#include "drake/solvers/gurobi_solver.h"
 
 namespace drake {
 namespace manipulation {
@@ -24,12 +24,16 @@ class ContactAwarePlan : public TaskSpacePlan {
             EigenPtr<Eigen::VectorXd> tau_cmd) const override;
 
  private:
+  void UpdatePositionError(
+      double t, const PlanData& plan_data,
+      const Eigen::Ref<const Eigen::Vector3d>& p_WoQ_W) const override;
   std::unique_ptr<solvers::MathematicalProgram> prog_;
   std::unique_ptr<solvers::MathematicalProgramResult> prog_result_;
   solvers::GurobiSolver solver_;
   solvers::VectorXDecisionVariable q_dot_desired_;
   solvers::LinearEqualityConstraint* ee_task_constraint_{nullptr};
-//  solvers::Binding<solvers::LinearEqualityConstraint>* ee_contact_constraint_;
+  //  solvers::Binding<solvers::LinearEqualityConstraint>*
+  //  ee_contact_constraint_;
 };
 
 }  // namespace robot_plans
