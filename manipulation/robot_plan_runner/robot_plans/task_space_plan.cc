@@ -53,13 +53,6 @@ void TaskSpacePlan::UpdateOrientationError(
   Q_TTr_ = Q_WT.inverse() * Q_WT_ref;
 };
 
-void TaskSpacePlan::UpdateKinematics(
-    const Eigen::Ref<const Eigen::VectorXd>& q,
-    const Eigen::Ref<const Eigen::VectorXd>& v, double t,
-    const PlanData& plan_data) const {
-
-};
-
 void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
                          const Eigen::Ref<const Eigen::VectorXd>& v,
                          const Eigen::Ref<const Eigen::VectorXd>&,

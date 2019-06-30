@@ -30,37 +30,39 @@ using std::vector;
 int test_joint_space_plan() {
   // create plan
   // plan1 goes to the starting pose of the contact-aware plan.
-  PlanData plan1;
+  PlanData plan0;
 
-  Eigen::VectorXd t_knots1(2);
-  t_knots1 << 0, 1;
+  Eigen::VectorXd t_knots0(2);
+  t_knots0 << 0, 1;
 
   Eigen::MatrixXd q_knots(7, 2);
   q_knots.col(0) << -0.5095, 1.1356, -0.0800, -1.4893, -0.3389, 1.2274, -0.3360;
   q_knots.col(1) = q_knots.col(0);
 
   auto qtraj = trajectories::PiecewisePolynomial<double>::ZeroOrderHold(
-      t_knots1, q_knots);
+      t_knots0, q_knots);
 
-  plan1.plan_type = PlanType::kJointSpacePlan;
-  plan1.joint_traj = qtraj;
+  plan0.plan_type = PlanType::kJointSpacePlan;
+  plan0.joint_traj = qtraj;
 
   // plan2 runs contact-aware plan.
-  PlanData plan2;
+  PlanData plan1;
   plan1.plan_type = PlanType::kTaskSpacePlan;
 
   PlanData::EeData ee_data;
   ee_data.p_ToQ_T.setZero();
 
-  Eigen::Vector2d t_knots2(0, 5);
+  Eigen::Vector3d t_knots2(0, 2.5, 5);
 
-  Eigen::MatrixXd xyz_knots(3, 2);
+  Eigen::MatrixXd xyz_knots(3, 3);
   xyz_knots.col(0) << 0, 0, 0;
-  xyz_knots.col(1) << 0, 0.25, 0.15;
+  xyz_knots.col(1) << 0, 0.125, 0.075;
+  xyz_knots.col(2) << 0, 0.25, 0.15;
 
   ee_data.ee_xyz_traj =
-      trajectories::PiecewisePolynomial<double>::ZeroOrderHold(t_knots2,
-                                                               xyz_knots);
+      trajectories::PiecewisePolynomial<double>::Cubic(
+          t_knots2, xyz_knots, Eigen::VectorXd::Zero(3),
+          Eigen::VectorXd::Zero(3));
   ee_data.ee_xyz_dot_traj = ee_data.ee_xyz_traj.derivative(1);
 
   auto Q_WT = math::RollPitchYawd(0, M_PI * 1.25, 0).ToQuaternion();
@@ -72,7 +74,7 @@ int test_joint_space_plan() {
       trajectories::PiecewiseQuaternionSlerp<double>(t_knots_v, quaternions);
 
   plan1.ee_data = ee_data;
-  vector<PlanData> plan_list{plan1, plan2};
+  vector<PlanData> plan_list{plan0, plan1};
 
 
   systems::DiagramBuilder<double> builder;

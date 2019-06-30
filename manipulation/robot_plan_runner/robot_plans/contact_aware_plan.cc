@@ -48,16 +48,15 @@ void ContactAwarePlan::UpdatePositionError(
 }
 
 void ContactAwarePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
-                            const Eigen::Ref<const Eigen::VectorXd>& v,
+                            const Eigen::Ref<const Eigen::VectorXd>& , // v
                             const Eigen::Ref<const Eigen::VectorXd>&,
-                            double control_period, double t,
+                            double control_period, double , // t
                             const PlanData& plan_data,
                             EigenPtr<Eigen::VectorXd> q_cmd,
                             EigenPtr<Eigen::VectorXd> tau_cmd) const {
   if (plan_data.plan_type != this->get_plan_type()) {
     throw std::runtime_error("Mismatch between Plan and PlanData.");
   }
-  this->UpdateKinematics(q, v, t, plan_data);
 
   ee_task_constraint_->UpdateCoefficients(Jv_WTq_, x_dot_desired_);
   solver_.Solve(*prog_, {}, {}, prog_result_.get());
