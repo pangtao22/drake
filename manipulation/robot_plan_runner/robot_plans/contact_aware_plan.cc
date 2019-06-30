@@ -48,16 +48,38 @@ void ContactAwarePlan::UpdatePositionError(
 }
 
 void ContactAwarePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
-                            const Eigen::Ref<const Eigen::VectorXd>& , // v
+                            const Eigen::Ref<const Eigen::VectorXd>& v,
                             const Eigen::Ref<const Eigen::VectorXd>&,
-                            double control_period, double , // t
+                            double control_period, double t,
                             const PlanData& plan_data,
                             EigenPtr<Eigen::VectorXd> q_cmd,
                             EigenPtr<Eigen::VectorXd> tau_cmd) const {
-  if (plan_data.plan_type != this->get_plan_type()) {
-    throw std::runtime_error("Mismatch between Plan and PlanData.");
-  }
+  this->check_plan_type(plan_data);
 
+  // Update q and v in plant_context_, which is owned by this class.
+  plant_->SetPositions(plant_context_.get(), robot_model_, q);
+  plant_->SetVelocities(plant_context_.get(), robot_model_, v);
+
+  // Update Kinematics.
+  const auto X_WT =
+      plant_->CalcRelativeTransform(*plant_context_, plant_->world_frame(),
+                                    plant_->get_frame(task_frame_idx_));
+  const auto& p_ToQ_T = plan_data.ee_data.value().p_ToQ_T;
+  const auto p_WoQ_W = X_WT * p_ToQ_T;
+  const auto Q_WT = X_WT.rotation().ToQuaternion();
+
+  plant_->CalcFrameGeometricJacobianExpressedInWorld(
+      *plant_context_, plant_->get_frame(task_frame_idx_), p_ToQ_T, &Jv_WTq_);
+
+  // Update errors.
+  this->UpdatePositionError(t, plan_data, p_WoQ_W);
+  this->UpdateOrientationError(t, plan_data, Q_WT);
+
+  // Update x_dot_desired.
+  x_dot_desired_.tail(3) = kp_translation * err_xyz_.array();
+  x_dot_desired_.head(3) = Q_WT * (kp_rotation * Q_TTr_.vec().array()).matrix();
+
+  // Update coefficients of QP.
   ee_task_constraint_->UpdateCoefficients(Jv_WTq_, x_dot_desired_);
   solver_.Solve(*prog_, {}, {}, prog_result_.get());
 

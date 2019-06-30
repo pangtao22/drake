@@ -93,9 +93,8 @@ class PlanBase {
 
  protected:
   void set_plan_type(PlanType plan_type) { plan_type_ = plan_type; };
+  void check_plan_type(const PlanData& plan_data) const;
   const int num_positions_;
-
- private:
   PlanType plan_type_;
 };
 
