@@ -18,7 +18,7 @@ ContactAwarePlan::ContactAwarePlan() : TaskSpacePlan() {
 
   joint_stiffness_.resize(num_positions_);
   joint_stiffness_ << 800, 600, 600, 600, 400, 200, 200;
-  velocity_cost_weight_ = 0.1;
+  velocity_cost_weight_ = 0.05;
 
   prog_result_ = std::make_unique<solvers::MathematicalProgramResult>();
 }
@@ -36,7 +36,7 @@ void ContactAwarePlan::UpdatePositionError(
   err_xyz_ = p_WoQ_W_ref - p_WoQ_W;
 
   const double err_norm = p_WoQ_W_ref.norm();
-  const double err_norm_max = 0.02;
+  const double err_norm_max = 0.01;
   if (err_norm > err_norm_max) {
     err_xyz_ *= err_norm_max / err_norm;
   }

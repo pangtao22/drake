@@ -18,7 +18,7 @@ const char kIiwaSdf[] =
 TaskSpacePlan::TaskSpacePlan()
     : PlanBase(PlanType::kTaskSpacePlan, 7),
       plant_(std::make_unique<multibody::MultibodyPlant<double>>()),
-      kp_translation(Eigen::Array3d(50, 50, 50)),
+      kp_translation(Eigen::Array3d(150, 150, 150)),
       kp_rotation(Eigen::Array3d(50, 50, 50)),
       task_dimension_(6) {
   // Constructs MultibodyPlant of iiwa7, which is used for Jacobian

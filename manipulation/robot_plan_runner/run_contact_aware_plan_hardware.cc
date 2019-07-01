@@ -46,11 +46,11 @@ int test_task_space_plan() {
   PlanData::EeData ee_data;
   ee_data.p_ToQ_T.setZero();
 
-  Eigen::Vector3d t_knots2(0, 2.5, 5);
+  Eigen::Vector3d t_knots2(0, 8, 16);
 
   Eigen::MatrixXd xyz_knots(3, 3);
   xyz_knots.col(0) << 0, 0, 0;
-  xyz_knots.col(2) << 0, -0.25, -0.15;
+  xyz_knots.col(2) << 0, -0.3, -0.15;
   xyz_knots.col(1) = (xyz_knots.col(0) + xyz_knots.col(2)) / 2;
 
   ee_data.ee_xyz_traj =
