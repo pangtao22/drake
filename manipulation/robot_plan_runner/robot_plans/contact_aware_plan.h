@@ -27,14 +27,27 @@ class ContactAwarePlan : public TaskSpacePlan {
   void UpdatePositionError(
       double t, const PlanData& plan_data,
       const Eigen::Ref<const Eigen::Vector3d>& p_WoQ_W) const override;
+  /*
+   * pC_B: coordinate of the contact point in the frame of the body under
+   *   contact. For now it is assumed to be the same as the task frame.
+   * tau_external: external joint torque estimated by the robot.
+   */
+  double EstimateContactForceNorm(
+      const Eigen::Ref<const Eigen::Vector3d>& pC_B,
+      const Eigen::Ref<const Eigen::VectorXd>& tau_external) const;
+
+
+  Eigen::ArrayXd joint_stiffness_;
+  double velocity_cost_weight_;
+
   std::unique_ptr<solvers::MathematicalProgram> prog_;
   std::unique_ptr<solvers::MathematicalProgramResult> prog_result_;
   solvers::GurobiSolver solver_;
   solvers::VectorXDecisionVariable q_dot_desired_;
   solvers::LinearEqualityConstraint* ee_task_constraint_{nullptr};
-  //  solvers::Binding<solvers::LinearEqualityConstraint>*
-  //  ee_contact_constraint_;
 };
+
+
 
 }  // namespace robot_plans
 }  // namespace robot_plan_runner
