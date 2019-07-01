@@ -57,7 +57,6 @@ int test_joint_space_plan() {
   Eigen::MatrixXd xyz_knots(3, 3);
   xyz_knots.col(0) << 0, 0, 0;
   xyz_knots.col(2) << 0, -0.25, -0.15;
-
   xyz_knots.col(1) = (xyz_knots.col(0) + xyz_knots.col(2)) / 2;
 
   ee_data.ee_xyz_traj =
@@ -68,7 +67,7 @@ int test_joint_space_plan() {
 
   auto Q_WT = math::RollPitchYawd(0, M_PI * 1.25, 0).ToQuaternion();
 
-  vector<double> t_knots_v{0, 2.5, 5};
+  vector<double> t_knots_v{0, 4, 8};
   vector<Eigen::Quaterniond> quaternions{Q_WT, Q_WT, Q_WT};
 
   ee_data.ee_quat_traj =

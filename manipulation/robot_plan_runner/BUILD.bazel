@@ -16,7 +16,6 @@ load(
 load("//tools/install:install_data.bzl", "install_data")
 load("//tools/lint:lint.bzl", "add_lint_tests")
 
-
 drake_cc_library(
     name = "controller_systems",
     srcs = [
@@ -68,12 +67,12 @@ drake_cc_library(
         ":robot_plan_runner",
         "//lcm",
         "//lcmtypes:lcmtypes_drake_cc",
-        "//manipulation/kuka_iiwa:kuka_iiwa",
+        "//manipulation/kuka_iiwa",
+        "//manipulation/robot_plan_runner/robot_plans",
+        "//systems/analysis:simulator",
+        "//systems/framework",
         "//systems/lcm",
         "//systems/primitives",
-        "//systems/framework",
-        "//systems/analysis:simulator",
-        "//manipulation/robot_plan_runner/robot_plans",
     ],
 )
 
@@ -81,9 +80,9 @@ drake_cc_binary(
     name = "robot_plans_test",
     srcs = ["robot_plans_test.cc"],
     deps = [
-        "//manipulation/robot_plan_runner/robot_plans",
-        ":robot_plan_runner",
         ":plan_sender",
+        ":robot_plan_runner",
+        "//manipulation/robot_plan_runner/robot_plans",
         "//systems/analysis:simulator",
         "//systems/framework",
     ],
@@ -94,7 +93,7 @@ drake_cc_binary(
     srcs = ["plan_runner_hardware_interface_test.cc"],
     deps = [
         ":plan_runner_hardware_interface",
-        "//math"
+        "//math",
     ],
 )
 
@@ -102,13 +101,13 @@ drake_cc_binary(
     name = "manipulation_station_test",
     srcs = ["manipulation_station_test.cc"],
     deps = [
-        ":robot_plan_runner",
         ":plan_sender",
+        ":robot_plan_runner",
+        "//examples/manipulation_station",
+        "//geometry:geometry_visualization",
         "//manipulation/robot_plan_runner/robot_plans",
         "//systems/analysis:simulator",
         "//systems/framework",
-        "//geometry:geometry_visualization",
-        "//examples/manipulation_station:manipulation_station",
     ],
 )
 
@@ -116,14 +115,23 @@ drake_cc_binary(
     name = "run_contact_aware_plan",
     srcs = ["run_contact_aware_plan.cc"],
     deps = [
-        ":robot_plan_runner",
         ":plan_sender",
-        "//math",
+        ":robot_plan_runner",
+        "//examples/manipulation_station",
+        "//geometry:geometry_visualization",
         "//manipulation/robot_plan_runner/robot_plans",
+        "//math",
         "//systems/analysis:simulator",
         "//systems/framework",
-        "//geometry:geometry_visualization",
-        "//examples/manipulation_station:manipulation_station",
+    ],
+)
+
+drake_cc_binary(
+    name = "run_contact_aware_plan_hardware",
+    srcs = ["run_contact_aware_plan_hardware.cc"],
+    deps = [
+        ":plan_runner_hardware_interface",
+        "//math",
     ],
 )
 

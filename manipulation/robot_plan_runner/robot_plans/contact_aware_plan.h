@@ -40,11 +40,12 @@ class ContactAwarePlan : public TaskSpacePlan {
   Eigen::ArrayXd joint_stiffness_;
   double velocity_cost_weight_;
 
-  std::unique_ptr<solvers::MathematicalProgram> prog_;
   std::unique_ptr<solvers::MathematicalProgramResult> prog_result_;
   solvers::GurobiSolver solver_;
-  solvers::VectorXDecisionVariable q_dot_desired_;
-  solvers::LinearEqualityConstraint* ee_task_constraint_{nullptr};
+//
+//  std::unique_ptr<solvers::MathematicalProgram> prog_;
+//  solvers::VectorXDecisionVariable dq_;
+//  solvers::LinearEqualityConstraint* ee_task_constraint_{nullptr};
 };
 
 

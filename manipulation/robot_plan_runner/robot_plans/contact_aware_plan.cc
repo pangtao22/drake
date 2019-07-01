@@ -1,5 +1,6 @@
 
 #include "drake/manipulation/robot_plan_runner/robot_plans/contact_aware_plan.h"
+#include "drake/solvers/solve.h"
 
 namespace drake {
 namespace manipulation {
@@ -19,21 +20,7 @@ ContactAwarePlan::ContactAwarePlan() : TaskSpacePlan() {
   joint_stiffness_ << 800, 600, 600, 600, 400, 200, 200;
   velocity_cost_weight_ = 0.1;
 
-  // MahtematicalProgram-related declarations.
-  prog_ = std::make_unique<solvers::MathematicalProgram>();
   prog_result_ = std::make_unique<solvers::MathematicalProgramResult>();
-
-  q_dot_desired_ = prog_->NewContinuousVariables(num_positions_);
-  ee_task_constraint_ =
-      prog_
-          ->AddLinearEqualityConstraint(
-              Eigen::MatrixXd::Zero(task_dimension_, num_positions_),
-              Eigen::VectorXd::Zero(task_dimension_), q_dot_desired_)
-          .evaluator()
-          .get();
-  prog_->AddL2NormCost(
-      Eigen::MatrixXd::Identity(num_positions_, num_positions_),
-      Eigen::VectorXd::Zero(num_positions_), q_dot_desired_);
 }
 
 void ContactAwarePlan::UpdatePositionError(
@@ -49,7 +36,7 @@ void ContactAwarePlan::UpdatePositionError(
   err_xyz_ = p_WoQ_W_ref - p_WoQ_W;
 
   const double err_norm = p_WoQ_W_ref.norm();
-  const double err_norm_max = 0.05;
+  const double err_norm_max = 0.02;
   if (err_norm > err_norm_max) {
     err_xyz_ *= err_norm_max / err_norm;
   }
@@ -103,25 +90,54 @@ void ContactAwarePlan::Step(
   x_dot_desired_.tail(3) = kp_translation * err_xyz_.array();
   x_dot_desired_.head(3) = Q_WT * (kp_rotation * Q_TTr_.vec().array()).matrix();
 
+  // MahtematicalProgram-related declarations.
+  const auto prog = std::make_unique<solvers::MathematicalProgram>();
+  auto dq = prog->NewContinuousVariables(num_positions_);
+
+  // alias for task Jacobian.
+  const Eigen::MatrixXd& Jt = Jv_WTq_;
+
+  // tracking error cost
+  prog->AddL2NormCost(Jt / control_period, x_dot_desired_, dq);
+
+  // joint velocity cost
+  prog->AddQuadraticErrorCost(
+      velocity_cost_weight_ / std::pow(control_period, 2) *
+          Eigen::MatrixXd::Identity(num_positions_, num_positions_),
+      Eigen::VectorXd::Zero(num_positions_), dq);
+
   // Deal with contact.
-  if (tau_external.cwiseAbs().maxCoeff() > 3) {
+  if (tau_external.cwiseAbs().maxCoeff() > 1e5) {
     // assuming the contact is at the center of the sphere.
     Eigen::Vector3d pC_T(0, 0, 0.075);
-    const double f_norm =
-        this->EstimateContactForceNorm(pC_T, tau_external);
-    std::cout << f_norm << endl;
-    throw std::runtime_error("I've seen enough.");
+    const double f_norm = this->EstimateContactForceNorm(pC_T, tau_external);
+
+    const Eigen::RowVectorXd J_nc = tau_external.transpose() / f_norm;
+    const Eigen::MatrixXd J_nc_pinv =
+        J_nc.completeOrthogonalDecomposition().pseudoInverse();
+
+    // force constraint
+    const Eigen::Matrix<double, 1, 1> f_desired(5);
+    prog->AddLinearEqualityConstraint(
+        (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
+        dq);
+
+    // contact-maintaining constraint
+    prog->AddLinearConstraint(J_nc / control_period,
+                              -std::numeric_limits<double>::infinity(), 0, dq);
   }
 
   // Update coefficients of QP.
-  ee_task_constraint_->UpdateCoefficients(Jv_WTq_, x_dot_desired_);
-  solver_.Solve(*prog_, {}, {}, prog_result_.get());
+  //  ee_task_constraint_->UpdateCoefficients(Jv_WTq_, x_dot_desired_);
+  // solver_.Solve(*prog_, {}, {}, prog_result_.get());
+
+  *prog_result_ = solvers::Solve(*prog);
 
   if (!prog_result_->is_success()) {
     throw std::runtime_error("Controller QP cannot be solved.");
   }
-  auto q_dot_desired_value = prog_result_->GetSolution(q_dot_desired_);
-  *q_cmd = q + q_dot_desired_value * control_period;
+  auto dq_value = prog_result_->GetSolution(dq);
+  *q_cmd = q + dq_value;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);
 }
 
