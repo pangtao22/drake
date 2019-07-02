@@ -25,7 +25,7 @@ class TaskSpacePlan : public PlanBase {
             EigenPtr<Eigen::VectorXd> tau_cmd) const override;
 
  protected:
-  virtual void UpdatePositionError(
+  void UpdatePositionError(
       double t, const PlanData& plan_data,
       const Eigen::Ref<const Eigen::Vector3d>& p_WoQ_W) const;
   void UpdateOrientationError(double t, const PlanData& plan_data,

@@ -10,7 +10,8 @@ namespace robot_plans {
 using std::cout;
 using std::endl;
 
-ContactAwarePlan::ContactAwarePlan() : TaskSpacePlan() {
+ContactAwarePlan::ContactAwarePlan()
+    : TaskSpacePlan(), w_cutoff_(0.5 * 2 * M_PI), velocity_cost_weight_(0.1) {
   this->set_plan_type(PlanType::kContactAwarePlan);
   if (!solver_.available()) {
     throw std::runtime_error("Gurobi solver is not available.");
@@ -18,12 +19,18 @@ ContactAwarePlan::ContactAwarePlan() : TaskSpacePlan() {
 
   joint_stiffness_.resize(num_positions_);
   joint_stiffness_ << 800, 600, 600, 600, 400, 200, 200;
-  velocity_cost_weight_ = 0.05;
+
+  dq_weight_.resize(num_positions_, num_positions_);
+  dq_weight_.setZero();
+  dq_weight_.diagonal() << 10, 9, 8, 8, 7, 2, 1;
+
+  // contact Jacobian.
+  Jv_WTc_.resize(3, num_positions_);
 
   prog_result_ = std::make_unique<solvers::MathematicalProgramResult>();
 }
 
-void ContactAwarePlan::UpdatePositionError(
+void ContactAwarePlan::UpdatePositionErrorUsingTargetPoint(
     double, const PlanData& plan_data,
     const Eigen::Ref<const Eigen::Vector3d>& p_WoQ_W) const {
   if (!p_WoQ_W_t0_) {
@@ -42,21 +49,30 @@ void ContactAwarePlan::UpdatePositionError(
   }
 }
 
-double ContactAwarePlan::EstimateContactForceNorm(
+Eigen::Vector3d ContactAwarePlan::EstimateContactForce(
     const Eigen::Ref<const Eigen::Vector3d>& pC_T,
     const Eigen::Ref<const Eigen::VectorXd>& tau_external) const {
-  Eigen::MatrixXd Jv_WTc(3, num_positions_);  // contact jacobian
+  // updates contact jacobian.
   Eigen::Vector3d p_WC;
   plant_->CalcPointsGeometricJacobianExpressedInWorld(
       *plant_context_, plant_->get_frame(task_frame_idx_), pC_T, &p_WC,
-      &Jv_WTc);
+      &Jv_WTc_);
 
   // least square solve Jv_WTc.T.dot(f) = tau_external.
   auto svd =
-      Jv_WTc.transpose().bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
-  const Eigen::Vector3d f = svd.solve(tau_external);
+      Jv_WTc_.transpose().bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
 
-  return f.norm();
+  return svd.solve(tau_external);
+}
+
+void ContactAwarePlan::LowPassFilterContactForce(
+    const Eigen::Ref<const Eigen::Vector3d> f_new, double h) const {
+  const double a = h * w_cutoff_ / (1 + h * w_cutoff_);
+  if (f_filtered_) {
+    *f_filtered_ = (1 - a) * (*f_filtered_) + a * f_new;
+  } else {
+    f_filtered_.reset(new Eigen::Vector3d(f_new));
+  }
 }
 
 void ContactAwarePlan::Step(
@@ -90,6 +106,13 @@ void ContactAwarePlan::Step(
   x_dot_desired_.tail(3) = kp_translation * err_xyz_.array();
   x_dot_desired_.head(3) = Q_WT * (kp_rotation * Q_TTr_.vec().array()).matrix();
 
+  // Update contact force estimation (f_filtered_), assuming the contact is at
+  // the center of the sphere.
+  const Eigen::Vector3d pC_T(0, 0, 0.075);
+  const Eigen::Vector3d f_contact =
+      this->EstimateContactForce(pC_T, tau_external);
+  this->LowPassFilterContactForce(f_contact, control_period);
+
   // MahtematicalProgram-related declarations.
   const auto prog = std::make_unique<solvers::MathematicalProgram>();
   auto dq = prog->NewContinuousVariables(num_positions_);
@@ -102,22 +125,21 @@ void ContactAwarePlan::Step(
 
   // joint velocity cost
   prog->AddQuadraticErrorCost(
-      velocity_cost_weight_ / std::pow(control_period, 2) *
-          Eigen::MatrixXd::Identity(num_positions_, num_positions_),
+      velocity_cost_weight_ / std::pow(control_period, 2) * dq_weight_,
       Eigen::VectorXd::Zero(num_positions_), dq);
 
   // Deal with contact.
-  if (tau_external.cwiseAbs().maxCoeff() > 1e5) {
-    // assuming the contact is at the center of the sphere.
-    Eigen::Vector3d pC_T(0, 0, 0.075);
-    const double f_norm = this->EstimateContactForceNorm(pC_T, tau_external);
+  const double f_norm_threshold = 10;
+  const double f_norm = (*f_filtered_).norm();
+  if (f_norm > f_norm_threshold) {
+    Eigen::Vector3d contact_normal = *f_filtered_ / f_norm;
 
-    const Eigen::RowVectorXd J_nc = tau_external.transpose() / f_norm;
+    const Eigen::RowVectorXd J_nc = contact_normal.transpose() * Jv_WTc_;
     const Eigen::MatrixXd J_nc_pinv =
         J_nc.completeOrthogonalDecomposition().pseudoInverse();
 
     // force constraint
-    const Eigen::Matrix<double, 1, 1> f_desired(5);
+    const Eigen::Matrix<double, 1, 1> f_desired(f_norm_threshold * 1.5);
     prog->AddLinearEqualityConstraint(
         (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
         dq);
@@ -129,9 +151,9 @@ void ContactAwarePlan::Step(
 
   // Update coefficients of QP.
   //  ee_task_constraint_->UpdateCoefficients(Jv_WTq_, x_dot_desired_);
-  // solver_.Solve(*prog_, {}, {}, prog_result_.get());
+  solver_.Solve(*prog, {}, {}, prog_result_.get());
 
-  *prog_result_ = solvers::Solve(*prog);
+  //  *prog_result_ = solvers::Solve(*prog);
 
   if (!prog_result_->is_success()) {
     throw std::runtime_error("Controller QP cannot be solved.");

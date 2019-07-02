@@ -50,7 +50,7 @@ int test_task_space_plan() {
 
   Eigen::MatrixXd xyz_knots(3, 3);
   xyz_knots.col(0) << 0, 0, 0;
-  xyz_knots.col(2) << 0, -0.3, -0.15;
+  xyz_knots.col(2) << 0, -0.25, -0.15;
   xyz_knots.col(1) = (xyz_knots.col(0) + xyz_knots.col(2)) / 2;
 
   ee_data.ee_xyz_traj =

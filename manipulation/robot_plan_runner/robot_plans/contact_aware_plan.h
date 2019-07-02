@@ -24,24 +24,38 @@ class ContactAwarePlan : public TaskSpacePlan {
             EigenPtr<Eigen::VectorXd> tau_cmd) const override;
 
  private:
-  void UpdatePositionError(
+  void UpdatePositionErrorUsingTargetPoint(
       double t, const PlanData& plan_data,
-      const Eigen::Ref<const Eigen::Vector3d>& p_WoQ_W) const override;
+      const Eigen::Ref<const Eigen::Vector3d>& p_WoQ_W) const;
   /*
    * pC_B: coordinate of the contact point in the frame of the body under
    *   contact. For now it is assumed to be the same as the task frame.
    * tau_external: external joint torque estimated by the robot.
    */
-  double EstimateContactForceNorm(
-      const Eigen::Ref<const Eigen::Vector3d>& pC_B,
+  Eigen::Vector3d EstimateContactForce(
+      const Eigen::Ref<const Eigen::Vector3d>& pC_T,
       const Eigen::Ref<const Eigen::VectorXd>& tau_external) const;
 
+  void LowPassFilterContactForce(
+      const Eigen::Ref<const Eigen::Vector3d> f_new, double h) const;
+
+  // filtered contact force
+  mutable std::unique_ptr<Eigen::Vector3d> f_filtered_;
+
+  // cutoff frequency of the low-pass filter on contact force, in rad/s.
+  const double w_cutoff_;
+
+  // Contact Jacobian (3 * num_positions_);
+  mutable Eigen::MatrixXd Jv_WTc_;
 
   Eigen::ArrayXd joint_stiffness_;
-  double velocity_cost_weight_;
+  const double velocity_cost_weight_;
+  Eigen::MatrixXd dq_weight_;
 
   std::unique_ptr<solvers::MathematicalProgramResult> prog_result_;
   solvers::GurobiSolver solver_;
+
+
 //
 //  std::unique_ptr<solvers::MathematicalProgram> prog_;
 //  solvers::VectorXDecisionVariable dq_;
