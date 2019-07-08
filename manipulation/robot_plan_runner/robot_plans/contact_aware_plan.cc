@@ -131,35 +131,31 @@ void ContactAwarePlan::Step(
   // Deal with contact.
   const double f_norm_threshold = 10;
   const double f_norm = (*f_filtered_).norm();
+  Eigen::VectorXd dq_force(num_positions_);
+  dq_force.setZero();
   if (f_norm > f_norm_threshold) {
     Eigen::Vector3d contact_normal = *f_filtered_ / f_norm;
 
     const Eigen::RowVectorXd J_nc = contact_normal.transpose() * Jv_WTc_;
-    const Eigen::MatrixXd J_nc_pinv =
-        J_nc.completeOrthogonalDecomposition().pseudoInverse();
 
-    // force constraint
-    const Eigen::Matrix<double, 1, 1> f_desired(f_norm_threshold * 1.5);
-    prog->AddLinearEqualityConstraint(
-        (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
-        dq);
+    // J_nc null space constraint
+    prog->AddLinearEqualityConstraint(J_nc, 0, dq);
 
-    // contact-maintaining constraint
-    prog->AddLinearConstraint(J_nc / control_period,
-                              -std::numeric_limits<double>::infinity(), 0, dq);
+    // calculate dq_force
+    const double f_desired = f_norm_threshold * 1.5;
+    dq_force =
+        (-J_nc.transpose().array() / joint_stiffness_ * f_desired).matrix();
   }
 
   // Update coefficients of QP.
   //  ee_task_constraint_->UpdateCoefficients(Jv_WTq_, x_dot_desired_);
   solver_.Solve(*prog, {}, {}, prog_result_.get());
 
-  //  *prog_result_ = solvers::Solve(*prog);
-
   if (!prog_result_->is_success()) {
     throw std::runtime_error("Controller QP cannot be solved.");
   }
   auto dq_value = prog_result_->GetSolution(dq);
-  *q_cmd = q + dq_value;
+  *q_cmd = q + dq_value + dq_force;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);
 }
 
