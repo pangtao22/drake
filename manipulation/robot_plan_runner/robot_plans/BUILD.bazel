@@ -78,6 +78,26 @@ drake_cc_library(
     ],
 )
 
+#drake_cc_library(
+#    name = "contact_aware_plan",
+#    srcs = ["contact_aware_plan.cc"],
+#    hdrs = ["contact_aware_plan.h"],
+#    data = [
+#        "//manipulation/models/iiwa_description:models",
+#    ],
+#    visibility = ["//visibility:public"],
+#    deps = [
+#        ":task_space_plan",
+#        "//common:find_resource",
+#        "//math:geometric_transform",
+#        "//multibody/parsing",
+#        "//multibody/plant",
+#        "//solvers:gurobi_solver",
+#        "//solvers:mathematical_program_lite",
+#        "//solvers:solve",
+#    ],
+#)
+
 install_data()
 
 add_lint_tests()

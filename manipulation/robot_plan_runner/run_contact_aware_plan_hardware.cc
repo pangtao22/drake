@@ -21,7 +21,7 @@ using std::vector;
  * PlanRunnerHardwareInterface. To see what it does to robots, it should be run
  * together with //examples/manipulation_station:mock_station_simulation
  */
-int test_task_space_plan() {
+int run_plan() {
   // create plan
   // plan1 goes to the starting pose of the contact-aware plan.
   PlanData plan0;
@@ -50,7 +50,7 @@ int test_task_space_plan() {
 
   Eigen::MatrixXd xyz_knots(3, 3);
   xyz_knots.col(0) << 0, 0, 0;
-  xyz_knots.col(2) << 0, -0.25, 0.15;
+  xyz_knots.col(2) << 0, -0.25, -0.15;
   xyz_knots.col(1) = (xyz_knots.col(0) + xyz_knots.col(2)) / 2;
 
   ee_data.ee_xyz_traj =
@@ -74,9 +74,6 @@ int test_task_space_plan() {
   auto plan_runner =
       manipulation::robot_plan_runner::PlanRunnerHardwareInterface(plan_list);
 
-  // save diagram graphviz string.
-//  plan_runner.SaveGraphvizStringToFile();
-
   // Run simulation.
   plan_runner.Run();
 
@@ -86,4 +83,4 @@ int test_task_space_plan() {
 }  // namespace
 }  // namespace drake
 
-int main() { return drake::test_task_space_plan(); };
+int main() { return drake::run_plan(); };

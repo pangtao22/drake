@@ -11,7 +11,7 @@ using std::cout;
 using std::endl;
 
 ContactAwarePlan::ContactAwarePlan()
-    : TaskSpacePlan(), w_cutoff_(0.5 * 2 * M_PI), velocity_cost_weight_(0.1) {
+    : TaskSpacePlan(), w_cutoff_(0.5 * 2 * M_PI), velocity_cost_weight_(0.2) {
   this->set_plan_type(PlanType::kContactAwarePlan);
   if (!solver_.available()) {
     throw std::runtime_error("Gurobi solver is not available.");
@@ -120,9 +120,6 @@ void ContactAwarePlan::Step(
   // alias for task Jacobian.
   const Eigen::MatrixXd& Jt = Jv_WTq_;
 
-  // tracking error cost
-  prog->AddL2NormCost(Jt / control_period, x_dot_desired_, dq);
-
   // joint velocity cost
   prog->AddQuadraticErrorCost(
       velocity_cost_weight_ / std::pow(control_period, 2) * dq_weight_,
@@ -145,6 +142,14 @@ void ContactAwarePlan::Step(
     const double f_desired = f_norm_threshold * 1.5;
     dq_force =
         (-J_nc.transpose().array() / joint_stiffness_ * f_desired).matrix();
+
+    // tracking error cost
+    prog->AddL2NormCost(Jt / control_period,
+                        x_dot_desired_ - Jt / control_period * dq_force, dq);
+
+  } else {
+    // tracking error cost
+    prog->AddL2NormCost(Jt / control_period, x_dot_desired_, dq);
   }
 
   // Update coefficients of QP.
