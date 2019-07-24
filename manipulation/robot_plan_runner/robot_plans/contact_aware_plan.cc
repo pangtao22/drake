@@ -139,7 +139,7 @@ void ContactAwarePlan::Step(
         J_nc.completeOrthogonalDecomposition().pseudoInverse();
 
     // force constraint
-    const Eigen::Matrix<double, 1, 1> f_desired(f_norm_threshold * 1.5);
+    const Eigen::Matrix<double, 1, 1> f_desired(f_norm_threshold * 1.2);
     prog->AddLinearEqualityConstraint(
         (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
         dq);
