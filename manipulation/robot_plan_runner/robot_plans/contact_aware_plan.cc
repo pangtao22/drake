@@ -151,9 +151,7 @@ void ContactAwarePlan::Step(
     // tracking error cost
     prog->AddL2NormCost(Jt / control_period, x_dot_desired_, dq);
   }
-
-  // Update coefficients of QP.
-  //  ee_task_constraint_->UpdateCoefficients(Jv_WTq_, x_dot_desired_);
+  
   solver_.Solve(*prog, {}, {}, prog_result_.get());
 
   if (!prog_result_->is_success()) {
