@@ -22,7 +22,7 @@ ContactAwarePlan::ContactAwarePlan()
 
   dq_weight_.resize(num_positions_, num_positions_);
   dq_weight_.setZero();
-  dq_weight_.diagonal() << 10, 9, 8, 8, 7, 2, 1;
+  dq_weight_.diagonal() << 5, 4, 3, 3, 2, 2, 1;
 
   // contact Jacobian.
   Jv_WTc_.resize(3, num_positions_);
@@ -139,7 +139,7 @@ void ContactAwarePlan::Step(
         J_nc.completeOrthogonalDecomposition().pseudoInverse();
 
     // force constraint
-    const Eigen::Matrix<double, 1, 1> f_desired(f_norm_threshold * 1.2);
+    const Eigen::Matrix<double, 1, 1> f_desired(f_norm_threshold * 1.5);
     prog->AddLinearEqualityConstraint(
         (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
         dq);
