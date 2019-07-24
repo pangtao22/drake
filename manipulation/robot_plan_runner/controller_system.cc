@@ -30,7 +30,7 @@ RobotController::RobotController(PlanType plan_type, double control_period) :
       break;
     case PlanType::kContactAwarePlan:
       this->set_name("ContactAwareController");
-      plan_ = std::make_unique<robot_plans::ContactAwarePlan>();
+      plan_ = std::make_unique<robot_plans::TaskSpacePlanContact>();
       break;
     case PlanType::kEmptyPlan:
       throw std::runtime_error(

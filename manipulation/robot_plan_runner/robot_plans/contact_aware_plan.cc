@@ -10,12 +10,15 @@ namespace robot_plans {
 using std::cout;
 using std::endl;
 
-ContactAwarePlan::ContactAwarePlan()
-    : TaskSpacePlan(), w_cutoff_(0.5 * 2 * M_PI), velocity_cost_weight_(0.2) {
+TaskSpacePlanContact::TaskSpacePlanContact()
+    : TaskSpacePlan(), velocity_cost_weight_(0.2) {
   this->set_plan_type(PlanType::kContactAwarePlan);
   if (!solver_.available()) {
     throw std::runtime_error("Gurobi solver is not available.");
   }
+
+  contact_force_estimator_ =
+      std::make_unique<ContactForceEstimator>(0.5 * 2 * M_PI);
 
   joint_stiffness_.resize(num_positions_);
   joint_stiffness_ << 800, 600, 600, 600, 400, 200, 200;
@@ -24,13 +27,10 @@ ContactAwarePlan::ContactAwarePlan()
   dq_weight_.setZero();
   dq_weight_.diagonal() << 5, 4, 3, 3, 2, 2, 1;
 
-  // contact Jacobian.
-  Jv_WTc_.resize(3, num_positions_);
-
   prog_result_ = std::make_unique<solvers::MathematicalProgramResult>();
 }
 
-void ContactAwarePlan::UpdatePositionErrorUsingTargetPoint(
+void TaskSpacePlanContact::UpdatePositionErrorUsingTargetPoint(
     double, const PlanData& plan_data,
     const Eigen::Ref<const Eigen::Vector3d>& p_WoQ_W) const {
   if (!p_WoQ_W_t0_) {
@@ -49,33 +49,7 @@ void ContactAwarePlan::UpdatePositionErrorUsingTargetPoint(
   }
 }
 
-Eigen::Vector3d ContactAwarePlan::EstimateContactForce(
-    const Eigen::Ref<const Eigen::Vector3d>& pC_T,
-    const Eigen::Ref<const Eigen::VectorXd>& tau_external) const {
-  // updates contact jacobian.
-  Eigen::Vector3d p_WC;
-  plant_->CalcPointsGeometricJacobianExpressedInWorld(
-      *plant_context_, plant_->get_frame(task_frame_idx_), pC_T, &p_WC,
-      &Jv_WTc_);
-
-  // least square solve Jv_WTc.T.dot(f) = tau_external.
-  auto svd =
-      Jv_WTc_.transpose().bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
-
-  return svd.solve(tau_external);
-}
-
-void ContactAwarePlan::LowPassFilterContactForce(
-    const Eigen::Ref<const Eigen::Vector3d> f_new, double h) const {
-  const double a = h * w_cutoff_ / (1 + h * w_cutoff_);
-  if (f_filtered_) {
-    *f_filtered_ = (1 - a) * (*f_filtered_) + a * f_new;
-  } else {
-    f_filtered_.reset(new Eigen::Vector3d(f_new));
-  }
-}
-
-void ContactAwarePlan::Step(
+void TaskSpacePlanContact::Step(
     const Eigen::Ref<const Eigen::VectorXd>& q,
     const Eigen::Ref<const Eigen::VectorXd>& v,
     const Eigen::Ref<const Eigen::VectorXd>& tau_external,
@@ -106,12 +80,12 @@ void ContactAwarePlan::Step(
   x_dot_desired_.tail(3) = kp_translation * err_xyz_.array();
   x_dot_desired_.head(3) = Q_WT * (kp_rotation * Q_TTr_.vec().array()).matrix();
 
-  // Update contact force estimation (f_filtered_), assuming the contact is at
-  // the center of the sphere.
+  // Estimate contact force, assuming the contact is at the center of the
+  // sphere.
   const Eigen::Vector3d pC_T(0, 0, 0.075);
   const Eigen::Vector3d f_contact =
-      this->EstimateContactForce(pC_T, tau_external);
-  this->LowPassFilterContactForce(f_contact, control_period);
+      contact_force_estimator_->UpdateContactForce(
+          pC_T, q, tau_external, control_period);
 
   // MahtematicalProgram-related declarations.
   const auto prog = std::make_unique<solvers::MathematicalProgram>();
@@ -127,13 +101,12 @@ void ContactAwarePlan::Step(
 
   // Deal with contact.
   const double f_norm_threshold = 10;
-  const double f_norm = (*f_filtered_).norm();
+  const double f_norm = f_contact.norm();
   Eigen::VectorXd dq_force(num_positions_);
   dq_force.setZero();
   if (f_norm > f_norm_threshold) {
-    Eigen::Vector3d contact_normal = *f_filtered_ / f_norm;
-
-    const Eigen::RowVectorXd J_nc = contact_normal.transpose() * Jv_WTc_;
+    const Eigen::RowVectorXd J_nc =
+        contact_force_estimator_->CalcContactJacobian();
 
     // J_nc null space constraint
     prog->AddLinearEqualityConstraint(J_nc, 0, dq);
@@ -146,12 +119,11 @@ void ContactAwarePlan::Step(
     // tracking error cost
     prog->AddL2NormCost(Jt / control_period,
                         x_dot_desired_ - Jt / control_period * dq_force, dq);
-
   } else {
     // tracking error cost
     prog->AddL2NormCost(Jt / control_period, x_dot_desired_, dq);
   }
-  
+
   solver_.Solve(*prog, {}, {}, prog_result_.get());
 
   if (!prog_result_->is_success()) {

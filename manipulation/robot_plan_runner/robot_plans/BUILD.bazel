@@ -45,15 +45,12 @@ drake_cc_library(
     name = "task_space_plan",
     srcs = ["task_space_plan.cc"],
     hdrs = ["task_space_plan.h"],
-    data = [
-        "//manipulation/models/iiwa_description:models",
-    ],
     visibility = ["//visibility:public"],
     deps = [
         ":plan_base",
+        ":plan_utilities",
         "//common:find_resource",
         "//math:geometric_transform",
-        "//multibody/parsing",
         "//multibody/plant",
     ],
 )
@@ -62,15 +59,10 @@ drake_cc_library(
     name = "contact_aware_plan",
     srcs = ["contact_aware_plan.cc"],
     hdrs = ["contact_aware_plan.h"],
-    data = [
-        "//manipulation/models/iiwa_description:models",
-    ],
     visibility = ["//visibility:public"],
     deps = [
         ":task_space_plan",
-        "//common:find_resource",
         "//math:geometric_transform",
-        "//multibody/parsing",
         "//multibody/plant",
         "//solvers:gurobi_solver",
         "//solvers:mathematical_program_lite",
@@ -78,25 +70,19 @@ drake_cc_library(
     ],
 )
 
-#drake_cc_library(
-#    name = "contact_aware_plan",
-#    srcs = ["contact_aware_plan.cc"],
-#    hdrs = ["contact_aware_plan.h"],
-#    data = [
-#        "//manipulation/models/iiwa_description:models",
-#    ],
-#    visibility = ["//visibility:public"],
-#    deps = [
-#        ":task_space_plan",
-#        "//common:find_resource",
-#        "//math:geometric_transform",
-#        "//multibody/parsing",
-#        "//multibody/plant",
-#        "//solvers:gurobi_solver",
-#        "//solvers:mathematical_program_lite",
-#        "//solvers:solve",
-#    ],
-#)
+drake_cc_library(
+    name = "plan_utilities",
+    srcs = ["plan_utilities.cc"],
+    hdrs = ["plan_utilities.h"],
+    data = [
+        "//manipulation/models/iiwa_description:models",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//common:find_resource",
+        "//multibody/parsing",
+    ],
+)
 
 install_data()
 

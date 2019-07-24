@@ -1,6 +1,5 @@
 #include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan.h"
-#include "drake/common/find_resource.h"
-#include "drake/multibody/parsing/parser.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/plan_utilities.h"
 
 namespace drake {
 namespace manipulation {
@@ -11,9 +10,6 @@ using Eigen::VectorXd;
 using std::cout;
 using std::endl;
 
-const char kIiwaSdf[] =
-    "drake/manipulation/models/iiwa_description/iiwa7/"
-    "iiwa7_no_collision.sdf";
 
 TaskSpacePlan::TaskSpacePlan()
     : PlanBase(PlanType::kTaskSpacePlan, 7),
@@ -23,13 +19,8 @@ TaskSpacePlan::TaskSpacePlan()
       task_dimension_(6) {
   // Constructs MultibodyPlant of iiwa7, which is used for Jacobian
   // calculations.
-  multibody::Parser parser(plant_.get());
-  std::string iiwa_sdf_path = FindResourceOrThrow(kIiwaSdf);
-  robot_model_ = parser.AddModelFromFile(iiwa_sdf_path, "iiwa");
+  robot_model_ = SetupIiwaControllerPlant(plant_.get());
 
-  plant_->WeldFrames(plant_->world_frame(),
-                     plant_->GetFrameByName("iiwa_link_0"));
-  plant_->Finalize();
   plant_context_ = plant_->CreateDefaultContext();
   task_frame_idx_ = plant_->GetFrameByName("iiwa_link_7").index();
   Jv_WTq_.resize(task_dimension_, num_positions_);
