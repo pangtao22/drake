@@ -144,6 +144,17 @@ void TaskSpacePlanContact::Step(
     throw std::runtime_error("Controller QP cannot be solved.");
   }
   auto dq_value = prog_result_->GetSolution(dq);
+
+  // saturation
+  const double dq_limit = 0.1;
+  for(int i = 0; i < num_positions_; i++) {
+    if(dq_value(i) > dq_limit) {
+      dq_value(i) = dq_limit;
+    } else if (dq_value(i) < -dq_limit) {
+      dq_value(i) = -dq_limit;
+    }
+  }
+
   *q_cmd = q + dq_value;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);
 }

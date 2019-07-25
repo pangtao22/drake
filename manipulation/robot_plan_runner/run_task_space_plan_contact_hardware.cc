@@ -30,7 +30,7 @@ int run_plan() {
   t_knots0 << 0, 1;
 
   Eigen::MatrixXd q_knots(7, 2);
-  q_knots.col(0) << -0.5095, 1.1356, -0.0800, -1.4893, -0.3389, 1.2274, -0.3360;
+  q_knots.col(0) << -0.4532, 1.1335, -0.0479, -1.3982, -0.3034, 1.3395, -0.3055;
   q_knots.col(1) = q_knots.col(0);
 
   auto qtraj = trajectories::PiecewisePolynomial<double>::ZeroOrderHold(
@@ -44,13 +44,13 @@ int run_plan() {
   plan1.plan_type = PlanType::kTaskSpacePlanContact;
 
   PlanData::EeData ee_data;
-  ee_data.p_ToQ_T.setZero();
+  ee_data.p_ToQ_T << 0, 0, 0.10;
 
   Eigen::Vector3d t_knots2(0, 8, 16);
 
   Eigen::MatrixXd xyz_knots(3, 3);
   xyz_knots.col(0) << 0, 0, 0;
-  xyz_knots.col(2) << 0, -0.25, -0.15;
+  xyz_knots.col(2) << 0, -0.22, -0.15;
   xyz_knots.col(1) = (xyz_knots.col(0) + xyz_knots.col(2)) / 2;
 
   ee_data.ee_xyz_traj =

@@ -127,11 +127,21 @@ drake_cc_binary(
 )
 
 drake_cc_binary(
-    name = "run_contact_aware_plan_hardware",
-    srcs = ["run_contact_aware_plan_hardware.cc"],
+    name = "run_task_space_plan_contact_hardware",
+    srcs = ["run_task_space_plan_contact_hardware.cc"],
     deps = [
         ":plan_runner_hardware_interface",
         "//math",
+    ],
+)
+
+drake_cc_binary(
+    name = "run_joint_space_plan_contact_hardware",
+    srcs = ["run_joint_space_plan_contact_hardware.cc"],
+    deps = [
+        ":plan_runner_hardware_interface",
+        "//math",
+        "//multibody/inverse_kinematics",
     ],
 )
 
