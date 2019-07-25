@@ -84,8 +84,8 @@ void TaskSpacePlanContact::Step(
   // sphere.
   const Eigen::Vector3d pC_T(0, 0, 0.075);
   const Eigen::Vector3d f_contact =
-      contact_force_estimator_->UpdateContactForce(
-          pC_T, q, tau_external, control_period);
+      contact_force_estimator_->UpdateContactForce(pC_T, q, tau_external,
+                                                   control_period);
 
   // MahtematicalProgram-related declarations.
   const auto prog = std::make_unique<solvers::MathematicalProgram>();
@@ -116,17 +116,23 @@ void TaskSpacePlanContact::Step(
         (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
         dq);
 
-//    // J_nc null space constraint
-//    prog->AddLinearEqualityConstraint(J_nc, 0, dq);
-//
-//    // calculate dq_force
-//    const double f_desired = f_norm_threshold * 1.5;
-//    dq_force =
-//        (-J_nc.transpose().array() / joint_stiffness_ * f_desired).matrix();
-//
-//    // tracking error cost
-//    prog->AddL2NormCost(Jt / control_period,
-//                        x_dot_desired_ - Jt / control_period * dq_force, dq);
+    prog->AddLinearConstraint(J_nc / control_period,
+                              -std::numeric_limits<double>::infinity(), 0, dq);
+
+    // For hybrid force-position control.
+    //    // J_nc null space constraint
+    //    prog->AddLinearEqualityConstraint(J_nc, 0, dq);
+    //
+    //    // calculate dq_force
+    //    const double f_desired = f_norm_threshold * 1.5;
+    //    dq_force =
+    //        (-J_nc.transpose().array() / joint_stiffness_ *
+    //        f_desired).matrix();
+    //
+    //    // tracking error cost
+    //    prog->AddL2NormCost(Jt / control_period,
+    //                        x_dot_desired_ - Jt / control_period * dq_force,
+    //                        dq);
   }
 
   // tracking error cost
