@@ -1,5 +1,5 @@
 
-#include "drake/manipulation/robot_plan_runner/robot_plans/contact_aware_plan.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan_contact.h"
 #include "drake/solvers/solve.h"
 
 namespace drake {
@@ -12,7 +12,7 @@ using std::endl;
 
 TaskSpacePlanContact::TaskSpacePlanContact()
     : TaskSpacePlan(), velocity_cost_weight_(0.2) {
-  this->set_plan_type(PlanType::kContactAwarePlan);
+  this->set_plan_type(PlanType::kTaskSpacePlanContact);
   if (!solver_.available()) {
     throw std::runtime_error("Gurobi solver is not available.");
   }

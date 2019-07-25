@@ -41,7 +41,7 @@ int run_plan() {
 
   // plan2 runs contact-aware plan.
   PlanData plan1;
-  plan1.plan_type = PlanType::kContactAwarePlan;
+  plan1.plan_type = PlanType::kTaskSpacePlanContact;
 
   PlanData::EeData ee_data;
   ee_data.p_ToQ_T.setZero();

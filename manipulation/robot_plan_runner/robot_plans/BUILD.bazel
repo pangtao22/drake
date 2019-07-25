@@ -13,10 +13,11 @@ package(default_visibility = ["//visibility:public"])
 drake_cc_package_library(
     name = "robot_plans",
     deps = [
-        ":contact_aware_plan",
         ":joint_space_plan",
+        ":joint_space_plan_contact",
         ":plan_base",
         ":task_space_plan",
+        ":task_space_plan_contact",
     ],
 )
 
@@ -56,14 +57,29 @@ drake_cc_library(
 )
 
 drake_cc_library(
-    name = "contact_aware_plan",
-    srcs = ["contact_aware_plan.cc"],
-    hdrs = ["contact_aware_plan.h"],
+    name = "task_space_plan_contact",
+    srcs = ["task_space_plan_contact.cc"],
+    hdrs = ["task_space_plan_contact.h"],
     visibility = ["//visibility:public"],
     deps = [
         ":task_space_plan",
         "//math:geometric_transform",
         "//multibody/plant",
+        "//solvers:gurobi_solver",
+        "//solvers:mathematical_program_lite",
+        "//solvers:solve",
+    ],
+)
+
+drake_cc_library(
+    name = "joint_space_plan_contact",
+    srcs = ["joint_space_plan_contact.cc"],
+    hdrs = ["joint_space_plan_contact.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":plan_base",
+        ":plan_utilities",
+        "//math:geometric_transform",
         "//solvers:gurobi_solver",
         "//solvers:mathematical_program_lite",
         "//solvers:solve",

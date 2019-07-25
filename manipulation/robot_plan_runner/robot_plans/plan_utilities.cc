@@ -27,13 +27,13 @@ multibody::ModelInstanceIndex SetupIiwaControllerPlant(
 /*
  * w_cutoff: cut off frequency in rad/s, recommended value 0.5 * 2 * M_PI.
  */
-ContactForceEstimator::ContactForceEstimator(double w_cutoff):
-    plant_(std::make_unique<multibody::MultibodyPlant<double>>()),
-    w_cutoff_(w_cutoff) {
+ContactForceEstimator::ContactForceEstimator(double w_cutoff)
+    : plant_(std::make_unique<multibody::MultibodyPlant<double>>()),
+      w_cutoff_(w_cutoff) {
   robot_model_ = SetupIiwaControllerPlant(plant_.get());
   plant_context_ = plant_->CreateDefaultContext();
 
-  //TODO: contact frame should not be hard-coded. It should come from contact
+  // TODO: contact frame should not be hard-coded. It should come from contact
   // particle filter,
   contact_frame_idx_ = plant_->GetFrameByName("iiwa_link_7").index();
   num_positions_ = plant_->num_positions();
@@ -41,11 +41,12 @@ ContactForceEstimator::ContactForceEstimator(double w_cutoff):
   // contact Jacobian.
   Jv_WCc_.resize(3, num_positions_);
 }
+
 /*
-* pC_C: coordinate of the contact point in the frame of the body under
-*   contact (C). For now it is assumed to be the same as the task frame.
-* tau_external: external joint torque estimated by the robot.
-*/
+ * pC_C: coordinate of the contact point in the frame of the body under
+ *   contact (C). For now it is assumed to be the same as the task frame.
+ * tau_external: external joint torque estimated by the robot.
+ */
 Eigen::Vector3d ContactForceEstimator::EstimateContactForce(
     const Eigen::Ref<const Eigen::Vector3d>& pC_C,
     const Eigen::Ref<const Eigen::VectorXd>& q,
@@ -93,9 +94,6 @@ Eigen::RowVectorXd ContactForceEstimator::CalcContactJacobian() {
   Eigen::Vector3d contact_normal = *f_filtered_ / f_norm;
   return contact_normal.transpose() * Jv_WCc_;
 }
-
-
-
 
 }  // namespace robot_plans
 }  // namespace robot_plan_runner

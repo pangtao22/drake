@@ -25,8 +25,9 @@ namespace robot_plans {
 enum class PlanType {
   kEmptyPlan,
   kTaskSpacePlan,
+  kTaskSpacePlanContact,
   kJointSpacePlan,
-  kContactAwarePlan,
+  kJointSpacePlanContact,
   kLastElement
 };
 

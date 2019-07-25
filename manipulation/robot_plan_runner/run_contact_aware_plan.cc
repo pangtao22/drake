@@ -45,9 +45,9 @@ int test_joint_space_plan() {
   plan0.plan_type = PlanType::kJointSpacePlan;
   plan0.joint_traj = qtraj;
 
-  // plan2 runs contact-aware plan.
+  // plan2 us a contact-aware plan.
   PlanData plan1;
-  plan1.plan_type = PlanType::kContactAwarePlan;
+  plan1.plan_type = PlanType::kTaskSpacePlanContact;
 
   PlanData::EeData ee_data;
   ee_data.p_ToQ_T.setZero();

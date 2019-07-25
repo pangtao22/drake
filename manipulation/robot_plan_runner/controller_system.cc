@@ -4,32 +4,38 @@
 #include "drake/manipulation/robot_plan_runner/controller_system.h"
 
 #include "drake/manipulation/robot_plan_runner/robot_plans/joint_space_plan.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/joint_space_plan_contact.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan.h"
-#include "drake/manipulation/robot_plan_runner/robot_plans/contact_aware_plan.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan_contact.h"
 #include "drake/systems/framework/basic_vector.h"
 
 namespace drake {
 namespace manipulation {
 namespace robot_plan_runner {
 
+using robot_plans::PlanData;
+using robot_plans::PlanType;
 using systems::BasicVector;
 using systems::kVectorValued;
-using robot_plans::PlanType;
-using robot_plans::PlanData;
 
-RobotController::RobotController(PlanType plan_type, double control_period) :
-  num_positions_(7), control_period_(control_period) {
+RobotController::RobotController(PlanType plan_type, double control_period)
+    : num_positions_(7), control_period_(control_period) {
   switch (plan_type) {
     case PlanType::kJointSpacePlan:
       this->set_name("JointSpaceController");
       plan_ = std::make_unique<robot_plans::JointSpacePlan>();
       break;
+    case PlanType::kJointSpacePlanContact:
+      this->set_name("JointSpacePlanContactController");
+      plan_ =
+          std::make_unique<robot_plans::JointSpacePlanContact>(num_positions_);
+      break;
     case PlanType::kTaskSpacePlan:
       this->set_name("TaskSpaceController");
       plan_ = std::make_unique<robot_plans::TaskSpacePlan>();
       break;
-    case PlanType::kContactAwarePlan:
-      this->set_name("ContactAwareController");
+    case PlanType::kTaskSpacePlanContact:
+      this->set_name("TaskSpacePlanContactController");
       plan_ = std::make_unique<robot_plans::TaskSpacePlanContact>();
       break;
     case PlanType::kEmptyPlan:
