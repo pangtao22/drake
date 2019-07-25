@@ -108,21 +108,29 @@ void TaskSpacePlanContact::Step(
     const Eigen::RowVectorXd J_nc =
         contact_force_estimator_->CalcContactJacobian();
 
-    // J_nc null space constraint
-    prog->AddLinearEqualityConstraint(J_nc, 0, dq);
+    const Eigen::VectorXd J_nc_pinv =
+        J_nc.transpose() / std::pow(J_nc.norm(), 2);
 
-    // calculate dq_force
     const double f_desired = f_norm_threshold * 1.5;
-    dq_force =
-        (-J_nc.transpose().array() / joint_stiffness_ * f_desired).matrix();
+    prog->AddLinearEqualityConstraint(
+        (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
+        dq);
 
-    // tracking error cost
-    prog->AddL2NormCost(Jt / control_period,
-                        x_dot_desired_ - Jt / control_period * dq_force, dq);
-  } else {
-    // tracking error cost
-    prog->AddL2NormCost(Jt / control_period, x_dot_desired_, dq);
+//    // J_nc null space constraint
+//    prog->AddLinearEqualityConstraint(J_nc, 0, dq);
+//
+//    // calculate dq_force
+//    const double f_desired = f_norm_threshold * 1.5;
+//    dq_force =
+//        (-J_nc.transpose().array() / joint_stiffness_ * f_desired).matrix();
+//
+//    // tracking error cost
+//    prog->AddL2NormCost(Jt / control_period,
+//                        x_dot_desired_ - Jt / control_period * dq_force, dq);
   }
+
+  // tracking error cost
+  prog->AddL2NormCost(Jt / control_period, x_dot_desired_, dq);
 
   solver_.Solve(*prog, {}, {}, prog_result_.get());
 
@@ -130,7 +138,7 @@ void TaskSpacePlanContact::Step(
     throw std::runtime_error("Controller QP cannot be solved.");
   }
   auto dq_value = prog_result_->GetSolution(dq);
-  *q_cmd = q + dq_value + dq_force;
+  *q_cmd = q + dq_value;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);
 }
 
