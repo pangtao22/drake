@@ -1,5 +1,6 @@
 
 #include <vector>
+#include <fstream>
 
 #include "drake/common/trajectories/piecewise_polynomial.h"
 #include "drake/manipulation/robot_plan_runner/plan_runner_hardware_interface.h"
@@ -44,8 +45,8 @@ int run_plan() {
   // L7 (link 7) orientation.
   auto R_WL7 = math::RollPitchYawd(0, M_PI * 1.25, 0).ToRotationMatrix();
 
-  const Eigen::Vector3d p_WQ_start(0.40, -0.38 + 0.05, 0.05);
-  const Eigen::Vector3d delta_xyz(0, -0.15, -0.15);
+  const Eigen::Vector3d p_WQ_start(0.40, -0.38 + 0.10, 0.05);
+  const Eigen::Vector3d delta_xyz(0, -0.20, -0.15);
 
   Eigen::VectorXd q_initial_guess(nq);
   q_initial_guess << -0.5095, 1.1356, -0.0800, -1.4893, -0.3389, 1.2274,
@@ -81,7 +82,13 @@ int run_plan() {
     t_knots1(i) = 16. / (n_knots - 1) * i;
   }
 
+  // Print q_knots1 to the screen and write it to a file.
   cout << q_knots1 << endl;
+  std::ofstream file("q_knots.csv");
+  const Eigen::IOFormat CSVFormat(
+      Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", "\n");
+  file << q_knots1.format(CSVFormat);
+  file.close();
 
   // plan1 runs joint space contact plan.
   PlanData plan1;
