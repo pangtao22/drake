@@ -16,11 +16,6 @@ using std::cout;
 using std::endl;
 using std::vector;
 
-/*
- * This is not as much a test as it is an example of using
- * PlanRunnerHardwareInterface. To see what it does to robots, it should be run
- * together with //examples/manipulation_station:mock_station_simulation
- */
 int run_plan() {
   // create plan
   // plan1 goes to the starting pose of the contact-aware plan.
@@ -78,9 +73,9 @@ int run_plan() {
   plan_runner.Run();
 
   return 0;
-};
+}
 
 }  // namespace
 }  // namespace drake
 
-int main() { return drake::run_plan(); };
+int main() { return drake::run_plan(); }

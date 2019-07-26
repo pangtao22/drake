@@ -145,6 +145,15 @@ drake_cc_binary(
     ],
 )
 
+drake_cc_binary(
+    name = "run_joint_step_response_hardware",
+    srcs = ["run_joint_step_response_hardware.cc"],
+    deps = [
+        ":plan_runner_hardware_interface",
+        "//math",
+    ],
+)
+
 install_data()
 
 add_lint_tests()
