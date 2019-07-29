@@ -38,7 +38,7 @@ int run_plan() {
   t_knots1 << 0, 2;
   Eigen::MatrixXd q_knots1(7, 2);
   q_knots1 = q_knots0;
-  q_knots1(5, 0) += 0.005;
+  q_knots1(6, 0) += 0.005;
 
   plan1.plan_type = PlanType::kJointSpacePlan;
   plan1.joint_traj = trajectories::PiecewisePolynomial<double>::ZeroOrderHold(

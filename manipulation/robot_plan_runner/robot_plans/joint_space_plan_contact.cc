@@ -35,6 +35,12 @@ void JointSpacePlanContact::Step(
   const auto& q_traj = plan_data.joint_traj.value();
   Eigen::VectorXd dq_ref = q_traj.value(t) - q;
 
+  const double dq_ref_norm = dq_ref.norm();
+  const double dq_ref_norm_threshold = 0.04;
+  if(dq_ref_norm > dq_ref_norm_threshold) {
+    dq_ref *= dq_ref_norm_threshold / dq_ref_norm;
+  }
+
   // MahtematicalProgram-related declarations.
   const auto prog = std::make_unique<solvers::MathematicalProgram>();
   auto dq = prog->NewContinuousVariables(num_positions_);
