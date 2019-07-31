@@ -45,7 +45,7 @@ int run_plan() {
   // L7 (link 7) orientation.
   auto R_WL7 = math::RollPitchYawd(0, M_PI * 1.25, 0).ToRotationMatrix();
 
-  const Eigen::Vector3d p_WQ_start(0.40, -0.38 + 0.10, 0.05);
+  const Eigen::Vector3d p_WQ_start(0.40, -0.38 + 0.10, 0.03);
   const Eigen::Vector3d delta_xyz(0, -0.20, -0.15);
 
   Eigen::VectorXd q_initial_guess(nq);
@@ -119,6 +119,8 @@ int run_plan() {
   // Construct plan runner hardware interface.
   auto plan_runner =
       manipulation::robot_plan_runner::PlanRunnerHardwareInterface(plan_list);
+
+  plan_runner.SaveGraphvizStringToFile();
 
   // Run simulation.
   plan_runner.Run();

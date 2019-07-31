@@ -2,7 +2,7 @@
 
 #include <Eigen/Core>
 
-#include "drake/manipulation/robot_plan_runner/robot_plans/plan_utilities.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/contact_force_estimator.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan.h"
 #include "drake/solvers/gurobi_solver.h"
 #include "drake/solvers/mathematical_program.h"

@@ -1,4 +1,5 @@
 #include "drake/manipulation/robot_plan_runner/robot_plans/joint_space_plan_contact.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/plan_utilities.h"
 
 namespace drake {
 namespace manipulation {
@@ -11,7 +12,7 @@ JointSpacePlanContact::JointSpacePlanContact(int num_positions)
   DRAKE_THROW_UNLESS(solver_.available());
 
   contact_force_estimator_ =
-      std::make_unique<ContactForceEstimator>(0.5 * 2 * M_PI);
+      std::make_unique<ContactForceEstimator>(0.005, 0.5 * 2 * M_PI);
 
   joint_stiffness_.resize(num_positions_);
   joint_stiffness_ << 800, 600, 600, 600, 400, 200, 200;
@@ -35,12 +36,6 @@ void JointSpacePlanContact::Step(
   const auto& q_traj = plan_data.joint_traj.value();
   Eigen::VectorXd dq_ref = q_traj.value(t) - q;
 
-  const double dq_ref_norm = dq_ref.norm();
-  const double dq_ref_norm_threshold = 0.04;
-  if(dq_ref_norm > dq_ref_norm_threshold) {
-    dq_ref *= dq_ref_norm_threshold / dq_ref_norm;
-  }
-
   // MahtematicalProgram-related declarations.
   const auto prog = std::make_unique<solvers::MathematicalProgram>();
   auto dq = prog->NewContinuousVariables(num_positions_);
@@ -48,14 +43,26 @@ void JointSpacePlanContact::Step(
   // Estimate contact force, assuming the contact is at the center of the
   // sphere.
   const Eigen::Vector3d pC_T(0, 0, 0.075);
+  ContactInfo contact_info;
+  contact_info.num_contacts = 1;
+  contact_info.contact_link_idx.push_back(7);
+  contact_info.positions.push_back(pC_T);
+
   const Eigen::Vector3d f_contact =
-      contact_force_estimator_->UpdateContactForce(pC_T, q, tau_external,
-                                                   control_period);
+      contact_force_estimator_->UpdateContactForce(contact_info, q,
+                                                   tau_external);
 
   const double f_norm_threshold = 10;
   const double f_norm = f_contact.norm();
 
   if (f_norm > f_norm_threshold) {
+    // saturate the norm of dq_ref.
+    const double dq_ref_norm = dq_ref.norm();
+    const double dq_ref_norm_threshold = 0.04;
+    if (dq_ref_norm > dq_ref_norm_threshold) {
+      dq_ref *= dq_ref_norm_threshold / dq_ref_norm;
+    }
+
     const Eigen::RowVectorXd J_nc =
         contact_force_estimator_->CalcContactJacobian();
 
@@ -85,8 +92,8 @@ void JointSpacePlanContact::Step(
 
   // saturation
   const double dq_limit = 10;
-  for(int i = 0; i < num_positions_; i++) {
-    if(dq_value(i) > dq_limit) {
+  for (int i = 0; i < num_positions_; i++) {
+    if (dq_value(i) > dq_limit) {
       dq_value(i) = dq_limit;
     } else if (dq_value(i) < -dq_limit) {
       dq_value(i) = -dq_limit;

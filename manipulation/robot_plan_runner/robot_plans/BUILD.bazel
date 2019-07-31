@@ -62,6 +62,7 @@ drake_cc_library(
     hdrs = ["task_space_plan_contact.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":contact_force_estimator",
         ":task_space_plan",
         "//math:geometric_transform",
         "//multibody/plant",
@@ -77,8 +78,8 @@ drake_cc_library(
     hdrs = ["joint_space_plan_contact.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":contact_force_estimator",
         ":plan_base",
-        ":plan_utilities",
         "//math:geometric_transform",
         "//solvers:gurobi_solver",
         "//solvers:mathematical_program_lite",
@@ -97,6 +98,16 @@ drake_cc_library(
     deps = [
         "//common:find_resource",
         "//multibody/parsing",
+    ],
+)
+
+drake_cc_library(
+    name = "contact_force_estimator",
+    srcs = ["contact_force_estimator.cc"],
+    hdrs = ["contact_force_estimator.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":plan_utilities",
     ],
 )
 

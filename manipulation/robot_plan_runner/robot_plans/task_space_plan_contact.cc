@@ -1,5 +1,7 @@
 
 #include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan_contact.h"
+
+#include "drake/manipulation/robot_plan_runner/robot_plans/plan_utilities.h"
 #include "drake/solvers/solve.h"
 
 namespace drake {
@@ -18,7 +20,7 @@ TaskSpacePlanContact::TaskSpacePlanContact()
   }
 
   contact_force_estimator_ =
-      std::make_unique<ContactForceEstimator>(0.5 * 2 * M_PI);
+      std::make_unique<ContactForceEstimator>(0.005, 0.5 * 2 * M_PI);
 
   joint_stiffness_.resize(num_positions_);
   joint_stiffness_ << 800, 600, 600, 600, 400, 200, 200;
@@ -83,9 +85,13 @@ void TaskSpacePlanContact::Step(
   // Estimate contact force, assuming the contact is at the center of the
   // sphere.
   const Eigen::Vector3d pC_T(0, 0, 0.075);
+  ContactInfo contact_info;
+  contact_info.num_contacts = 1;
+  contact_info.contact_link_idx.push_back(7);
+  contact_info.positions.push_back(pC_T);
   const Eigen::Vector3d f_contact =
-      contact_force_estimator_->UpdateContactForce(pC_T, q, tau_external,
-                                                   control_period);
+      contact_force_estimator_->UpdateContactForce(contact_info, q,
+                                                   tau_external);
 
   // MahtematicalProgram-related declarations.
   const auto prog = std::make_unique<solvers::MathematicalProgram>();
@@ -147,8 +153,8 @@ void TaskSpacePlanContact::Step(
 
   // saturation
   const double dq_limit = 0.1;
-  for(int i = 0; i < num_positions_; i++) {
-    if(dq_value(i) > dq_limit) {
+  for (int i = 0; i < num_positions_; i++) {
+    if (dq_value(i) > dq_limit) {
       dq_value(i) = dq_limit;
     } else if (dq_value(i) < -dq_limit) {
       dq_value(i) = -dq_limit;

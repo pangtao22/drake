@@ -1,7 +1,7 @@
 #pragma once
 
 #include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
-#include "drake/manipulation/robot_plan_runner/robot_plans/plan_utilities.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/contact_force_estimator.h"
 #include "drake/solvers/gurobi_solver.h"
 #include "drake/solvers/mathematical_program.h"
 #include "drake/solvers/mathematical_program_result.h"
