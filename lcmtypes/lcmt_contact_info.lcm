@@ -1,0 +1,9 @@
+package drake;
+
+struct lcmt_contact_info {
+    int64_t  timestamp;
+    int32_t  num_contacts;
+    int8_t   link_indices[num_contacts];
+    double   position[num_contacts][3];
+    double   normal[num_contacts][3];
+}

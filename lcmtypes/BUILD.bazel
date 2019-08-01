@@ -274,6 +274,14 @@ drake_lcm_cc_library(
 )
 
 drake_lcm_cc_library(
+    name = "contact_particle_filter",
+    lcm_package = "drake",
+    lcm_srcs = [
+        "lcmt_contact_info.lcm",
+    ],
+)
+
+drake_lcm_cc_library(
     name = "schunk",
     lcm_package = "drake",
     lcm_srcs = [
@@ -331,6 +339,7 @@ LCMTYPES_CC = [
     ":contact_info_for_viz",
     ":contact_information",
     ":contact_results_for_viz",
+    ":contact_particle_filter",
     ":desired_body_motion",
     ":desired_centroidal_momentum_dot",
     ":desired_dof_motions",
@@ -405,16 +414,16 @@ install_py2_duplicates_if_py3(
 install(
     name = "install",
     install_tests = [":test/drake-lcm-spy_install_test.py"],
+    rename = {
+        "share/java/liblcmtypes_drake_java.jar": "lcmtypes_drake.jar",
+        "bin/drake-lcm-spy-launcher.sh": "drake-lcm-spy",
+    },
     targets = [
         ":drake-lcm-spy-launcher",
         ":drake-lcm-spy",
         ":lcmtypes_drake_java",
         ":lcmtypes_drake_py",
     ],
-    rename = {
-        "share/java/liblcmtypes_drake_java.jar": "lcmtypes_drake.jar",
-        "bin/drake-lcm-spy-launcher.sh": "drake-lcm-spy",
-    },
     deps = [
         ":install_drake_cc_headers",
         ":install_py2_duplicates_if_py3",
