@@ -18,7 +18,8 @@ class LowPassFilter {
  public:
   LowPassFilter(int dimension, double h, double w_cutoff);
   void Update(const Eigen::Ref<const Eigen::VectorXd>& u);
-  void reset();
+  void Update(const std::vector<double>& u);
+  void reset_state();
   const Eigen::VectorXd& get_current_x() const;
 
  private:

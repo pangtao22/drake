@@ -39,17 +39,18 @@ class PlanRunnerHardwareInterface {
   lcmt_iiwa_status GetCurrentIiwaStatus();
 
  private:
-  /*
-   * Blocks until a iiwa_status lcm message is received.
-   */
-  void WaitForNewMessage(
-      drake::lcm::DrakeLcmInterface* const lcm_ptr,
-      systems::lcm::LcmSubscriberSystem* const lcm_sub) const;
   std::unique_ptr<systems::Diagram<double>> diagram_;
   std::unique_ptr<lcm::DrakeLcm> owned_lcm_;
   systems::lcm::LcmSubscriberSystem* iiwa_status_sub_;
   robot_plan_runner::PlanSender* plan_sender_;
 };
+
+/*
+ * Blocks until an lcm message is received.
+ */
+void WaitForNewMessage(
+    drake::lcm::DrakeLcmInterface* const lcm_ptr,
+    systems::lcm::LcmSubscriberSystem* const lcm_sub);
 
 }  // namespace robot_plan_runner
 }  // namespace manipulation

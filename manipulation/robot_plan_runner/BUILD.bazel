@@ -76,6 +76,19 @@ drake_cc_library(
     ],
 )
 
+drake_cc_library(
+    name = "contact_location_estimator",
+    srcs = ["contact_location_estimator.cc"],
+    hdrs = ["contact_location_estimator.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//lcmtypes:lcmtypes_drake_cc",
+        "//manipulation/robot_plan_runner/robot_plans:contact_force_estimator",
+        "//manipulation/robot_plan_runner/robot_plans:plan_utilities",
+        "//systems/framework",
+    ],
+)
+
 drake_cc_binary(
     name = "robot_plans_test",
     srcs = ["robot_plans_test.cc"],
@@ -151,6 +164,16 @@ drake_cc_binary(
     deps = [
         ":plan_runner_hardware_interface",
         "//math",
+    ],
+)
+
+drake_cc_binary(
+    name = "run_contact_location_estimator",
+    srcs = ["run_contact_location_estimator.cc"],
+    deps = [
+        ":contact_location_estimator",
+        ":plan_runner_hardware_interface",
+        "//systems/primitives:signal_logger",
     ],
 )
 

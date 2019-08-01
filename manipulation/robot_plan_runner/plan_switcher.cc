@@ -28,7 +28,7 @@ void PlanSwitcher::CalcSwitchIndex(
       this->EvalAbstractInput(context, input_port_idx_plan_data_);
   *plan_switch_index = systems::InputPortIndex(
       static_cast<int>(input->template get_value<PlanData>().plan_type));
-};
+}
 
 }  // namespace robot_plan_runner
 }  // namespace manipulation

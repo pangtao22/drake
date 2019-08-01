@@ -68,8 +68,7 @@ void JointSpacePlanContact::Step(
 
     const double f_desired = f_norm_threshold * 1.5;
 
-    Eigen::VectorXd J_nc_pinv =
-        J_nc.transpose() / std::pow(J_nc.norm(), 2);
+    Eigen::VectorXd J_nc_pinv = J_nc.transpose() / std::pow(J_nc.norm(), 2);
     SetSmallValuesToZero(&J_nc_pinv, 1e-13);
 
     prog->AddLinearEqualityConstraint(

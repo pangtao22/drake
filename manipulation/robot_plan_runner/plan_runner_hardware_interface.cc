@@ -93,7 +93,7 @@ lcmt_iiwa_status PlanRunnerHardwareInterface::GetCurrentIiwaStatus() {
   auto diagram = builder.Build();
   systems::Simulator<double> simulator(*diagram);
 
-  this->WaitForNewMessage(lcm, iiwa_status_sub);
+  WaitForNewMessage(lcm, iiwa_status_sub);
   simulator.AdvanceTo(1e-6);
 
   const auto& iiwa_status_sub_context = diagram->GetMutableSubsystemContext(
@@ -102,23 +102,6 @@ lcmt_iiwa_status PlanRunnerHardwareInterface::GetCurrentIiwaStatus() {
   return iiwa_status_sub->get_output_port().Eval<lcmt_iiwa_status>(
       iiwa_status_sub_context);
 }
-
-void PlanRunnerHardwareInterface::WaitForNewMessage(
-    drake::lcm::DrakeLcmInterface* const lcm_ptr,
-    systems::lcm::LcmSubscriberSystem* const lcm_sub_ptr) const {
-  auto wait_for_new_message = [lcm_ptr](const auto& lcm_sub) {
-    std::cout << "Waiting for " << lcm_sub.get_channel_name() << " message..."
-              << std::flush;
-    const int orig_count = lcm_sub.GetInternalMessageCount();
-    LcmHandleSubscriptionsUntil(
-        lcm_ptr,
-        [&]() { return lcm_sub.GetInternalMessageCount() > orig_count; },
-        10 /* timeout_millis */);
-    std::cout << "Received!" << std::endl;
-  };
-
-  wait_for_new_message(*lcm_sub_ptr);
-};
 
 void PlanRunnerHardwareInterface::Run(double realtime_rate) {
   systems::Simulator<double> simulator(*diagram_);
@@ -138,6 +121,23 @@ void PlanRunnerHardwareInterface::Run(double realtime_rate) {
   cout << "All plans duration " << t_total << endl;
   simulator.AdvanceTo(t_total);
 }
+
+void WaitForNewMessage(
+    drake::lcm::DrakeLcmInterface* const lcm_ptr,
+    systems::lcm::LcmSubscriberSystem* const lcm_sub_ptr)  {
+  auto wait_for_new_message = [lcm_ptr](const auto& lcm_sub) {
+    std::cout << "Waiting for " << lcm_sub.get_channel_name() << " message..."
+              << std::flush;
+    const int orig_count = lcm_sub.GetInternalMessageCount();
+    LcmHandleSubscriptionsUntil(
+        lcm_ptr,
+        [&]() { return lcm_sub.GetInternalMessageCount() > orig_count; },
+        10 /* timeout_millis */);
+    std::cout << "Received!" << std::endl;
+  };
+
+  wait_for_new_message(*lcm_sub_ptr);
+};
 
 }  // namespace robot_plan_runner
 }  // namespace manipulation

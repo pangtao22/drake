@@ -48,7 +48,6 @@ void ClipEigenVector(Eigen::VectorXd* const v_ptr, double min, double max) {
 }
 
 
-
 /*
  *  w_cutoff: cutoff frequency of the low-pass filter on contact force, in
  *  rad/s.
@@ -64,6 +63,7 @@ LowPassFilter::LowPassFilter(int dimension, double h, double w_cutoff)
  * x(k+1) = (1-a) * x(k) + a * u
  */
 void LowPassFilter::Update(const Eigen::Ref<const Eigen::VectorXd>& u) {
+  DRAKE_THROW_UNLESS(u.size() == n_);
   if (has_valid_state_) {
     x_ = (1 - a_) * x_ + a_ * u;
   } else {
@@ -72,7 +72,12 @@ void LowPassFilter::Update(const Eigen::Ref<const Eigen::VectorXd>& u) {
   }
 }
 
-void LowPassFilter::reset() { has_valid_state_ = false; }
+void LowPassFilter::Update(const std::vector<double>& u) {
+  this->Update(Eigen::Map<const Eigen::VectorXd>(u.data(), u.size()));
+}
+
+
+void LowPassFilter::reset_state() { has_valid_state_ = false; }
 
 const Eigen::VectorXd& LowPassFilter::get_current_x() const {
   if (has_valid_state_) {
