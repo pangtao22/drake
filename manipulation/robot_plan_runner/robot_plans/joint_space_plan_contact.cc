@@ -68,8 +68,9 @@ void JointSpacePlanContact::Step(
 
     const double f_desired = f_norm_threshold * 1.5;
 
-    const Eigen::VectorXd J_nc_pinv =
+    Eigen::VectorXd J_nc_pinv =
         J_nc.transpose() / std::pow(J_nc.norm(), 2);
+    SetSmallValuesToZero(&J_nc_pinv, 1e-13);
 
     prog->AddLinearEqualityConstraint(
         (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
@@ -92,13 +93,7 @@ void JointSpacePlanContact::Step(
 
   // saturation
   const double dq_limit = 10;
-  for (int i = 0; i < num_positions_; i++) {
-    if (dq_value(i) > dq_limit) {
-      dq_value(i) = dq_limit;
-    } else if (dq_value(i) < -dq_limit) {
-      dq_value(i) = -dq_limit;
-    }
-  }
+  ClipEigenVector(&dq_value, -dq_limit, dq_limit);
 
   *q_cmd = q + dq_value;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);

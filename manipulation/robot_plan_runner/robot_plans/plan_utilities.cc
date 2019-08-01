@@ -24,13 +24,38 @@ multibody::ModelInstanceIndex SetupIiwaControllerPlant(
   return plant->GetModelInstanceByName("iiwa7");
 }
 
+void SetSmallValuesToZero(Eigen::VectorXd* const v_ptr, double tolerance) {
+  auto& v = *v_ptr;
+  const int n = v.size();
+  for (int i = 0; i < n; i++) {
+    if (abs(v(i)) <= tolerance) {
+      v(i) = 0;
+    }
+  }
+}
+
+void ClipEigenVector(Eigen::VectorXd* const v_ptr, double min, double max) {
+  auto& v = *v_ptr;
+  const int n = v.size();
+
+  for (int i = 0; i < n; i++) {
+    if (v(i) > max) {
+      v(i) = max;
+    } else if (v(i) < min) {
+      v(i) = min;
+    }
+  }
+}
+
+
+
 /*
  *  w_cutoff: cutoff frequency of the low-pass filter on contact force, in
  *  rad/s.
  *  h: controller time step in seconds.
  */
-LowPassFilter::LowPassFilter(int dimension, double h, double w_cutoff):
-    a_(h * w_cutoff / (1 + h * w_cutoff)), n_(dimension) {
+LowPassFilter::LowPassFilter(int dimension, double h, double w_cutoff)
+    : a_(h * w_cutoff / (1 + h * w_cutoff)), n_(dimension) {
   x_.resize(n_);
 }
 
@@ -39,7 +64,7 @@ LowPassFilter::LowPassFilter(int dimension, double h, double w_cutoff):
  * x(k+1) = (1-a) * x(k) + a * u
  */
 void LowPassFilter::Update(const Eigen::Ref<const Eigen::VectorXd>& u) {
-  if(has_valid_state_) {
+  if (has_valid_state_) {
     x_ = (1 - a_) * x_ + a_ * u;
   } else {
     has_valid_state_ = true;
@@ -47,17 +72,15 @@ void LowPassFilter::Update(const Eigen::Ref<const Eigen::VectorXd>& u) {
   }
 }
 
-void LowPassFilter::reset() {has_valid_state_ = false; }
+void LowPassFilter::reset() { has_valid_state_ = false; }
 
-Eigen::VectorXd LowPassFilter::get_current_x() {
-  if(has_valid_state_) {
+const Eigen::VectorXd& LowPassFilter::get_current_x() const {
+  if (has_valid_state_) {
     return x_;
   } else {
     throw std::runtime_error("LowPassFilter does not have a valid state.");
   }
 }
-
-
 
 }  // namespace robot_plans
 }  // namespace robot_plan_runner
