@@ -8,9 +8,11 @@ namespace robot_plan_runner {
 
 using Eigen::Vector3d;
 using robot_plans::ContactInfo;
+using std::cout;
+using std::endl;
 
 ContactLocationEstimator::ContactLocationEstimator()
-    : update_period_(0.01), w_cutoff_(1 * 2 * M_PI) {
+    : update_period_(0.01), w_cutoff_(0.5 * 2 * M_PI) {
   this->set_name("ContactLocationEstimator");
 
   contact_position_filter_ = std::make_unique<robot_plans::LowPassFilter>(
@@ -57,15 +59,23 @@ void ContactLocationEstimator::CopyStateOut(
 void ContactLocationEstimator::UpdateContactInfo(
     const systems::Context<double>& context,
     systems::State<double>* state) const {
-  const auto& lcm_contact_info =
+  const auto& contact_info_msg =
       get_input_port().Eval<lcmt_contact_info>(context);
   auto& contact_info =
       state->get_mutable_abstract_state<ContactInfo>(abstract_state_index_);
 
+
+  const auto nc = static_cast<unsigned long>(contact_info_msg.num_contacts);
+
+//  if (nc != contact_info_msg.link_indices.size()) {
+//    cout << context.get_time() << " " <<
+//    nc << " " << contact_info_msg.position.size() << " " <<
+//         contact_info_msg.link_indices.size() << endl;
+//  }
+//
   // Sanity check.
-  const auto nc = static_cast<unsigned long>(lcm_contact_info.num_contacts);
-  DRAKE_THROW_UNLESS(nc == lcm_contact_info.position.size());
-  DRAKE_THROW_UNLESS(nc == lcm_contact_info.link_indices.size());
+  DRAKE_THROW_UNLESS(nc == contact_info_msg.position.size());
+//  DRAKE_THROW_UNLESS(nc == contact_info_msg.link_indices.size());
 
   // Update the system's abstract state.
   contact_info.num_contacts = nc;
@@ -78,13 +88,12 @@ void ContactLocationEstimator::UpdateContactInfo(
 
   // Only handles up to one contact at the moment.
   DRAKE_THROW_UNLESS(nc == 1);
-
-  if (contact_info.contact_link_idx[0] != lcm_contact_info.link_indices[0]) {
+  if (contact_info.contact_link_idx[0] != contact_info_msg.link_indices[0]) {
     // If contact link changes, reset contact position.
     contact_position_filter_->reset_state();
-    contact_info.contact_link_idx[0] = lcm_contact_info.link_indices[0];
+    contact_info.contact_link_idx[0] = contact_info_msg.link_indices[0];
   }
-  contact_position_filter_->Update(lcm_contact_info.position[0]);
+  contact_position_filter_->Update(contact_info_msg.position[0]);
   contact_info.positions[0] = contact_position_filter_->get_current_x();
 }
 

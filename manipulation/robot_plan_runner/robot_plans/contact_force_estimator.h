@@ -15,7 +15,7 @@ namespace robot_plans {
 struct ContactInfo {
   ContactInfo() {};
   int num_contacts{0};
-  std::vector<int> contact_link_idx{-1};
+  std::vector<int> contact_link_idx{};
   std::vector<Eigen::Vector3d> positions{};
 };
 
