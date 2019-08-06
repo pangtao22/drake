@@ -87,6 +87,7 @@ drake_cc_library(
         "//manipulation/robot_plan_runner/robot_plans:contact_force_estimator",
         "//manipulation/robot_plan_runner/robot_plans:plan_utilities",
         "//systems/framework",
+        "//systems/primitives",
     ],
 )
 

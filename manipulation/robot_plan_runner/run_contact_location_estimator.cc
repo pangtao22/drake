@@ -1,5 +1,3 @@
-#include <fstream>
-
 #include "drake/lcm/drake_lcm.h"
 #include "drake/lcmt_contact_info.hpp"
 #include "drake/manipulation/robot_plan_runner/contact_location_estimator.h"
@@ -15,63 +13,7 @@ namespace robot_plan_runner {
 namespace {
 
 using robot_plans::ContactInfo;
-using systems::BasicVector;
 using systems::SignalLogger;
-
-class ContactInfoTranslator : public systems::LeafSystem<double> {
- public:
-  ContactInfoTranslator() {
-    this->set_name("ContactInfoTranslator");
-
-    this->DeclareAbstractInputPort("contact_info", Value<ContactInfo>());
-
-    this->DeclareVectorOutputPort("num_contacts", BasicVector<double>(1),
-                                  &ContactInfoTranslator::GetNumContacts);
-    this->DeclareVectorOutputPort("contact_link", BasicVector<double>(1),
-                                  &ContactInfoTranslator::GetContactLink);
-    this->DeclareVectorOutputPort("contact_position", BasicVector<double>(3),
-                                  &ContactInfoTranslator::GetContactPosition);
-  }
-
- private:
-  void GetNumContacts(const systems::Context<double>& context,
-                      BasicVector<double>* output) const {
-    const auto& contact_info =
-        this->get_input_port(0).Eval<ContactInfo>(context);
-    output->SetFromVector(
-        Eigen::Matrix<double, 1, 1>(contact_info.num_contacts));
-  }
-
-  void GetContactLink(const systems::Context<double>& context,
-                      BasicVector<double>* output) const {
-    const auto& contact_info =
-        this->get_input_port(0).Eval<ContactInfo>(context);
-    output->SetFromVector(
-        Eigen::Matrix<double, 1, 1>(contact_info.contact_link_idx[0]));
-  }
-
-  void GetContactPosition(const systems::Context<double>& context,
-                          BasicVector<double>* output) const {
-    const auto& contact_info =
-        this->get_input_port(0).Eval<ContactInfo>(context);
-
-    output->SetFromVector(contact_info.positions[0]);
-  }
-};
-
-template <class T>
-void SaveLogToFile(systems::SignalLogger<T>* const logger,
-                   const std::string& name) {
-  std::ofstream file_data(name + "_data.csv");
-  std::ofstream file_time(name + "_time.csv");
-  const Eigen::IOFormat CSVFormat(Eigen::StreamPrecision, Eigen::DontAlignCols,
-                                  ", ", "\n");
-  file_data << logger->data().format(CSVFormat);
-  file_time << logger->sample_times().format(CSVFormat);
-
-  file_data.close();
-  file_time.close();
-}
 
 int do_main() {
   systems::DiagramBuilder<double> builder;

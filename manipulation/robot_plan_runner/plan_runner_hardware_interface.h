@@ -4,10 +4,11 @@
 
 #include "drake/lcm/drake_lcm.h"
 #include "drake/lcmt_iiwa_status.hpp"
-#include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
 #include "drake/manipulation/robot_plan_runner/plan_sender.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
 #include "drake/systems/framework/diagram_builder.h"
 #include "drake/systems/lcm/lcm_subscriber_system.h"
+#include "drake/systems/primitives/signal_logger.h"
 
 namespace drake {
 namespace manipulation {
@@ -33,25 +34,29 @@ class PlanRunnerHardwareInterface {
   void Run(double realtime_rate = 1.0);
 
   /*
- * Get current iiwa status by creating a diagram with only a lcm subscriber
- * and simulating it for 1e-6 seconds.
- */
+   * Get current iiwa status by creating a diagram with only a lcm subscriber
+   * and simulating it for 1e-6 seconds.
+   */
   lcmt_iiwa_status GetCurrentIiwaStatus();
 
  private:
   std::unique_ptr<systems::Diagram<double>> diagram_;
   std::unique_ptr<lcm::DrakeLcm> owned_lcm_;
-  systems::lcm::LcmSubscriberSystem* iiwa_status_sub_;
-  systems::lcm::LcmSubscriberSystem* contact_info_sub_;
-  robot_plan_runner::PlanSender* plan_sender_;
+  systems::lcm::LcmSubscriberSystem* iiwa_status_sub_{nullptr};
+  systems::lcm::LcmSubscriberSystem* contact_info_sub_{nullptr};
+  robot_plan_runner::PlanSender* plan_sender_{nullptr};
+
+  // loggers for contact_info
+  systems::SignalLogger<double>* logger_num_contacts_{nullptr};
+  systems::SignalLogger<double>* logger_contact_link_{nullptr};
+  systems::SignalLogger<double>* logger_contact_position_{nullptr};
 };
 
 /*
  * Blocks until an lcm message is received.
  */
-void WaitForNewMessage(
-    drake::lcm::DrakeLcmInterface* const lcm_ptr,
-    systems::lcm::LcmSubscriberSystem* const lcm_sub);
+void WaitForNewMessage(drake::lcm::DrakeLcmInterface* const lcm_ptr,
+                       systems::lcm::LcmSubscriberSystem* const lcm_sub);
 
 }  // namespace robot_plan_runner
 }  // namespace manipulation

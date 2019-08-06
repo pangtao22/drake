@@ -67,7 +67,7 @@ PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
   builder.Connect(plan_runner->GetOutputPort("iiwa_torque_command"),
                   iiwa_command_sender->get_torque_input_port());
 
-  // Contact force estimator.
+  // Contact location estimator.
   contact_info_sub_ = builder.template AddSystem(
       systems::lcm::LcmSubscriberSystem::Make<drake::lcmt_contact_info>(
           "CONTACT_INFO", lcm));
@@ -80,6 +80,25 @@ PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
   builder.Connect(
       contact_location_estimator->GetOutputPort("contact_info"),
       plan_runner->GetInputPort("contact_info"));
+
+  // Loggers for contact location estimator.
+  auto contact_info_translator =
+      builder.template AddSystem<ContactInfoTranslator>();
+  builder.Connect(contact_location_estimator->GetOutputPort("contact_info"),
+                  contact_info_translator->GetInputPort("contact_info"));
+
+  logger_num_contacts_ = systems::LogOutput(
+      contact_info_translator->GetOutputPort("num_contacts"), &builder);
+  logger_num_contacts_->set_publish_period(0.005);
+
+  logger_contact_link_ = systems::LogOutput(
+      contact_info_translator->GetOutputPort("contact_link"), &builder);
+  logger_contact_link_->set_publish_period(0.005);
+
+  logger_contact_position_ = systems::LogOutput(
+      contact_info_translator->GetOutputPort("contact_position"), &builder);
+  logger_contact_position_->set_publish_period(0.005);
+
   diagram_ = builder.Build();
 };
 
@@ -135,6 +154,11 @@ void PlanRunnerHardwareInterface::Run(double realtime_rate) {
   double t_total = plan_sender_->get_all_plans_duration();
   cout << "All plans duration " << t_total << endl;
   simulator.AdvanceTo(t_total);
+
+  // Save logs to disk.
+  SaveLogToFile(logger_num_contacts_, "num_contacts");
+  SaveLogToFile(logger_contact_link_, "contact_link");
+  SaveLogToFile(logger_contact_position_, "contact_position");
 }
 
 void WaitForNewMessage(drake::lcm::DrakeLcmInterface* const lcm_ptr,
