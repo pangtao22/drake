@@ -29,10 +29,11 @@ class RobotController : public systems::LeafSystem<double> {
   std::unique_ptr<robot_plans::PlanBase> plan_;
   const int num_positions_{};
   const double control_period_{};
-  int input_port_idx_q_{-1};
-  int input_port_idx_v_{-1};
-  int input_port_idx_tau_ext_{-1};
-  int input_port_idx_plan_data_{-1};
+  systems::InputPortIndex input_port_idx_q_{-1};
+  systems::InputPortIndex input_port_idx_v_{-1};
+  systems::InputPortIndex input_port_idx_tau_ext_{-1};
+  systems::InputPortIndex input_port_idx_plan_data_{-1};
+  systems::InputPortIndex input_port_idx_contact_info_{-1};
 
   mutable Eigen::VectorXd q_cmd_;
   mutable Eigen::VectorXd tau_cmd_;

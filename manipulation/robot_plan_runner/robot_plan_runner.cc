@@ -5,6 +5,7 @@
 #include "drake/manipulation/robot_plan_runner/robot_plan_runner.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
 
+#include "drake/manipulation/robot_plan_runner/robot_plans/contact_force_estimator.h"
 #include "drake/systems/framework/diagram_builder.h"
 #include "drake/systems/framework/leaf_system.h"
 #include "drake/systems/primitives/demultiplexer.h"
@@ -30,6 +31,13 @@ RobotPlanRunner::RobotPlanRunner(bool is_discrete, double control_period_sec) {
   builder.ExportInput(passthrough_plan_data->get_input_port(), "plan_data");
   passthrough_plan_data->set_name("PassThrough_plan_data");
 
+  auto passthrough_contact_info =
+      builder.template AddSystem<systems::PassThrough>(
+          Value<robot_plans::ContactInfo>{});
+  builder.ExportInput(passthrough_contact_info->get_input_port(),
+                      "contact_info");
+  passthrough_contact_info->set_name("PassThrough_contact_info");
+
   auto passthrough_q_measured =
       builder.template AddSystem<systems::PassThrough>(num_positions);
   builder.ExportInput(passthrough_q_measured->get_input_port(),
@@ -50,7 +58,7 @@ RobotPlanRunner::RobotPlanRunner(bool is_discrete, double control_period_sec) {
 
   // Add controller systems in the order they appear in PlanType.
   std::vector<RobotController*> controllers;
-  for(int i = 1; i < static_cast<int>(PlanType::kLastElement); i++) {
+  for (int i = 1; i < static_cast<int>(PlanType::kLastElement); i++) {
     auto controller = builder.template AddSystem<RobotController>(
         static_cast<PlanType>(i), control_period_sec);
     controllers.push_back(controller);
@@ -65,6 +73,8 @@ RobotPlanRunner::RobotPlanRunner(bool is_discrete, double control_period_sec) {
     // connection to passthroughs
     builder.Connect(passthrough_plan_data->get_output_port(),
                     controller->GetInputPort("plan_data"));
+    builder.Connect(passthrough_contact_info->get_output_port(),
+                    controller->GetInputPort("contact_info"));
     builder.Connect(passthrough_q_measured->get_output_port(),
                     controller->GetInputPort("q"));
     builder.Connect(passthrough_v_estimated->get_output_port(),

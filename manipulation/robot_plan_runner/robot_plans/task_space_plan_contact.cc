@@ -56,7 +56,8 @@ void TaskSpacePlanContact::Step(
     const Eigen::Ref<const Eigen::VectorXd>& v,
     const Eigen::Ref<const Eigen::VectorXd>& tau_external,
     double control_period, double t, const PlanData& plan_data,
-    EigenPtr<Eigen::VectorXd> q_cmd, EigenPtr<Eigen::VectorXd> tau_cmd) const {
+    const robot_plans::ContactInfo&, EigenPtr<Eigen::VectorXd> q_cmd,
+    EigenPtr<Eigen::VectorXd> tau_cmd) const {
   this->check_plan_type(plan_data);
 
   // Update q and v in plant_context_, which is owned by this class.

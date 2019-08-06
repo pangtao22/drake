@@ -42,6 +42,7 @@ class PlanRunnerHardwareInterface {
   std::unique_ptr<systems::Diagram<double>> diagram_;
   std::unique_ptr<lcm::DrakeLcm> owned_lcm_;
   systems::lcm::LcmSubscriberSystem* iiwa_status_sub_;
+  systems::lcm::LcmSubscriberSystem* contact_info_sub_;
   robot_plan_runner::PlanSender* plan_sender_;
 };
 

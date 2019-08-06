@@ -21,6 +21,7 @@ class TaskSpacePlanContact : public TaskSpacePlan {
             const Eigen::Ref<const Eigen::VectorXd>& v,
             const Eigen::Ref<const Eigen::VectorXd>& tau_external,
             double control_period, double t, const PlanData& plan_data,
+            const robot_plans::ContactInfo& contact_info,
             EigenPtr<Eigen::VectorXd> q_cmd,
             EigenPtr<Eigen::VectorXd> tau_cmd) const override;
 

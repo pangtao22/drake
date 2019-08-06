@@ -10,7 +10,6 @@ using Eigen::VectorXd;
 using std::cout;
 using std::endl;
 
-
 TaskSpacePlan::TaskSpacePlan()
     : PlanBase(PlanType::kTaskSpacePlan, 7),
       plant_(std::make_unique<multibody::MultibodyPlant<double>>()),
@@ -48,7 +47,9 @@ void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
                          const Eigen::Ref<const Eigen::VectorXd>& v,
                          const Eigen::Ref<const Eigen::VectorXd>&,
                          double control_period, double t,
-                         const PlanData& plan_data, EigenPtr<VectorXd> q_cmd,
+                         const PlanData& plan_data,
+                         const robot_plans::ContactInfo&,
+                         EigenPtr<VectorXd> q_cmd,
                          EigenPtr<VectorXd> tau_cmd) const {
   this->check_plan_type(plan_data);
 

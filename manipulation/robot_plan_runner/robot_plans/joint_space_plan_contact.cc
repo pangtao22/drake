@@ -29,6 +29,7 @@ void JointSpacePlanContact::Step(
     const Eigen::Ref<const Eigen::VectorXd>&,
     const Eigen::Ref<const Eigen::VectorXd>& tau_external,
     double control_period, double t, const PlanData& plan_data,
+    const robot_plans::ContactInfo& contact_info,
     EigenPtr<Eigen::VectorXd> q_cmd, EigenPtr<Eigen::VectorXd> tau_cmd) const {
   DRAKE_THROW_UNLESS(plan_data.plan_type == plan_type_);
 
@@ -42,17 +43,17 @@ void JointSpacePlanContact::Step(
 
   // Estimate contact force, assuming the contact is at the center of the
   // sphere.
-  const Eigen::Vector3d pC_T(0, 0, 0.075);
-  ContactInfo contact_info;
-  contact_info.num_contacts = 1;
-  contact_info.contact_link_idx.push_back(7);
-  contact_info.positions.push_back(pC_T);
+//  const Eigen::Vector3d pC_T(0, 0, 0.075);
+//  ContactInfo contact_info;
+//  contact_info.num_contacts = 1;
+//  contact_info.contact_link_idx.push_back(7);
+//  contact_info.positions.push_back(pC_T);
 
   const Eigen::Vector3d f_contact =
       contact_force_estimator_->UpdateContactForce(contact_info, q,
                                                    tau_external);
 
-  const double f_norm_threshold = 10;
+  const double f_norm_threshold = 8;
   const double f_norm = f_contact.norm();
 
   if (f_norm > f_norm_threshold) {

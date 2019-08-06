@@ -13,6 +13,7 @@ namespace drake {
 namespace manipulation {
 namespace robot_plan_runner {
 
+using robot_plans::ContactInfo;
 using robot_plans::PlanData;
 using robot_plans::PlanType;
 using systems::BasicVector;
@@ -59,6 +60,9 @@ RobotController::RobotController(PlanType plan_type, double control_period)
   input_port_idx_plan_data_ =
       this->DeclareAbstractInputPort("plan_data", Value<PlanData>{})
           .get_index();
+  input_port_idx_contact_info_ =
+      this->DeclareAbstractInputPort("contact_info", Value<ContactInfo>{})
+          .get_index();
 
   // output port
   this->DeclareVectorOutputPort("q_tau_cmd",
@@ -76,9 +80,14 @@ robot_plans::PlanType RobotController::get_plan_type() {
 void RobotController::CalcCommands(const systems::Context<double>& context,
                                    BasicVector<double>* q_tau_cmd) const {
   // Evaluate current PlanData from input port.
-  const AbstractValue* plan_data_ptr =
-      this->EvalAbstractInput(context, input_port_idx_plan_data_);
-  const auto& plan_data = plan_data_ptr->get_value<PlanData>();
+  //  const AbstractValue* plan_data_ptr =
+  //      this->EvalAbstractInput(context, input_port_idx_plan_data_);
+  //  const auto& plan_data = plan_data_ptr->get_value<PlanData>();
+
+  const auto& plan_data =
+      this->get_input_port(input_port_idx_plan_data_).Eval<PlanData>(context);
+  const auto& contact_info = this->get_input_port(input_port_idx_contact_info_)
+                                 .Eval<ContactInfo>(context);
 
   // Evaluate robot state input ports.
   const auto& q = this->get_input_port(input_port_idx_q_).Eval(context);
@@ -94,7 +103,8 @@ void RobotController::CalcCommands(const systems::Context<double>& context,
   }
 
   double t = context.get_time() - t_start_current_;
-  plan_->Step(q, v, tau_ext, control_period_, t, plan_data, &q_cmd_, &tau_cmd_);
+  plan_->Step(q, v, tau_ext, control_period_, t, plan_data, contact_info,
+              &q_cmd_, &tau_cmd_);
 
   // Write output to its pointer.
   Eigen::VectorBlock<VectorX<double>> q_tau_vector =

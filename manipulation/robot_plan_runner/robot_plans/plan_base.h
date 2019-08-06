@@ -7,6 +7,7 @@
 #include "drake/common/drake_optional.h"
 #include "drake/common/trajectories/piecewise_polynomial.h"
 #include "drake/common/trajectories/piecewise_quaternion.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/contact_force_estimator.h"
 
 namespace drake {
 namespace manipulation {
@@ -88,6 +89,7 @@ class PlanBase {
                     const Eigen::Ref<const Eigen::VectorXd>& v,
                     const Eigen::Ref<const Eigen::VectorXd>& tau_external,
                     double control_period, double t, const PlanData& plan_data,
+                    const robot_plans::ContactInfo& contact_info,
                     EigenPtr<Eigen::VectorXd> q_commanded,
                     EigenPtr<Eigen::VectorXd> tau_commanded) const = 0;
   PlanType get_plan_type() const { return plan_type_; };

@@ -14,6 +14,7 @@ void JointSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd> &,
                           double,
                           double t,
                           const PlanData &plan_data,
+                          const robot_plans::ContactInfo&,
                           EigenPtr<VectorXd> q_cmd,
                           EigenPtr<VectorXd> tau_cmd) const {
   DRAKE_THROW_UNLESS(plan_data.plan_type == plan_type_);

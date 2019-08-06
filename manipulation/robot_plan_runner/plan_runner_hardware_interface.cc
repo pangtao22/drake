@@ -1,8 +1,10 @@
 #include <fstream>
 
+#include "drake/lcmt_contact_info.hpp"
 #include "drake/lcmt_iiwa_command.hpp"
 #include "drake/manipulation/kuka_iiwa/iiwa_command_sender.h"
 #include "drake/manipulation/kuka_iiwa/iiwa_status_receiver.h"
+#include "drake/manipulation/robot_plan_runner/contact_location_estimator.h"
 #include "drake/manipulation/robot_plan_runner/plan_runner_hardware_interface.h"
 #include "drake/manipulation/robot_plan_runner/robot_plan_runner.h"
 #include "drake/systems/analysis/simulator.h"
@@ -14,9 +16,9 @@ namespace drake {
 namespace manipulation {
 namespace robot_plan_runner {
 
+using robot_plans::PlanData;
 using std::cout;
 using std::endl;
-using robot_plans::PlanData;
 
 PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
     const std::vector<PlanData>& plan_list)
@@ -24,9 +26,8 @@ PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
   // create diagram system.
   systems::DiagramBuilder<double> builder;
 
-  auto lcm =
-      builder.template AddSystem<systems::lcm::LcmInterfaceSystem>(
-          owned_lcm_.get());
+  auto lcm = builder.template AddSystem<systems::lcm::LcmInterfaceSystem>(
+      owned_lcm_.get());
 
   // Receive iiwa status.
   iiwa_status_sub_ = builder.AddSystem(
@@ -66,6 +67,19 @@ PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
   builder.Connect(plan_runner->GetOutputPort("iiwa_torque_command"),
                   iiwa_command_sender->get_torque_input_port());
 
+  // Contact force estimator.
+  contact_info_sub_ = builder.template AddSystem(
+      systems::lcm::LcmSubscriberSystem::Make<drake::lcmt_contact_info>(
+          "CONTACT_INFO", lcm));
+  auto contact_location_estimator =
+      builder.template AddSystem<ContactLocationEstimator>();
+
+  builder.Connect(
+      contact_info_sub_->get_output_port(),
+      contact_location_estimator->GetInputPort("lcmt_contact_info"));
+  builder.Connect(
+      contact_location_estimator->GetOutputPort("contact_info"),
+      plan_runner->GetInputPort("contact_info"));
   diagram_ = builder.Build();
 };
 
@@ -81,9 +95,8 @@ void PlanRunnerHardwareInterface::SaveGraphvizStringToFile(
 lcmt_iiwa_status PlanRunnerHardwareInterface::GetCurrentIiwaStatus() {
   // create diagram system.
   systems::DiagramBuilder<double> builder;
-  auto lcm =
-      builder.template AddSystem<systems::lcm::LcmInterfaceSystem>(new
-      lcm::DrakeLcm());
+  auto lcm = builder.template AddSystem<systems::lcm::LcmInterfaceSystem>(
+      new lcm::DrakeLcm());
 
   // Receive iiwa status.
   auto iiwa_status_sub = builder.template AddSystem(
@@ -108,13 +121,15 @@ void PlanRunnerHardwareInterface::Run(double realtime_rate) {
   simulator.set_publish_every_time_step(false);
   simulator.set_target_realtime_rate(realtime_rate);
 
+  WaitForNewMessage(owned_lcm_.get(), contact_info_sub_);
+
   // Update the abstract state of iiwa status lcm subscriber system, so that
   // actual robot state can be obtained when its output ports are evaluated at
   // initialization.
   auto& iiwa_status_sub_context = diagram_->GetMutableSubsystemContext(
       *iiwa_status_sub_, &simulator.get_mutable_context());
-  auto& state = iiwa_status_sub_context
-      .get_mutable_abstract_state<lcmt_iiwa_status>(0);
+  auto& state =
+      iiwa_status_sub_context.get_mutable_abstract_state<lcmt_iiwa_status>(0);
   state = this->GetCurrentIiwaStatus();
 
   double t_total = plan_sender_->get_all_plans_duration();
@@ -122,9 +137,8 @@ void PlanRunnerHardwareInterface::Run(double realtime_rate) {
   simulator.AdvanceTo(t_total);
 }
 
-void WaitForNewMessage(
-    drake::lcm::DrakeLcmInterface* const lcm_ptr,
-    systems::lcm::LcmSubscriberSystem* const lcm_sub_ptr)  {
+void WaitForNewMessage(drake::lcm::DrakeLcmInterface* const lcm_ptr,
+                       systems::lcm::LcmSubscriberSystem* const lcm_sub_ptr) {
   auto wait_for_new_message = [lcm_ptr](const auto& lcm_sub) {
     std::cout << "Waiting for " << lcm_sub.get_channel_name() << " message..."
               << std::flush;
