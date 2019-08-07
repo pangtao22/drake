@@ -1,7 +1,7 @@
 #include <fstream>
 
-#include "drake/manipulation/robot_plan_runner/contact_location_estimator.h"
 #include "drake/lcmt_contact_info.hpp"
+#include "drake/manipulation/robot_plan_runner/contact_location_estimator.h"
 
 namespace drake {
 namespace manipulation {
@@ -94,7 +94,18 @@ void ContactLocationEstimator::UpdateContactInfo(
     contact_position_filter_->reset_state();
     contact_info.contact_link_idx[0] = contact_info_msg.link_indices[0];
   }
-  contact_position_filter_->Update(contact_info_msg.position[0]);
+
+  bool is_nan = false;
+  const auto& position = contact_info_msg.position[0];
+  for (int i = 0; i < 3; i++) {
+    if (std::isnan(position[i])) {
+      is_nan = true;
+      break;
+    }
+  }
+  if (!is_nan) {
+    contact_position_filter_->Update(position);
+  }
   contact_info.positions[0] = contact_position_filter_->get_current_x();
 }
 
@@ -148,8 +159,8 @@ void SaveLogToFile(systems::SignalLogger<T>* const logger,
   file_time.close();
 }
 
-template void SaveLogToFile<double> (systems::SignalLogger<double>* const,
-                                     const std::string&);
+template void SaveLogToFile<double>(systems::SignalLogger<double>* const,
+                                    const std::string&);
 
 }  // namespace robot_plan_runner
 }  // namespace manipulation

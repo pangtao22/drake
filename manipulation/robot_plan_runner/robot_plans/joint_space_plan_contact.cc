@@ -8,7 +8,7 @@ namespace robot_plans {
 
 JointSpacePlanContact::JointSpacePlanContact(int num_positions)
     : PlanBase(PlanType::kJointSpacePlanContact, num_positions),
-      velocity_cost_weight_(0.2) {
+      velocity_cost_weight_(0.2), positive_v_count_(0) {
   DRAKE_THROW_UNLESS(solver_.available());
 
   contact_force_estimator_ =
@@ -43,20 +43,24 @@ void JointSpacePlanContact::Step(
 
   // Estimate contact force, assuming the contact is at the center of the
   // sphere.
-//  const Eigen::Vector3d pC_T(0, 0, 0.075);
-//  ContactInfo contact_info;
-//  contact_info.num_contacts = 1;
-//  contact_info.contact_link_idx.push_back(7);
-//  contact_info.positions.push_back(pC_T);
+  //  const Eigen::Vector3d pC_T(0, 0, 0.075);
+  //  ContactInfo contact_info;
+  //  contact_info.num_contacts = 1;
+  //  contact_info.contact_link_idx.push_back(7);
+  //  contact_info.positions.push_back(pC_T);
 
   const Eigen::Vector3d f_contact =
       contact_force_estimator_->UpdateContactForce(contact_info, q,
                                                    tau_external);
 
-  const double f_norm_threshold = 8;
+  const double f_norm_threshold = 10;
   const double f_norm = f_contact.norm();
 
   if (f_norm > f_norm_threshold) {
+    const Eigen::RowVectorXd J_nc =
+        contact_force_estimator_->CalcContactJacobian();
+    const double dx_along_f = (J_nc * dq_ref)[0];
+
     // saturate the norm of dq_ref.
     const double dq_ref_norm = dq_ref.norm();
     const double dq_ref_norm_threshold = 0.04;
@@ -64,19 +68,25 @@ void JointSpacePlanContact::Step(
       dq_ref *= dq_ref_norm_threshold / dq_ref_norm;
     }
 
-    const Eigen::RowVectorXd J_nc =
-        contact_force_estimator_->CalcContactJacobian();
+    if (dx_along_f > 0) {
+      positive_v_count_++;
+    } else {
+      positive_v_count_ = 0;
+    }
 
-    const double f_desired = f_norm_threshold * 1.5;
+    if (positive_v_count_ < 5) {
+      const double f_desired = f_norm_threshold * 1.5;
 
-    Eigen::VectorXd J_nc_pinv = J_nc.transpose() / std::pow(J_nc.norm(), 2);
-    SetSmallValuesToZero(&J_nc_pinv, 1e-13);
+      Eigen::VectorXd J_nc_pinv = J_nc.transpose() / std::pow(J_nc.norm(), 2);
+      SetSmallValuesToZero(&J_nc_pinv, 1e-13);
 
-    prog->AddLinearEqualityConstraint(
-        (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
-        dq);
-    prog->AddLinearConstraint(J_nc / control_period,
-                              -std::numeric_limits<double>::infinity(), 0, dq);
+      prog->AddLinearEqualityConstraint(
+          (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(),
+          -f_desired, dq);
+      prog->AddLinearConstraint(J_nc / control_period,
+                                -std::numeric_limits<double>::infinity(), 0,
+                                dq);
+    }
   }
 
   // Error on tracking error

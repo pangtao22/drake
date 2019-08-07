@@ -31,6 +31,8 @@ class JointSpacePlanContact : public PlanBase {
   std::unique_ptr<ContactForceEstimator> contact_force_estimator_;
   std::unique_ptr<solvers::MathematicalProgramResult> prog_result_;
   solvers::GurobiSolver solver_;
+
+  mutable int positive_v_count_{0};
 };
 
 }  // namespace robot_plans
