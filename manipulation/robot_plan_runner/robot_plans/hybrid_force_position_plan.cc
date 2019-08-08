@@ -30,13 +30,14 @@ HybridForcePositionPlan::HybridForcePositionPlan()
   prog_result_ = std::make_unique<solvers::MathematicalProgramResult>();
 }
 
-void HybridForcePositionPlan::Step(
-    const Eigen::Ref<const Eigen::VectorXd>& q,
-    const Eigen::Ref<const Eigen::VectorXd>& v,
-    const Eigen::Ref<const Eigen::VectorXd>& tau_external,
-    double control_period, double t, const PlanData& plan_data,
-    const robot_plans::ContactInfo&, EigenPtr<Eigen::VectorXd> q_cmd,
-    EigenPtr<Eigen::VectorXd> tau_cmd) const {
+void HybridForcePositionPlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
+                                   const Eigen::Ref<const Eigen::VectorXd>& v,
+                                   const Eigen::Ref<const Eigen::VectorXd>&,
+                                   double control_period, double t,
+                                   const PlanData& plan_data,
+                                   const robot_plans::ContactInfo&,
+                                   EigenPtr<Eigen::VectorXd> q_cmd,
+                                   EigenPtr<Eigen::VectorXd> tau_cmd) const {
   DRAKE_THROW_UNLESS(plan_data.plan_type == plan_type_);
 
   // Update q and v in plant_context_, which is owned by this class.
@@ -120,7 +121,7 @@ void HybridForcePositionPlan::Step(
 
   // calculate dq_force
   f_contact_ = (1 - f_contact_growth_rate_) * f_contact_ +
-      f_contact_growth_rate_ * f_contact_desired_;
+               f_contact_growth_rate_ * f_contact_desired_;
   const Eigen::VectorXd dq_force =
       (-Jf.transpose().array() / joint_stiffness_ * f_contact_).matrix();
 

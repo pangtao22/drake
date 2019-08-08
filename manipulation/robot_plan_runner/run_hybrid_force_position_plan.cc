@@ -60,7 +60,7 @@ int run_plan() {
   plan1.plan_type = PlanType ::kHybridForcePositionPlan;
 
   PlanData::EeData ee_data;
-  ee_data.p_ToQ_T << 0, 0, 0.125;
+  ee_data.p_ToQ_T << 0, 0.05 / std::sqrt(2), 0.075 + 0.05 / std::sqrt(2);
 
   Eigen::MatrixXd xyz_knots(2, 3);
   xyz_knots.col(0) << 0, 0;
@@ -102,7 +102,7 @@ int run_plan() {
   Eigen::MatrixXd q_knots(nq, 2);
   q_knots.col(0) = CalcStartingJointAngles(
       RotationMatrixd(Q_WT),
-      Eigen::Vector3d(0.40, 0, 0.02),
+      Eigen::Vector3d(0.40, 0, 0.04),
       ee_data.p_ToQ_T,
       q_initial_guess);
 
