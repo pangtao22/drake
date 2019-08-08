@@ -2,7 +2,7 @@
 #include <unordered_map>
 
 #include "drake/manipulation/robot_plan_runner/controller_system.h"
-
+#include "drake/manipulation/robot_plan_runner/robot_plans/hybrid_force_position_plan.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/joint_space_plan.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/joint_space_plan_contact.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan.h"
@@ -38,6 +38,10 @@ RobotController::RobotController(PlanType plan_type, double control_period)
     case PlanType::kTaskSpacePlanContact:
       this->set_name("TaskSpacePlanContactController");
       plan_ = std::make_unique<robot_plans::TaskSpacePlanContact>();
+      break;
+    case PlanType::kHybridForcePositionPlan:
+      this->set_name("HybridForcePositionController");
+      plan_ = std::make_unique<robot_plans::HybridForcePositionPlan>();
       break;
     case PlanType::kEmptyPlan:
       throw std::runtime_error(

@@ -95,14 +95,14 @@ int run_plan() {
 
   // L7 (link 7) orientation.
   // End effector making contact with table.
-//  auto R_WL7 = math::RollPitchYawd(0, M_PI * 1.25, 0).ToRotationMatrix();
-//  const Eigen::Vector3d p_WQ_start(0.40, -0.38 + 0.10, 0.03);
-//  const Eigen::Vector3d delta_xyz(0, -0.20, -0.15);
-//  Eigen::VectorXd q_initial_guess(nq);
-//  q_initial_guess << -0.5095, 1.1356, -0.0800, -1.4893, -0.3389, 1.2274,
-//      -0.3360;
+  //  auto R_WL7 = math::RollPitchYawd(0, M_PI * 1.25, 0).ToRotationMatrix();
+  //  const Eigen::Vector3d p_WQ_start(0.40, -0.38 + 0.10, 0.03);
+  //  const Eigen::Vector3d delta_xyz(0, -0.20, -0.15);
+  //  Eigen::VectorXd q_initial_guess(nq);
+  //  q_initial_guess << -0.5095, 1.1356, -0.0800, -1.4893, -0.3389, 1.2274,
+  //      -0.3360;
 
-  auto R_WL7 = math::RollPitchYawd(0, M_PI /3, 0).ToRotationMatrix();
+  auto R_WL7 = math::RollPitchYawd(0, M_PI / 3, 0).ToRotationMatrix();
   const Eigen::Vector3d p_WQ_start(0.60, -0.38 + 0.10, 0.17);
   const Eigen::Vector3d delta_xyz(0, -0.22, -0.12);
   Eigen::VectorXd q_initial_guess(nq);
@@ -135,7 +135,8 @@ int run_plan() {
 
   // Construct plan runner hardware interface.
   auto plan_runner =
-      manipulation::robot_plan_runner::PlanRunnerHardwareInterface(plan_list);
+      manipulation::robot_plan_runner::PlanRunnerHardwareInterface(plan_list,
+                                                                   true);
 
   plan_runner.SaveGraphvizStringToFile();
 

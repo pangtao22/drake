@@ -43,8 +43,8 @@ class TaskSpacePlan : public PlanBase {
   mutable Eigen::MatrixXd Jv_WTq_;
 
   // gains
-  const Eigen::Array3d kp_translation;
-  const Eigen::Array3d kp_rotation;
+  const Eigen::Array3d kp_translation_;
+  const Eigen::Array3d kp_rotation_;
 
   const int task_dimension_;
 };

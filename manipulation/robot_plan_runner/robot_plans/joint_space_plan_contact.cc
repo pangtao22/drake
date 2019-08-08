@@ -8,7 +8,7 @@ namespace robot_plans {
 
 JointSpacePlanContact::JointSpacePlanContact(int num_positions)
     : PlanBase(PlanType::kJointSpacePlanContact, num_positions),
-      velocity_cost_weight_(0.2), positive_v_count_(0) {
+      positive_v_count_(0) {
   DRAKE_THROW_UNLESS(solver_.available());
 
   contact_force_estimator_ =

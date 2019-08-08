@@ -5,6 +5,7 @@
 #include "drake/lcm/drake_lcm.h"
 #include "drake/lcmt_iiwa_status.hpp"
 #include "drake/manipulation/robot_plan_runner/plan_sender.h"
+#include "drake/manipulation/robot_plan_runner/robot_plan_runner.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
 #include "drake/systems/framework/diagram_builder.h"
 #include "drake/systems/lcm/lcm_subscriber_system.h"
@@ -20,7 +21,8 @@ namespace robot_plan_runner {
 class PlanRunnerHardwareInterface {
  public:
   explicit PlanRunnerHardwareInterface(
-      const std::vector<robot_plans::PlanData>&);
+      const std::vector<robot_plans::PlanData>&,
+      bool listen_to_contact_info=false);
   /*
    * Saves the graphviz string which describes this system to a file.
    */
@@ -45,11 +47,14 @@ class PlanRunnerHardwareInterface {
   systems::lcm::LcmSubscriberSystem* iiwa_status_sub_{nullptr};
   systems::lcm::LcmSubscriberSystem* contact_info_sub_{nullptr};
   robot_plan_runner::PlanSender* plan_sender_{nullptr};
+  robot_plan_runner::RobotPlanRunner* plan_runner_{nullptr};
 
   // loggers for contact_info
   systems::SignalLogger<double>* logger_num_contacts_{nullptr};
   systems::SignalLogger<double>* logger_contact_link_{nullptr};
   systems::SignalLogger<double>* logger_contact_position_{nullptr};
+
+  const bool listen_to_contact_info_;
 };
 
 /*

@@ -18,6 +18,7 @@ drake_cc_package_library(
         ":plan_base",
         ":task_space_plan",
         ":task_space_plan_contact",
+        ":hybrid_force_position_plan",
     ],
 )
 
@@ -79,6 +80,20 @@ drake_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":plan_base",
+        "//math:geometric_transform",
+        "//solvers:gurobi_solver",
+        "//solvers:mathematical_program_lite",
+        "//solvers:solve",
+    ],
+)
+
+drake_cc_library(
+    name = "hybrid_force_position_plan",
+    srcs = ["hybrid_force_position_plan.cc"],
+    hdrs = ["hybrid_force_position_plan.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":task_space_plan",
         "//math:geometric_transform",
         "//solvers:gurobi_solver",
         "//solvers:mathematical_program_lite",

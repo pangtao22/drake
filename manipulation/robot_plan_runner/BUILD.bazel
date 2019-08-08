@@ -179,6 +179,15 @@ drake_cc_binary(
     ],
 )
 
+drake_cc_binary(
+    name = "run_hybrid_force_position_plan",
+    srcs = ["run_hybrid_force_position_plan.cc"],
+    deps = [
+        ":plan_runner_hardware_interface",
+        "//math",
+    ]
+)
+
 install_data()
 
 add_lint_tests()

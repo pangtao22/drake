@@ -29,6 +29,7 @@ enum class PlanType {
   kTaskSpacePlanContact,
   kJointSpacePlan,
   kJointSpacePlanContact,
+  kHybridForcePositionPlan,
   kLastElement
 };
 
@@ -38,7 +39,11 @@ struct PlanData {
   //  1,2,3, ..., as in the case of running simulations, or
   //  the integer timestamp of the robot_plan_t message received.
   long plan_signature{-1};
+
+  // For plans using joint space trajectories.
   optional<trajectories::PiecewisePolynomial<double>> joint_traj;
+
+  // For plans using task space trajectories.
   struct EeData {
     // Coordinates of point Q expressed in frame T (task frame).
     Eigen::Vector3d p_ToQ_T;
@@ -57,17 +62,19 @@ struct PlanData {
   };
   optional<EeData> ee_data;
 
-  double get_duration() const {
-    if (joint_traj.has_value()) {
-      return joint_traj.value().end_time();
-    } else if (ee_data.has_value()) {
-      // TODO(pangtao22): throw if durations of ee_xyz_traj and ee_quat_traj
-      //  are different.
-      return ee_data.value().ee_xyz_traj.end_time();
-    } else {
-      throw std::runtime_error("invalid PlanData.");
-    }
+  // For hybrid force-position plans.
+  struct HybridTaskDefinition {
+    // Coordinates of the three axes of the task frame expressed in world frame.
+    // Each column of C is an axis.
+    Eigen::Matrix3d R_WC;
+    // Indices of the columns of C which are force/motion controlled.
+    std::vector<unsigned int> force_controlled_axes{};
+    std::vector<unsigned int> motion_controlled_axes{};
   };
+  optional<HybridTaskDefinition> hybrid_task_definition;
+
+  // Returns the duration of this plan.
+  double get_duration() const;
 };
 
 /*
