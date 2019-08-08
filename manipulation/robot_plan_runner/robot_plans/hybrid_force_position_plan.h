@@ -26,8 +26,11 @@ class HybridForcePositionPlan : public TaskSpacePlan {
             EigenPtr<Eigen::VectorXd> tau_cmd) const override;
 
  private:
-  Eigen::ArrayXd joint_stiffness_;
   const double velocity_cost_weight_;
+  const double f_contact_growth_rate_;
+  const double f_contact_desired_;
+  mutable double f_contact_;
+  Eigen::ArrayXd joint_stiffness_;
   Eigen::MatrixXd dq_weight_;
 
   std::unique_ptr<solvers::MathematicalProgramResult> prog_result_;

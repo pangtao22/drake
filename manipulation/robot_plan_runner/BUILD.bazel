@@ -185,6 +185,7 @@ drake_cc_binary(
     deps = [
         ":plan_runner_hardware_interface",
         "//math",
+        "//multibody/inverse_kinematics",
     ]
 )
 

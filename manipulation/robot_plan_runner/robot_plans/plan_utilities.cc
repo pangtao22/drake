@@ -47,7 +47,6 @@ void ClipEigenVector(Eigen::VectorXd* const v_ptr, double min, double max) {
   }
 }
 
-
 /*
  *  w_cutoff: cutoff frequency of the low-pass filter on contact force, in
  *  rad/s.

@@ -12,7 +12,11 @@ using Eigen::Vector3d;
 using Eigen::VectorXd;
 
 HybridForcePositionPlan::HybridForcePositionPlan()
-    : TaskSpacePlan(), velocity_cost_weight_(0.1) {
+    : TaskSpacePlan(),
+      velocity_cost_weight_(0.01),
+      f_contact_growth_rate_(0.005 / (1 + 0.005)),
+      f_contact_desired_(10),
+      f_contact_(0) {
   DRAKE_THROW_UNLESS(solver_.available());
   this->set_plan_type(PlanType::kHybridForcePositionPlan);
 
@@ -104,7 +108,7 @@ void HybridForcePositionPlan::Step(
   prog->AddLinearEqualityConstraint(Jf, 0, dq);
 
   // tracking error costs
-  prog->AddL2NormCost(J_translation / control_period, x_dot_desired, dq);
+  prog->AddL2NormCost(Jm / control_period, x_dot_desired, dq);
   prog->AddL2NormCost(J_rotation / control_period, w_desired, dq);
 
   solver_.Solve(*prog, {}, {}, prog_result_.get());
@@ -115,9 +119,10 @@ void HybridForcePositionPlan::Step(
   const Eigen::VectorXd dq_motion = prog_result_->GetSolution(dq);
 
   // calculate dq_force
-  const double f_desired = 0;
+  f_contact_ = (1 - f_contact_growth_rate_) * f_contact_ +
+      f_contact_growth_rate_ * f_contact_desired_;
   const Eigen::VectorXd dq_force =
-      (-Jf.transpose().array() / joint_stiffness_ * f_desired).matrix();
+      (-Jf.transpose().array() / joint_stiffness_ * f_contact_).matrix();
 
   Eigen::VectorXd dq_all = dq_motion + dq_force;
 
