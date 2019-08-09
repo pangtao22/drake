@@ -16,7 +16,8 @@ HybridForcePositionPlan::HybridForcePositionPlan()
       velocity_cost_weight_(0.01),
       f_contact_growth_rate_(0.005 / (1 + 0.005)),
       f_contact_desired_(10),
-      f_contact_(0) {
+      f_contact_ref_(0),
+      f_integrator_state_(0) {
   DRAKE_THROW_UNLESS(solver_.available());
   this->set_plan_type(PlanType::kHybridForcePositionPlan);
 
@@ -28,16 +29,18 @@ HybridForcePositionPlan::HybridForcePositionPlan()
   dq_weight_.diagonal() << 5, 4, 3, 3, 2, 2, 1;
 
   prog_result_ = std::make_unique<solvers::MathematicalProgramResult>();
+
+  contact_force_estimator_ =
+      std::make_unique<ContactForceEstimator>(0.005, 0.5 * 2 * M_PI);
 }
 
-void HybridForcePositionPlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
-                                   const Eigen::Ref<const Eigen::VectorXd>& v,
-                                   const Eigen::Ref<const Eigen::VectorXd>&,
-                                   double control_period, double t,
-                                   const PlanData& plan_data,
-                                   const robot_plans::ContactInfo&,
-                                   EigenPtr<Eigen::VectorXd> q_cmd,
-                                   EigenPtr<Eigen::VectorXd> tau_cmd) const {
+void HybridForcePositionPlan::Step(
+    const Eigen::Ref<const Eigen::VectorXd>& q,
+    const Eigen::Ref<const Eigen::VectorXd>& v,
+    const Eigen::Ref<const Eigen::VectorXd>& tau_external,
+    double control_period, double t, const PlanData& plan_data,
+    const robot_plans::ContactInfo&, EigenPtr<Eigen::VectorXd> q_cmd,
+    EigenPtr<Eigen::VectorXd> tau_cmd) const {
   DRAKE_THROW_UNLESS(plan_data.plan_type == plan_type_);
 
   // Update q and v in plant_context_, which is owned by this class.
@@ -120,10 +123,36 @@ void HybridForcePositionPlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
   const Eigen::VectorXd dq_motion = prog_result_->GetSolution(dq);
 
   // calculate dq_force
-  f_contact_ = (1 - f_contact_growth_rate_) * f_contact_ +
-               f_contact_growth_rate_ * f_contact_desired_;
+  f_contact_ref_ = (1 - f_contact_growth_rate_) * f_contact_ref_ +
+                   f_contact_growth_rate_ * f_contact_desired_;
+
+  ContactInfo contact_info;
+  contact_info.num_contacts = 1;
+  contact_info.contact_link_idx.push_back(7);
+  contact_info.positions.push_back(p_ToQ_T);
+  const Eigen::Vector3d f_contact_C =
+      R_WC.transpose() * contact_force_estimator_->UpdateContactForce(
+                             contact_info, q, tau_external);
+
+  //TODO: it's assumed here that exactly one of the three axes of C is force
+  // controlled.
+  const double f_contact = f_contact_C[force_axes[0]];
+
+  // update integrator states.
+  const double ki = 5;
+  f_integrator_state_ += ki * (f_contact_ref_ - f_contact);
+
+  // Anti-windup.
+  if (f_integrator_state_ > 5) {
+    f_integrator_state_ = 5;
+  } else if (f_integrator_state_ < -5) {
+    f_integrator_state_ = -5;
+  }
+
+  double f_contact_cmd = f_contact_ref_ + f_integrator_state_;
+
   const Eigen::VectorXd dq_force =
-      (-Jf.transpose().array() / joint_stiffness_ * f_contact_).matrix();
+      (-Jf.transpose().array() / joint_stiffness_ * f_contact_cmd).matrix();
 
   Eigen::VectorXd dq_all = dq_motion + dq_force;
 

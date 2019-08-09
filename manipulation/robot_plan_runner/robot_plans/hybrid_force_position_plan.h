@@ -2,6 +2,7 @@
 
 #include <Eigen/Core>
 
+#include "drake/manipulation/robot_plan_runner/robot_plans/contact_force_estimator.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan.h"
 #include "drake/multibody/plant/multibody_plant.h"
 #include "drake/solvers/gurobi_solver.h"
@@ -29,14 +30,16 @@ class HybridForcePositionPlan : public TaskSpacePlan {
   const double velocity_cost_weight_;
   const double f_contact_growth_rate_;
   const double f_contact_desired_;
-  mutable double f_contact_;
+  mutable double f_contact_ref_;
+  mutable double f_integrator_state_;
   Eigen::ArrayXd joint_stiffness_;
   Eigen::MatrixXd dq_weight_;
 
   std::unique_ptr<solvers::MathematicalProgramResult> prog_result_;
   solvers::GurobiSolver solver_;
-};
 
+  std::unique_ptr<ContactForceEstimator> contact_force_estimator_;
+};
 
 }  // namespace robot_plans
 }  // namespace robot_plan_runner
