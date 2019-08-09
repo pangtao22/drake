@@ -102,7 +102,7 @@ int run_plan() {
   Eigen::MatrixXd q_knots(nq, 2);
   q_knots.col(0) = CalcStartingJointAngles(
       RotationMatrixd(Q_WT),
-      Eigen::Vector3d(0.40, 0, 0.04),
+      Eigen::Vector3d(0.40, 0, 0.03),
       ee_data.p_ToQ_T,
       q_initial_guess);
 

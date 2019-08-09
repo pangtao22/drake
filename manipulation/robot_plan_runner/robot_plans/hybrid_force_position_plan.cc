@@ -134,22 +134,26 @@ void HybridForcePositionPlan::Step(
       R_WC.transpose() * contact_force_estimator_->UpdateContactForce(
                              contact_info, q, tau_external);
 
-  //TODO: it's assumed here that exactly one of the three axes of C is force
+  // TODO: it's assumed here that exactly one of the three axes of C is force
   // controlled.
   const double f_contact = f_contact_C[force_axes[0]];
 
-  // update integrator states.
-  const double ki = 5;
-  f_integrator_state_ += ki * (f_contact_ref_ - f_contact);
+  double f_contact_cmd = f_contact_ref_;
 
-  // Anti-windup.
-  if (f_integrator_state_ > 5) {
-    f_integrator_state_ = 5;
-  } else if (f_integrator_state_ < -5) {
-    f_integrator_state_ = -5;
+  if (std::abs(f_contact_ref_ - f_contact_desired_) < 1) {
+    // update integrator states.
+    const double ki = 5;
+    f_integrator_state_ += ki * (f_contact_ref_ - f_contact) * control_period;
+//    std::cout << t << " " << f_contact_ref_ << " " << f_contact << std::endl;
+    // Anti-windup.
+    if (f_integrator_state_ > 5) {
+      f_integrator_state_ = 5;
+    } else if (f_integrator_state_ < -5) {
+      f_integrator_state_ = -5;
+    }
+
+    f_contact_cmd += f_integrator_state_;
   }
-
-  double f_contact_cmd = f_contact_ref_ + f_integrator_state_;
 
   const Eigen::VectorXd dq_force =
       (-Jf.transpose().array() / joint_stiffness_ * f_contact_cmd).matrix();
