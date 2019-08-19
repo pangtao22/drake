@@ -19,6 +19,8 @@ double PlanData::get_duration() const {
     // TODO(pangtao22): throw if durations of ee_xyz_traj and ee_quat_traj
     //  are different.
     return ee_data.value().ee_xyz_traj.end_time();
+  } else if (hybrid_task_definition.has_value()) {
+    return hybrid_task_definition.value().p_WoCo_W_traj.end_time();
   } else {
     throw std::runtime_error("invalid PlanData.");
   }

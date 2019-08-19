@@ -68,8 +68,8 @@ int run_plan() {
   Eigen::Vector3d t_knots1(0, 8, 16);
   task_definition.p_WoCo_W_traj =
       trajectories::PiecewisePolynomial<double>::Cubic(
-          t_knots1, p_WoCo_W_knots, Eigen::VectorXd::Zero(2),
-          Eigen::VectorXd::Zero(2));
+          t_knots1, p_WoCo_W_knots, Eigen::VectorXd::Zero(3),
+          Eigen::VectorXd::Zero(3));
 
   const auto Q_WC = RollPitchYawd(0, 0, 0).ToQuaternion();
   vector<double> t_knots_v{t_knots1[0], t_knots1[1], t_knots1[2]};
