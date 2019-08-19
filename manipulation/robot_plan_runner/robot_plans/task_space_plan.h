@@ -45,8 +45,6 @@ class TaskSpacePlan : public PlanBase {
   // gains
   const Eigen::Array3d kp_translation_;
   const Eigen::Array3d kp_rotation_;
-
-  const int task_dimension_;
 };
 
 }  // namespace robot_plans

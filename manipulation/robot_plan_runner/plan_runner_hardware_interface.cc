@@ -166,6 +166,7 @@ void PlanRunnerHardwareInterface::Run(double realtime_rate) {
   double t_total = plan_sender_->get_all_plans_duration();
   cout << "All plans duration " << t_total << endl;
   simulator.AdvanceTo(t_total);
+//    simulator.AdvanceTo(11.0);
 
   if (listen_to_contact_info_) {
     // Save logs to disk.

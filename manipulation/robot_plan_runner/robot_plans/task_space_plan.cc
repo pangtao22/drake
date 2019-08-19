@@ -14,16 +14,15 @@ TaskSpacePlan::TaskSpacePlan()
     : PlanBase(PlanType::kTaskSpacePlan, 7),
       plant_(std::make_unique<multibody::MultibodyPlant<double>>()),
       kp_translation_(Eigen::Array3d(150, 150, 150)),
-      kp_rotation_(Eigen::Array3d(50, 50, 50)),
-      task_dimension_(6) {
+      kp_rotation_(Eigen::Array3d(50, 50, 50)) {
   // Constructs MultibodyPlant of iiwa7, which is used for Jacobian
   // calculations.
   robot_model_ = SetupIiwaControllerPlant(plant_.get());
 
   plant_context_ = plant_->CreateDefaultContext();
   task_frame_idx_ = plant_->GetFrameByName("iiwa_link_7").index();
-  Jv_WTq_.resize(task_dimension_, num_positions_);
-  x_dot_desired_.resize(task_dimension_);
+  Jv_WTq_.resize(6, num_positions_);
+  x_dot_desired_.resize(6);
 };
 
 void TaskSpacePlan::UpdatePositionError(

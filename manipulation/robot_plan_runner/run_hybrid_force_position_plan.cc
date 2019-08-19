@@ -62,8 +62,8 @@ int run_plan() {
   PlanData::HybridTaskDefinition task_definition;
 
   Eigen::MatrixXd p_WoCo_W_knots(3, 3);
-  p_WoCo_W_knots.col(0) << 0.40, 0, 0;
-  p_WoCo_W_knots.col(2) << 0.40, -0.20, 0;
+  p_WoCo_W_knots.col(0) << 0.40, 0, 0.03;
+  p_WoCo_W_knots.col(2) << 0.40, -0.2, 0.03;
   p_WoCo_W_knots.col(1) = (p_WoCo_W_knots.col(0) + p_WoCo_W_knots.col(2)) / 2;
   Eigen::Vector3d t_knots1(0, 8, 16);
   task_definition.p_WoCo_W_traj =
@@ -105,9 +105,9 @@ int run_plan() {
       -0.3055;
 
   Eigen::MatrixXd q_knots(nq, 2);
-  const auto Q_WT =
+  const auto Q_WTr =
       task_definition.Q_WC_traj.value(0) * task_definition.Q_CTr;
-  q_knots.col(0) = CalcStartingJointAngles(RotationMatrixd(Q_WT),
+  q_knots.col(0) = CalcStartingJointAngles(RotationMatrixd(Q_WTr),
                                            Eigen::Vector3d(0.40, 0, 0.03),
                                            task_definition.p_ToP_T,
                                            q_initial_guess);

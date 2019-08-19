@@ -10,6 +10,9 @@ namespace robot_plans {
 using Eigen::MatrixXd;
 using Eigen::Vector3d;
 using Eigen::VectorXd;
+using std::cout;
+using std::endl;
+using math::RotationMatrixd;
 
 HybridForcePositionPlan::HybridForcePositionPlan()
     : PlanBase(PlanType::kHybridForcePositionPlan, 7),
@@ -59,6 +62,11 @@ void HybridForcePositionPlan::Step(
   const auto& p_CoPr_C = task_def.p_CoPr_C;
   const auto& Q_CTr = task_def.Q_CTr;
 
+  cout << endl << "t: " << t << endl;
+  cout << "p_ToP_T\n" << p_ToP_T << endl;
+  cout << "p_CoPr_C\n" << p_CoPr_C << endl;
+  cout << "Q_CTr\n" << Q_CTr.toRotationMatrix() << endl;
+
   const auto X_WT =
       plant_->CalcRelativeTransform(*plant_context_, plant_->world_frame(),
                                     plant_->get_frame(task_frame_idx_));
@@ -68,34 +76,48 @@ void HybridForcePositionPlan::Step(
   // Q_CT
   const auto Q_WT = X_WT.rotation().ToQuaternion();
   const auto Q_CW = task_def.Q_WC_traj.orientation(t).inverse();
+  const auto R_CW = Q_CW.toRotationMatrix();
   const auto Q_CT = Q_CW * Q_WT;
+
+  cout << "R_CW\n" << R_CW << endl;
 
   // p_CoP_C
   const auto p_WoP_W = X_WT * p_ToP_T;
   const auto p_WoCo_W = task_def.p_WoCo_W_traj.value(t);
   const auto p_CoP_C = Q_CW * (p_WoP_W - p_WoCo_W);
 
+  cout << "p_WoP_W\n" << p_WoP_W << endl;
+  cout << "p_WoCo_W\n" << p_WoCo_W << endl;
+  cout << "p_CoP_C\n" << p_CoP_C << endl;
+
   // Update position error.
   const auto p_PPr_C = p_CoPr_C - p_CoP_C;
 
+  cout << "p_PPr_C\n" << p_PPr_C << endl;
+
   // Update orientation error.
   const auto Q_TTr = Q_CT.inverse() * Q_CTr;
+  cout << "Q_TTr\n" << Q_TTr.w() << endl << Q_TTr.vec() << endl;
 
   // Calculate translational velocity in C.
   const Vector3d v_CoPd_C = (kp_translation_ * p_PPr_C.array()).matrix();
 
   // Calculate angular velocity in C.
-  const Vector3d w_CTd_C = (kp_rotation_ * Q_TTr.vec().array()).matrix();
+  const Vector3d w_CTd_C = Q_CT * (kp_rotation_ * Q_TTr.vec().array())
+      .matrix();
 
   VectorXd V_C_TP_C_des(6);
-  V_C_TP_C_des.head(3) = w_CTd_C;
+  V_C_TP_C_des.head(3) = - w_CTd_C;
   V_C_TP_C_des.tail(3) = v_CoPd_C;
+
+  cout << "V_C_TP_C_des\n" << V_C_TP_C_des << endl;
 
   // Joacbians
   MatrixXd Jc(6, num_positions_);
-  const auto R_CW = Q_CW.toRotationMatrix();
   Jc.topRows(3) = R_CW * Jv_WTq_.topRows(3);
   Jc.bottomRows(3) = R_CW * Jv_WTq_.bottomRows(3);
+
+  cout << "Jc\n" << Jc << endl;
 
 
   // optimization for the motion component of dq.
@@ -121,7 +143,7 @@ void HybridForcePositionPlan::Step(
   }
   const Eigen::VectorXd dq_motion = prog_result_->GetSolution(dq);
 
-//  // calculate dq_force
+  // calculate dq_force
   f_contact_ref_ = (1 - f_contact_growth_rate_) * f_contact_ref_ +
                    f_contact_growth_rate_ * f_contact_desired_;
 //
@@ -157,13 +179,17 @@ void HybridForcePositionPlan::Step(
 //  const Eigen::VectorXd dq_force =
 //      (-Jf.transpose().array() / joint_stiffness_ * f_contact_cmd).matrix();
 
-  Eigen::VectorXd dq_all = dq_motion;
+//  Eigen::VectorXd dq_all = dq_motion;
+//
+//  // saturation
+//  const double dq_limit = 1;
+//  ClipEigenVector(&dq_all, -dq_limit, dq_limit);
+//  cout << velocity_cost_weight_ << endl;
+//  auto svd = Jv_WTq_.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
+//  svd.setThreshold(0.01);
+//  const Eigen::VectorXd q_dot_desired = svd.solve(V_C_TP_C_des);
 
-  // saturation
-  const double dq_limit = 10;
-  ClipEigenVector(&dq_all, -dq_limit, dq_limit);
-
-  *q_cmd = q + dq_all;
+  *q_cmd = q + dq_motion;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);
 }
 
