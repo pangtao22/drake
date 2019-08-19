@@ -59,33 +59,38 @@ int run_plan() {
   PlanData plan1;
   plan1.plan_type = PlanType ::kHybridForcePositionPlan;
 
-  PlanData::EeData ee_data;
-  ee_data.p_ToQ_T << 0, 0.05 / std::sqrt(2), 0.075 + 0.05 / std::sqrt(2);
+  PlanData::HybridTaskDefinition task_definition;
 
-  Eigen::MatrixXd xyz_knots(2, 3);
-  xyz_knots.col(0) << 0, 0;
-  xyz_knots.col(2) << 0, -0.20;
-  xyz_knots.col(1) = (xyz_knots.col(0) + xyz_knots.col(2)) / 2;
+  Eigen::MatrixXd p_WoCo_W_knots(3, 3);
+  p_WoCo_W_knots.col(0) << 0.40, 0, 0;
+  p_WoCo_W_knots.col(2) << 0.40, -0.20, 0;
+  p_WoCo_W_knots.col(1) = (p_WoCo_W_knots.col(0) + p_WoCo_W_knots.col(2)) / 2;
   Eigen::Vector3d t_knots1(0, 8, 16);
-  ee_data.ee_xyz_traj = trajectories::PiecewisePolynomial<double>::Cubic(
-      t_knots1, xyz_knots, Eigen::VectorXd::Zero(2), Eigen::VectorXd::Zero(2));
-  ee_data.ee_xyz_dot_traj = ee_data.ee_xyz_traj.derivative(1);
+  task_definition.p_WoCo_W_traj =
+      trajectories::PiecewisePolynomial<double>::Cubic(
+          t_knots1, p_WoCo_W_knots, Eigen::VectorXd::Zero(2),
+          Eigen::VectorXd::Zero(2));
 
-  auto Q_WT = RollPitchYawd(0, M_PI * 1.25, 0).ToQuaternion();
+  const auto Q_WC = RollPitchYawd(0, 0, 0).ToQuaternion();
   vector<double> t_knots_v{t_knots1[0], t_knots1[1], t_knots1[2]};
-  vector<Eigen::Quaterniond> quaternions{Q_WT, Q_WT, Q_WT};
-  ee_data.ee_quat_traj =
+  vector<Eigen::Quaterniond> quaternions{Q_WC, Q_WC, Q_WC};
+  task_definition.Q_WC_traj =
       trajectories::PiecewiseQuaternionSlerp<double>(t_knots_v, quaternions);
 
-  plan1.ee_data = ee_data;
+  task_definition.Q_CTr = RollPitchYawd(0, M_PI * 1.25, 0).ToQuaternion();
 
-  PlanData::HybridTaskDefinition task_definition;
-  // x,y,z axes of C are aligned with those of the world frame.
-  task_definition.R_WC = Eigen::Matrix3d::Identity();
+  task_definition.p_CoPr_C << 0, 0, 0;
 
-  task_definition.force_controlled_axes.push_back(2);   // world z
-  task_definition.motion_controlled_axes.push_back(0);  // world x
-  task_definition.motion_controlled_axes.push_back(1);  // world y
+  task_definition.p_ToP_T << 0, 0.05 / std::sqrt(2),
+      0.075 + 0.05 / std::sqrt(2);
+
+  //  task_definition.force_controlled_axes.push_back(2);   // world z
+  task_definition.motion_controlled_axes.push_back(0);  // world x-rotation
+  task_definition.motion_controlled_axes.push_back(1);  // world y-rotation
+  task_definition.motion_controlled_axes.push_back(2);  // world z-rotation
+  task_definition.motion_controlled_axes.push_back(3);  // world x
+  task_definition.motion_controlled_axes.push_back(4);  // world y
+  task_definition.motion_controlled_axes.push_back(5);  // world z
 
   plan1.hybrid_task_definition = task_definition;
 
@@ -100,11 +105,12 @@ int run_plan() {
       -0.3055;
 
   Eigen::MatrixXd q_knots(nq, 2);
-  q_knots.col(0) = CalcStartingJointAngles(
-      RotationMatrixd(Q_WT),
-      Eigen::Vector3d(0.40, 0, 0.03),
-      ee_data.p_ToQ_T,
-      q_initial_guess);
+  const auto Q_WT =
+      task_definition.Q_WC_traj.value(0) * task_definition.Q_CTr;
+  q_knots.col(0) = CalcStartingJointAngles(RotationMatrixd(Q_WT),
+                                           Eigen::Vector3d(0.40, 0, 0.03),
+                                           task_definition.p_ToP_T,
+                                           q_initial_guess);
 
   q_knots.col(1) = q_knots.col(0);
 

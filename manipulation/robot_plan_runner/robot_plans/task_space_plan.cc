@@ -39,7 +39,7 @@ void TaskSpacePlan::UpdatePositionError(
 
 void TaskSpacePlan::UpdateOrientationError(
     double t, const PlanData& plan_data, const Eigen::Quaterniond& Q_WT) const {
-  const auto Q_WT_ref = plan_data.ee_data.value().ee_quat_traj.value(t);
+  const auto Q_WT_ref = plan_data.ee_data.value().ee_quat_traj.orientation(t);
   Q_TTr_ = Q_WT.inverse() * Q_WT_ref;
 };
 

@@ -93,7 +93,7 @@ drake_cc_library(
     hdrs = ["hybrid_force_position_plan.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":task_space_plan",
+        ":plan_base",
         "//math:geometric_transform",
         "//solvers:gurobi_solver",
         "//solvers:mathematical_program_lite",

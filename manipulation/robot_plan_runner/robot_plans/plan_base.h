@@ -64,9 +64,22 @@ struct PlanData {
 
   // For hybrid force-position plans.
   struct HybridTaskDefinition {
-    // Coordinates of the three axes of the task frame expressed in world frame.
-    // Each column of C is an axis.
-    Eigen::Matrix3d R_WC;
+    // Trajectory of the origin of frame C relative to the origin of world
+    // frame, expressed in world frame.
+    trajectories::PiecewisePolynomial<double> p_WoCo_W_traj;
+
+    // Orientation of the constraint frame relative to world frame.
+    trajectories::PiecewiseQuaternionSlerp<double> Q_WC_traj;
+
+    // Fixed orientation reference of the task frame: Tr, relative to frame C.
+    Eigen::Quaterniond Q_CTr;
+
+    // Fixed position reference of point P relative to frame C.
+    Eigen::Vector3d p_CoPr_C;
+
+    // Coordinates of P in task frame T.
+    Eigen::Vector3d p_ToP_T;
+
     // Indices of the columns of C which are force/motion controlled.
     std::vector<unsigned int> force_controlled_axes{};
     std::vector<unsigned int> motion_controlled_axes{};
