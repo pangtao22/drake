@@ -9,6 +9,7 @@ namespace robot_plans {
 using Eigen::VectorXd;
 using std::cout;
 using std::endl;
+using math::RotationMatrixd;
 
 TaskSpacePlan::TaskSpacePlan()
     : PlanBase(PlanType::kTaskSpacePlan, 7),
@@ -39,7 +40,7 @@ void TaskSpacePlan::UpdatePositionError(
 void TaskSpacePlan::UpdateOrientationError(
     double t, const PlanData& plan_data, const Eigen::Quaterniond& Q_WT) const {
   const auto Q_WT_ref = plan_data.ee_data.value().ee_quat_traj.orientation(t);
-  Q_TTr_ = Q_WT.inverse() * Q_WT_ref;
+  Q_TTr_ = RotationMatrixd(Q_WT.inverse() * Q_WT_ref).ToQuaternion();
 };
 
 void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
