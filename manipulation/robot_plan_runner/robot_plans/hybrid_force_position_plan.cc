@@ -10,21 +10,19 @@ namespace robot_plans {
 using Eigen::MatrixXd;
 using Eigen::Vector3d;
 using Eigen::VectorXd;
+using math::RotationMatrixd;
 using std::cout;
 using std::endl;
-using math::RotationMatrixd;
+typedef Eigen::Matrix<double, 6, 1> Vector6d;
 
 HybridForcePositionPlan::HybridForcePositionPlan()
     : PlanBase(PlanType::kHybridForcePositionPlan, 7),
-      plant_(std::make_unique<multibody::MultibodyPlant<double>>()),
       kp_translation_(Eigen::Array3d(150, 150, 150)),
       kp_rotation_(Eigen::Array3d(100, 100, 100)),
-      velocity_cost_weight_(0.01),
-      f_contact_growth_rate_(0.005 / (1 + 0.005)),
-      f_contact_desired_(10),
-      f_contact_ref_(0) {
-//      f_integrator_state_(0) {
+      velocity_cost_weight_(0.01) {
   DRAKE_THROW_UNLESS(solver_.available());
+
+  plant_ = std::make_unique<multibody::MultibodyPlant<double>>();
   robot_model_ = SetupIiwaControllerPlant(plant_.get());
   plant_context_ = plant_->CreateDefaultContext();
   task_frame_idx_ = plant_->GetFrameByName("iiwa_link_7").index();
@@ -41,15 +39,32 @@ HybridForcePositionPlan::HybridForcePositionPlan()
 
   contact_force_estimator_ =
       std::make_unique<ContactForceEstimator>(0.005, 0.5 * 2 * M_PI);
+  f_contact_ref_ = std::make_unique<FirstOrderSystem<double>>(0, 10, 0.8);
+
+  v_translation_norm_limit_ =
+      std::make_unique<FirstOrderSystem<double>>(0.2, 0.7, 0.3);
 }
 
-void HybridForcePositionPlan::Step(
-    const Eigen::Ref<const Eigen::VectorXd>& q,
-    const Eigen::Ref<const Eigen::VectorXd>& v,
-    const Eigen::Ref<const Eigen::VectorXd>&,
-    double control_period, double t, const PlanData& plan_data,
-    const robot_plans::ContactInfo&, EigenPtr<Eigen::VectorXd> q_cmd,
-    EigenPtr<Eigen::VectorXd> tau_cmd) const {
+Eigen::MatrixXd HybridForcePositionPlan::CalcSelectorMatrix(
+    const std::vector<unsigned int>& axes) const {
+  MatrixXd S;
+  int n = axes.size();
+  S.resize(n, 6);
+  S.setZero();
+  for (int i = 0; i < n; i++) {
+    S(i, axes[i]) = 1;
+  }
+  return S;
+}
+
+void HybridForcePositionPlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
+                                   const Eigen::Ref<const Eigen::VectorXd>& v,
+                                   const Eigen::Ref<const Eigen::VectorXd>&,
+                                   double control_period, double t,
+                                   const PlanData& plan_data,
+                                   const robot_plans::ContactInfo&,
+                                   EigenPtr<Eigen::VectorXd> q_cmd,
+                                   EigenPtr<Eigen::VectorXd> tau_cmd) const {
   DRAKE_THROW_UNLESS(plan_data.plan_type == plan_type_);
 
   // Update q and v in plant_context_, which is owned by this class.
@@ -102,27 +117,41 @@ void HybridForcePositionPlan::Step(
   // Calculate translational velocity in C.
   Vector3d v_CoPd_C = kp_translation_ * p_PPr_C.array();
   const double v_norm = v_CoPd_C.norm();
-  if (v_norm > 0.7) {
-    v_CoPd_C *= 0.7 / v_norm;
+  const double v_norm_limit = v_translation_norm_limit_->value(t);
+  if (v_norm > v_norm_limit) {
+    v_CoPd_C *= v_norm_limit / v_norm;
   }
 
   // Calculate angular velocity in C.
-  const Vector3d w_CTd_C = Q_CT * (kp_rotation_ * Q_TTr.vec().array())
-      .matrix();
+  const Vector3d w_CTd_C = Q_CT * (kp_rotation_ * Q_TTr.vec().array()).matrix();
 
-  VectorXd V_C_TP_C_des(6);
+  Vector6d V_C_TP_C_des;
   V_C_TP_C_des.head(3) = w_CTd_C;
   V_C_TP_C_des.tail(3) = v_CoPd_C;
 
   cout << "V_C_TP_C_des\n" << V_C_TP_C_des << endl;
+
+  Vector6d V_ff_c;
+  if (t > plan_data.get_duration()) {
+    V_ff_c.setZero();
+  } else {
+    V_ff_c.head(3) = R_CW * task_def.Q_WC_traj.angular_velocity(t);
+    V_ff_c.tail(3) = R_CW * task_def.p_WoCo_W_traj.derivative(1).value(t);
+  }
+
+  cout << "V_ff_c\n" << V_ff_c << endl;
+  cout << "v_co_ff\n" << task_def.p_WoCo_W_traj.derivative(1).value(t) << endl;
 
   // Joacbians
   MatrixXd Jc(6, num_positions_);
   Jc.topRows(3) = R_CW * Jv_WTq_.topRows(3);
   Jc.bottomRows(3) = R_CW * Jv_WTq_.bottomRows(3);
 
-//  cout << "Jc\n" << Jc << endl;
+  //  cout << "Jc\n" << Jc << endl;
 
+  // Selector matrices
+  const auto Sm = this->CalcSelectorMatrix(task_def.motion_controlled_axes);
+  cout << "S_m\n" << Sm << endl;
 
   // optimization for the motion component of dq.
   const auto prog = std::make_unique<solvers::MathematicalProgram>();
@@ -134,11 +163,12 @@ void HybridForcePositionPlan::Step(
       Eigen::VectorXd::Zero(num_positions_), dq);
 
   // Jf null space constraint
-//  prog->AddLinearEqualityConstraint(Jf, 0, dq);
+  //  prog->AddLinearEqualityConstraint(Jf, 0, dq);
 
   // tracking error costs
-  prog->AddL2NormCost(Jc / control_period, V_C_TP_C_des, dq);
-//  prog->AddL2NormCost(J_rotation / control_period, w_desired, dq);
+  prog->AddL2NormCost(Sm * Jc / control_period, Sm * (V_C_TP_C_des + V_ff_c),
+                      dq);
+  //  prog->AddL2NormCost(J_rotation / control_period, w_desired, dq);
 
   solver_.Solve(*prog, {}, {}, prog_result_.get());
 
@@ -147,51 +177,52 @@ void HybridForcePositionPlan::Step(
   }
   const Eigen::VectorXd dq_motion = prog_result_->GetSolution(dq);
 
-  // calculate dq_force
-  f_contact_ref_ = (1 - f_contact_growth_rate_) * f_contact_ref_ +
-                   f_contact_growth_rate_ * f_contact_desired_;
-//
-//  ContactInfo contact_info;
-//  contact_info.num_contacts = 1;
-//  contact_info.contact_link_idx.push_back(7);
-//  contact_info.positions.push_back(p_ToP_T);
-//  const Eigen::Vector3d f_contact_C =
-//      R_WC.transpose() * contact_force_estimator_->UpdateContactForce(
-//                             contact_info, q, tau_external);
-//
-//  // TODO: it's assumed here that exactly one of the three axes of C is force
-//  // controlled.
-//  const double f_contact = f_contact_C[force_axes[0]];
-//
-//  double f_contact_cmd = f_contact_ref_;
-//
-//  if (std::abs(f_contact_ref_ - f_contact_desired_) < 1) {
-//    // update integrator states.
-//    const double ki = 5;
-//    f_integrator_state_ += ki * (f_contact_ref_ - f_contact) * control_period;
-////    std::cout << t << " " << f_contact_ref_ << " " << f_contact << std::endl;
-//    // Anti-windup.
-//    if (f_integrator_state_ > 5) {
-//      f_integrator_state_ = 5;
-//    } else if (f_integrator_state_ < -5) {
-//      f_integrator_state_ = -5;
-//    }
-//
-//    f_contact_cmd += f_integrator_state_;
-//  }
-//
-//  const Eigen::VectorXd dq_force =
-//      (-Jf.transpose().array() / joint_stiffness_ * f_contact_cmd).matrix();
 
-//  Eigen::VectorXd dq_all = dq_motion;
-//
-//  // saturation
-//  const double dq_limit = 1;
-//  ClipEigenVector(&dq_all, -dq_limit, dq_limit);
-//  cout << velocity_cost_weight_ << endl;
-//  auto svd = Jv_WTq_.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
-//  svd.setThreshold(0.01);
-//  const Eigen::VectorXd q_dot_desired = svd.solve(V_C_TP_C_des);
+  //
+  //  ContactInfo contact_info;
+  //  contact_info.num_contacts = 1;
+  //  contact_info.contact_link_idx.push_back(7);
+  //  contact_info.positions.push_back(p_ToP_T);
+  //  const Eigen::Vector3d f_contact_C =
+  //      R_WC.transpose() * contact_force_estimator_->UpdateContactForce(
+  //                             contact_info, q, tau_external);
+  //
+  //  // TODO: it's assumed here that exactly one of the three axes of C is
+  //  force
+  //  // controlled.
+  //  const double f_contact = f_contact_C[force_axes[0]];
+  //
+  //  double f_contact_cmd = f_contact_ref_;
+  //
+  //  if (std::abs(f_contact_ref_ - f_contact_desired_) < 1) {
+  //    // update integrator states.
+  //    const double ki = 5;
+  //    f_integrator_state_ += ki * (f_contact_ref_ - f_contact) *
+  //    control_period;
+  ////    std::cout << t << " " << f_contact_ref_ << " " << f_contact <<
+  /// std::endl;
+  //    // Anti-windup.
+  //    if (f_integrator_state_ > 5) {
+  //      f_integrator_state_ = 5;
+  //    } else if (f_integrator_state_ < -5) {
+  //      f_integrator_state_ = -5;
+  //    }
+  //
+  //    f_contact_cmd += f_integrator_state_;
+  //  }
+  //
+  //  const Eigen::VectorXd dq_force =
+  //      (-Jf.transpose().array() / joint_stiffness_ * f_contact_cmd).matrix();
+
+  //  Eigen::VectorXd dq_all = dq_motion;
+  //
+  //  // saturation
+  //  const double dq_limit = 1;
+  //  ClipEigenVector(&dq_all, -dq_limit, dq_limit);
+  //  cout << velocity_cost_weight_ << endl;
+  //  auto svd = Jv_WTq_.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
+  //  svd.setThreshold(0.01);
+  //  const Eigen::VectorXd q_dot_desired = svd.solve(V_C_TP_C_des);
 
   *q_cmd = q + dq_motion;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);

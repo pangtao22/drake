@@ -12,7 +12,7 @@ multibody::ModelInstanceIndex SetupIiwaControllerPlant(
 
 void SetSmallValuesToZero(Eigen::VectorXd* const v_ptr, double tolerance);
 
-template<class T>
+template <class T>
 void ClipEigenVector(T* const v, double min, double max);
 
 class LowPassFilter {
@@ -28,6 +28,22 @@ class LowPassFilter {
   const int n_;
   bool has_valid_state_{false};
   Eigen::VectorXd x_;
+};
+
+template <class T>
+class FirstOrderSystem {
+ public:
+  FirstOrderSystem(const T& x_start, const T& x_end, double time_constant)
+      : x_start_(x_start), x_end_(x_end), T_(time_constant){};
+
+  T value(double t) const {
+    return x_start_ + (x_end_ - x_start_) * (1 - std::exp(-t / T_));
+  };
+
+ private:
+  const T x_start_;
+  const T x_end_;
+  const double T_;
 };
 
 }  // namespace robot_plans
