@@ -65,7 +65,7 @@ int run_plan() {
   p_WoCo_W_knots.col(0) << 0.40, 0, 0.03;
   p_WoCo_W_knots.col(2) << 0.40, -0.2, 0.03;
   p_WoCo_W_knots.col(1) = (p_WoCo_W_knots.col(0) + p_WoCo_W_knots.col(2)) / 2;
-  Eigen::Vector3d t_knots1(0, 8, 16);
+  Eigen::Vector3d t_knots1(0, 4, 8);
   task_definition.p_WoCo_W_traj =
       trajectories::PiecewisePolynomial<double>::Cubic(
           t_knots1, p_WoCo_W_knots, Eigen::VectorXd::Zero(3),

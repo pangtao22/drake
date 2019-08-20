@@ -18,7 +18,7 @@ HybridForcePositionPlan::HybridForcePositionPlan()
     : PlanBase(PlanType::kHybridForcePositionPlan, 7),
       plant_(std::make_unique<multibody::MultibodyPlant<double>>()),
       kp_translation_(Eigen::Array3d(150, 150, 150)),
-      kp_rotation_(Eigen::Array3d(50, 50, 50)),
+      kp_rotation_(Eigen::Array3d(100, 100, 100)),
       velocity_cost_weight_(0.01),
       f_contact_growth_rate_(0.005 / (1 + 0.005)),
       f_contact_desired_(10),
@@ -46,7 +46,7 @@ HybridForcePositionPlan::HybridForcePositionPlan()
 void HybridForcePositionPlan::Step(
     const Eigen::Ref<const Eigen::VectorXd>& q,
     const Eigen::Ref<const Eigen::VectorXd>& v,
-    const Eigen::Ref<const Eigen::VectorXd>& tau_external,
+    const Eigen::Ref<const Eigen::VectorXd>&,
     double control_period, double t, const PlanData& plan_data,
     const robot_plans::ContactInfo&, EigenPtr<Eigen::VectorXd> q_cmd,
     EigenPtr<Eigen::VectorXd> tau_cmd) const {
@@ -97,11 +97,15 @@ void HybridForcePositionPlan::Step(
 
   // Update orientation error.
   const auto Q_TTr = RotationMatrixd(Q_CT.inverse() * Q_CTr).ToQuaternion();
-//  cout << "Q_TTr\n" << Q_TTr.w() << endl << Q_TTr.vec() << endl;
+  cout << "Q_TTr\n" << Q_TTr.w() << endl << Q_TTr.vec() << endl;
 
   // Calculate translational velocity in C.
   Vector3d v_CoPd_C = kp_translation_ * p_PPr_C.array();
-  ClipEigenVector(&v_CoPd_C, -0.2, 0.2);
+  const double v_norm = v_CoPd_C.norm();
+  if (v_norm > 0.7) {
+    v_CoPd_C *= 0.7 / v_norm;
+  }
+
   // Calculate angular velocity in C.
   const Vector3d w_CTd_C = Q_CT * (kp_rotation_ * Q_TTr.vec().array())
       .matrix();
