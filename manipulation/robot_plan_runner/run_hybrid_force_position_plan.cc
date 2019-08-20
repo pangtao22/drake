@@ -71,11 +71,15 @@ int run_plan() {
           t_knots1, p_WoCo_W_knots, Eigen::VectorXd::Zero(3),
           Eigen::VectorXd::Zero(3));
 
-  const auto Q_WC = RollPitchYawd(0, 0, 0).ToQuaternion();
-  vector<double> t_knots_v{t_knots1[0], t_knots1[1], t_knots1[2]};
-  vector<Eigen::Quaterniond> quaternions{Q_WC, Q_WC, Q_WC};
+  const auto Q_WC_start = RollPitchYawd(0, 0, 0).ToQuaternion();
+  const auto Q_WC_end = RollPitchYawd(0, 0, M_PI / 4).ToQuaternion();
+  vector<double> t_knots_v{t_knots1[0], t_knots1[2]};
+  vector<Eigen::Quaterniond> quaternions{Q_WC_start, Q_WC_end};
   task_definition.Q_WC_traj =
       trajectories::PiecewiseQuaternionSlerp<double>(t_knots_v, quaternions);
+
+  cout << "slerp\n"
+       << task_definition.Q_WC_traj.orientation(8).toRotationMatrix() << endl;
 
   task_definition.Q_CTr = RollPitchYawd(0, M_PI * 1.25, 0).ToQuaternion();
 
@@ -105,12 +109,10 @@ int run_plan() {
       -0.3055;
 
   Eigen::MatrixXd q_knots(nq, 2);
-  const auto Q_WTr =
-      task_definition.Q_WC_traj.value(0) * task_definition.Q_CTr;
-  q_knots.col(0) = CalcStartingJointAngles(RotationMatrixd(Q_WTr),
-                                           Eigen::Vector3d(0.40, 0, 0.03),
-                                           task_definition.p_ToP_T,
-                                           q_initial_guess);
+  const auto Q_WTr = task_definition.Q_WC_traj.value(0) * task_definition.Q_CTr;
+  q_knots.col(0) = CalcStartingJointAngles(
+      RotationMatrixd(Q_WTr), Eigen::Vector3d(0.40, 0, 0.03),
+      task_definition.p_ToP_T, q_initial_guess);
 
   q_knots.col(1) = q_knots.col(0);
 

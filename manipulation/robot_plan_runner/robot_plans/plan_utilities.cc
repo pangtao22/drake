@@ -34,7 +34,8 @@ void SetSmallValuesToZero(Eigen::VectorXd* const v_ptr, double tolerance) {
   }
 }
 
-void ClipEigenVector(Eigen::VectorXd* const v_ptr, double min, double max) {
+template <class T>
+void ClipEigenVector(T* const v_ptr, double min, double max) {
   auto& v = *v_ptr;
   const int n = v.size();
 
@@ -75,7 +76,6 @@ void LowPassFilter::Update(const std::vector<double>& u) {
   this->Update(Eigen::Map<const Eigen::VectorXd>(u.data(), u.size()));
 }
 
-
 void LowPassFilter::reset_state() { has_valid_state_ = false; }
 
 const Eigen::VectorXd& LowPassFilter::get_current_x() const {
@@ -85,6 +85,12 @@ const Eigen::VectorXd& LowPassFilter::get_current_x() const {
     throw std::runtime_error("LowPassFilter does not have a valid state.");
   }
 }
+
+template void ClipEigenVector(Eigen::VectorXd* const v_ptr, double min,
+                              double max);
+
+template void ClipEigenVector(Eigen::Vector3d* const v_ptr, double min,
+                              double max);
 
 }  // namespace robot_plans
 }  // namespace robot_plan_runner

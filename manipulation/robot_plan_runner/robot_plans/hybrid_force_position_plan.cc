@@ -62,10 +62,10 @@ void HybridForcePositionPlan::Step(
   const auto& p_CoPr_C = task_def.p_CoPr_C;
   const auto& Q_CTr = task_def.Q_CTr;
 
-//  cout << endl << "t: " << t << endl;
-//  cout << "p_ToP_T\n" << p_ToP_T << endl;
-//  cout << "p_CoPr_C\n" << p_CoPr_C << endl;
-//  cout << "Q_CTr\n" << Q_CTr.toRotationMatrix() << endl;
+  cout << endl << "t: " << t << endl;
+  cout << "p_ToP_T\n" << p_ToP_T << endl;
+  cout << "p_CoPr_C\n" << p_CoPr_C << endl;
+  cout << "Q_CTr\n" << Q_CTr.toRotationMatrix() << endl;
 
   const auto X_WT =
       plant_->CalcRelativeTransform(*plant_context_, plant_->world_frame(),
@@ -79,29 +79,29 @@ void HybridForcePositionPlan::Step(
   const auto R_CW = Q_CW.toRotationMatrix();
   const auto Q_CT = Q_CW * Q_WT;
 
-//  cout << "R_CW\n" << R_CW << endl;
+  cout << "R_CW\n" << R_CW << endl;
 
   // p_CoP_C
   const auto p_WoP_W = X_WT * p_ToP_T;
   const auto p_WoCo_W = task_def.p_WoCo_W_traj.value(t);
   const auto p_CoP_C = Q_CW * (p_WoP_W - p_WoCo_W);
 
-//  cout << "p_WoP_W\n" << p_WoP_W << endl;
-//  cout << "p_WoCo_W\n" << p_WoCo_W << endl;
-//  cout << "p_CoP_C\n" << p_CoP_C << endl;
+  cout << "p_WoP_W\n" << p_WoP_W << endl;
+  cout << "p_WoCo_W\n" << p_WoCo_W << endl;
+  cout << "p_CoP_C\n" << p_CoP_C << endl;
 
   // Update position error.
   const auto p_PPr_C = p_CoPr_C - p_CoP_C;
 
-//  cout << "p_PPr_C\n" << p_PPr_C << endl;
+  cout << "p_PPr_C\n" << p_PPr_C << endl;
 
   // Update orientation error.
   const auto Q_TTr = RotationMatrixd(Q_CT.inverse() * Q_CTr).ToQuaternion();
 //  cout << "Q_TTr\n" << Q_TTr.w() << endl << Q_TTr.vec() << endl;
 
   // Calculate translational velocity in C.
-  const Vector3d v_CoPd_C = (kp_translation_ * p_PPr_C.array()).matrix();
-
+  Vector3d v_CoPd_C = kp_translation_ * p_PPr_C.array();
+  ClipEigenVector(&v_CoPd_C, -0.2, 0.2);
   // Calculate angular velocity in C.
   const Vector3d w_CTd_C = Q_CT * (kp_rotation_ * Q_TTr.vec().array())
       .matrix();
@@ -110,7 +110,7 @@ void HybridForcePositionPlan::Step(
   V_C_TP_C_des.head(3) = w_CTd_C;
   V_C_TP_C_des.tail(3) = v_CoPd_C;
 
-//  cout << "V_C_TP_C_des\n" << V_C_TP_C_des << endl;
+  cout << "V_C_TP_C_des\n" << V_C_TP_C_des << endl;
 
   // Joacbians
   MatrixXd Jc(6, num_positions_);

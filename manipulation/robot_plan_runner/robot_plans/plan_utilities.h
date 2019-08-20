@@ -12,7 +12,8 @@ multibody::ModelInstanceIndex SetupIiwaControllerPlant(
 
 void SetSmallValuesToZero(Eigen::VectorXd* const v_ptr, double tolerance);
 
-void ClipEigenVector(Eigen::VectorXd* const v, double min, double max);
+template<class T>
+void ClipEigenVector(T* const v, double min, double max);
 
 class LowPassFilter {
  public:
