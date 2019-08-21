@@ -48,6 +48,7 @@ class HybridForcePositionPlan : public PlanBase {
 
   std::unique_ptr<ContactForceEstimator> contact_force_estimator_;
   std::unique_ptr<FirstOrderSystem<double>> f_contact_ref_;
+  mutable double f_integrator_state_;
 
   std::unique_ptr<FirstOrderSystem<double>> v_translation_norm_limit_;
 };

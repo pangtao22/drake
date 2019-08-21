@@ -40,6 +40,8 @@ class FirstOrderSystem {
     return x_start_ + (x_end_ - x_start_) * (1 - std::exp(-t / T_));
   };
 
+  double get_time_constant() { return T_; };
+
  private:
   const T x_start_;
   const T x_end_;

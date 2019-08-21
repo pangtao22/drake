@@ -88,13 +88,15 @@ int run_plan() {
   task_definition.p_ToP_T << 0, 0.05 / std::sqrt(2),
       0.075 + 0.05 / std::sqrt(2);
 
-  //  task_definition.force_controlled_axes.push_back(2);   // world z
-  task_definition.motion_controlled_axes.push_back(0);  // world x-rotation
-  task_definition.motion_controlled_axes.push_back(1);  // world y-rotation
-  task_definition.motion_controlled_axes.push_back(2);  // world z-rotation
-  task_definition.motion_controlled_axes.push_back(3);  // world x
-  task_definition.motion_controlled_axes.push_back(4);  // world y
-  task_definition.motion_controlled_axes.push_back(5);  // world z
+  task_definition.motion_controlled_axes.push_back(0);  // C x-rotation
+  task_definition.motion_controlled_axes.push_back(1);  // C y-rotation
+  task_definition.motion_controlled_axes.push_back(2);  // C z-rotation
+  task_definition.motion_controlled_axes.push_back(3);  // C x
+  task_definition.motion_controlled_axes.push_back(4);  // C y
+//  task_definition.motion_controlled_axes.push_back(5);  // C z
+
+  task_definition.force_controlled_axes.push_back(5);   // C z
+
 
   plan1.hybrid_task_definition = task_definition;
 
