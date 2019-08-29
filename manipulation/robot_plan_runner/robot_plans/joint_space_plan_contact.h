@@ -1,7 +1,8 @@
 #pragma once
 
-#include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/contact_force_estimator.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/plan_utilities.h"
 #include "drake/solvers/gurobi_solver.h"
 #include "drake/solvers/mathematical_program.h"
 #include "drake/solvers/mathematical_program_result.h"
@@ -32,6 +33,9 @@ class JointSpacePlanContact : public PlanBase {
   solvers::GurobiSolver solver_;
 
   mutable int positive_v_count_{0};
+
+  mutable std::unique_ptr<FirstOrderSystem<double>> desired_contact_force_;
+  mutable double t_separation_{0};
 };
 
 }  // namespace robot_plans

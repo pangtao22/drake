@@ -1,10 +1,12 @@
 #include "drake/manipulation/robot_plan_runner/robot_plans/joint_space_plan_contact.h"
-#include "drake/manipulation/robot_plan_runner/robot_plans/plan_utilities.h"
 
 namespace drake {
 namespace manipulation {
 namespace robot_plan_runner {
 namespace robot_plans {
+
+using std::cout;
+using std::endl;
 
 JointSpacePlanContact::JointSpacePlanContact(int num_positions)
     : PlanBase(PlanType::kJointSpacePlanContact, num_positions),
@@ -74,19 +76,27 @@ void JointSpacePlanContact::Step(
       positive_v_count_ = 0;
     }
 
-    if (positive_v_count_ < 5) {
-      const double f_desired = f_norm_threshold * 1.5;
-
-      Eigen::VectorXd J_nc_pinv = J_nc.transpose() / std::pow(J_nc.norm(), 2);
-      SetSmallValuesToZero(&J_nc_pinv, 1e-13);
-
-      prog->AddLinearEqualityConstraint(
-          (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(),
-          -f_desired, dq);
-      prog->AddLinearConstraint(J_nc / control_period,
-                                -std::numeric_limits<double>::infinity(), 0,
-                                dq);
+    if (positive_v_count_ >= 5 && !desired_contact_force_) {
+      desired_contact_force_ = std::make_unique<FirstOrderSystem<double>>(
+          f_norm_threshold * 1.5, f_norm_threshold * 0.8, 0.12);
+      t_separation_ = t;
+      cout << "separation starts!" << endl;
     }
+
+    double f_desired = f_norm_threshold * 1.5;
+    if(desired_contact_force_) {
+      f_desired = desired_contact_force_->value(t - t_separation_);
+      cout << t << " " << (t - t_separation_) << " " << f_desired << endl;
+    }
+
+    Eigen::VectorXd J_nc_pinv = J_nc.transpose() / std::pow(J_nc.norm(), 2);
+    SetSmallValuesToZero(&J_nc_pinv, 1e-13);
+
+    prog->AddLinearEqualityConstraint(
+        (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
+        dq);
+    prog->AddLinearConstraint(J_nc / control_period,
+                              -std::numeric_limits<double>::infinity(), 0, dq);
   }
 
   // Error on tracking error
@@ -102,8 +112,8 @@ void JointSpacePlanContact::Step(
   auto dq_value = prog_result_->GetSolution(dq);
 
   // saturation
-  const double dq_limit = 10;
-  ClipEigenVector(&dq_value, -dq_limit, dq_limit);
+//  const double dq_limit = 1;
+//  ClipEigenVector(&dq_value, -dq_limit, dq_limit);
 
   *q_cmd = q + dq_value;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);
