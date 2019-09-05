@@ -85,7 +85,7 @@ int run_plan() {
 
   task_definition.p_CoPr_C << 0, 0, 0;
 
-  task_definition.p_ToP_T << 0, 0.05 / std::sqrt(2),
+  task_definition.p_ToP_T << - 0.05 / std::sqrt(2), 0,
       0.075 + 0.05 / std::sqrt(2);
 
   task_definition.motion_controlled_axes.push_back(0);  // C x-rotation
@@ -117,6 +117,8 @@ int run_plan() {
       task_definition.p_ToP_T, q_initial_guess);
 
   q_knots.col(1) = q_knots.col(0);
+
+  cout << q_knots.col(0) << endl;
 
   plan0.plan_type = PlanType::kJointSpacePlan;
   plan0.joint_traj =
