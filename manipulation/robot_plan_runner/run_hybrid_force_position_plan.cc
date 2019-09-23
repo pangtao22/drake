@@ -62,8 +62,8 @@ int run_plan() {
   PlanData::HybridTaskDefinition task_definition;
 
   Eigen::MatrixXd p_WoCo_W_knots(3, 3);
-  p_WoCo_W_knots.col(0) << 0.40, 0, 0.03;
-  p_WoCo_W_knots.col(2) << 0.40, -0.2, 0.03;
+  p_WoCo_W_knots.col(0) << 0.40, 0, 0.0;
+  p_WoCo_W_knots.col(2) << 0.40, -0.2, 0.0;
   p_WoCo_W_knots.col(1) = (p_WoCo_W_knots.col(0) + p_WoCo_W_knots.col(2)) / 2;
   Eigen::Vector3d t_knots1(0, 4, 8);
   task_definition.p_WoCo_W_traj =

@@ -18,8 +18,8 @@ from pydrake.systems.framework import (BasicVector, DiagramBuilder,
 from pydrake.systems.meshcat_visualizer import MeshcatVisualizer
 from pydrake.systems.primitives import FirstOrderLowPassFilter
 
-from drake.examples.manipulation_station.differential_ik import DifferentialIK
-
+# from drake.examples.manipulation_station.differential_ik import DifferentialIK
+from differential_ik import DifferentialIK
 try:
     import pygame
     from pygame.locals import *
