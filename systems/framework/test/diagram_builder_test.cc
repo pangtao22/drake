@@ -5,7 +5,10 @@
 #include <Eigen/Dense>
 #include <gtest/gtest.h>
 
+#include "drake/common/test_utilities/expect_no_throw.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
+#include "drake/common/trajectories/exponential_plus_piecewise_polynomial.h"
+#include "drake/common/trajectories/piecewise_polynomial.h"
 #include "drake/systems/framework/diagram.h"
 #include "drake/systems/primitives/adder.h"
 #include "drake/systems/primitives/constant_vector_source.h"
@@ -35,7 +38,7 @@ GTEST_TEST(DiagramBuilderTest, Empty) {
 template <typename T>
 class ConstAndEcho final : public LeafSystem<T> {
  public:
-  ConstAndEcho() : LeafSystem<T>(SystemTypeTag<systems::ConstAndEcho>{}) {
+  ConstAndEcho() : LeafSystem<T>(SystemTypeTag<ConstAndEcho>{}) {
     this->DeclareInputPort("input", kVectorValued, 1);
     this->DeclareVectorOutputPort(
         "echo", BasicVector<T>(1), &ConstAndEcho::CalcEcho);
@@ -118,7 +121,7 @@ GTEST_TEST(DiagramBuilderTest, CycleButNoLoopPortLevel) {
   auto echo = builder.AddSystem<ConstAndEcho>();
   echo->set_name("echo");
   builder.Connect(echo->get_const_output_port(), echo->get_vec_input_port());
-  EXPECT_NO_THROW(builder.Build());
+  DRAKE_EXPECT_NO_THROW(builder.Build());
 }
 
 // Contrasts with CycleButNoLoopPortLevel. In this case, the cycle *does*
@@ -176,7 +179,7 @@ GTEST_TEST(DiagramBuilderTest, CycleButNoAlgebraicLoopSystemLevel) {
   builder.Connect(integrator->get_output_port(), adder->get_input_port(1));
 
   // There is no algebraic loop, so we should not throw.
-  EXPECT_NO_THROW(builder.Build());
+  DRAKE_EXPECT_NO_THROW(builder.Build());
 }
 
 // Tests that multiple cascaded elements that are not direct-feedthrough
@@ -193,7 +196,7 @@ GTEST_TEST(DiagramBuilderTest, CascadedNonDirectFeedthrough) {
                   integrator2->get_input_port());
 
   // There is no algebraic loop, so we should not throw.
-  EXPECT_NO_THROW(builder.Build());
+  DRAKE_EXPECT_NO_THROW(builder.Build());
 }
 
 // Tests that an exception is thrown when building an empty diagram.
@@ -205,21 +208,21 @@ GTEST_TEST(DiagramBuilderTest, FinalizeWhenEmpty) {
 GTEST_TEST(DiagramBuilderTest, SystemsThatAreNotAddedThrow) {
   DiagramBuilder<double> builder;
   Adder<double> adder(1 /* inputs */, 1 /* size */);
-  adder.set_name("x");
+  adder.set_name("adder");
   DRAKE_EXPECT_THROWS_MESSAGE(
       builder.Connect(adder, adder),
       std::logic_error,
-      "DiagramBuilder: Cannot operate on ports of System x "
+      "DiagramBuilder: Cannot operate on ports of System adder "
       "until it has been registered using AddSystem");
   DRAKE_EXPECT_THROWS_MESSAGE(
       builder.ExportInput(adder.get_input_port(0)),
       std::logic_error,
-      "DiagramBuilder: Cannot operate on ports of System x "
+      "DiagramBuilder: Cannot operate on ports of System adder "
       "until it has been registered using AddSystem");
   DRAKE_EXPECT_THROWS_MESSAGE(
       builder.ExportOutput(adder.get_output_port()),
       std::logic_error,
-      "DiagramBuilder: Cannot operate on ports of System x "
+      "DiagramBuilder: Cannot operate on ports of System adder "
       "until it has been registered using AddSystem");
 }
 
@@ -301,6 +304,52 @@ GTEST_TEST(DiagramBuilderTest, ConnectAbstractTypeMismatchThrow) {
       "input port u0 of System int_system \\(type int\\)");
 }
 
+// Test that port connections can be polymorphic, especially for types that are
+// both copyable and cloneable.  {ExponentialPlus,}PiecewisePolynomial are both
+// copyable (to themselves) and cloneable (to a common base class, Trajectory).
+// To connect them in a diagram, we must specify we want to use the subtyping.
+GTEST_TEST(DiagramBuilderTest, ConnectAbstractSubtypes) {
+  using Trajectoryd = trajectories::Trajectory<double>;
+  using PiecewisePolynomiald = trajectories::PiecewisePolynomial<double>;
+  using ExponentialPlusPiecewisePolynomiald =
+      trajectories::ExponentialPlusPiecewisePolynomial<double>;
+
+  DiagramBuilder<double> builder;
+  auto sys1 = builder.AddSystem<PassThrough<double>>(
+      Value<Trajectoryd>(PiecewisePolynomiald{}));
+  auto sys2 = builder.AddSystem<PassThrough<double>>(
+      Value<Trajectoryd>(ExponentialPlusPiecewisePolynomiald{}));
+  DRAKE_EXPECT_NO_THROW(builder.Connect(*sys1, *sys2));
+  builder.ExportInput(sys1->get_input_port());
+  builder.ExportOutput(sys2->get_output_port());
+  auto diagram = builder.Build();
+
+  // We can feed PiecewisePolynomial through the Diagram.
+  {
+    auto context = diagram->CreateDefaultContext();
+    const PiecewisePolynomiald input(Vector1d(22.0));
+    diagram->get_input_port(0).FixValue(
+        context.get(), Value<Trajectoryd>(input));
+    const auto& output =
+        dynamic_cast<const PiecewisePolynomiald&>(
+            diagram->get_output_port(0).Eval<Trajectoryd>(*context));
+    EXPECT_EQ(output.value(0.0)(0), 22.0);
+  }
+
+  // We can feed ExponentialPlusPiecewisePolynomial through the Diagram.
+  {
+    auto context = diagram->CreateDefaultContext();
+    const ExponentialPlusPiecewisePolynomiald input(
+        PiecewisePolynomiald(Vector1d(22.0)));
+    diagram->get_input_port(0).FixValue(
+        context.get(), Value<Trajectoryd>(input));
+    const auto& output =
+        dynamic_cast<const ExponentialPlusPiecewisePolynomiald&>(
+            diagram->get_output_port(0).Eval<Trajectoryd>(*context));
+    EXPECT_EQ(output.value(0.0)(0), 22.0);
+  }
+}
+
 // Helper class that has one input port, and no output ports.
 template <typename T>
 class Sink : public LeafSystem<T> {
@@ -326,7 +375,7 @@ GTEST_TEST(DiagramBuilderTest, DefaultInputPortNamesAreUniqueTest) {
   builder.ExportInput(sink2->get_input_port(0));
 
   // If the port names were not unique, then the build step would throw.
-  EXPECT_NO_THROW(builder.Build());
+  DRAKE_EXPECT_NO_THROW(builder.Build());
 }
 
 GTEST_TEST(DiagramBuilderTest, DefaultOutputPortNamesAreUniqueTest) {
@@ -339,7 +388,7 @@ GTEST_TEST(DiagramBuilderTest, DefaultOutputPortNamesAreUniqueTest) {
   builder.ExportOutput(source2->get_output_port(0));
 
   // If the port names were not unique, then the build step would throw.
-  EXPECT_NO_THROW(builder.Build());
+  DRAKE_EXPECT_NO_THROW(builder.Build());
 }
 
 GTEST_TEST(DiagramBuilderTest, DefaultPortNamesAreUniqueTest2) {
@@ -445,16 +494,16 @@ class DiagramBuilderSolePortsTest : public ::testing::Test {
 
 // A diagram of Source->Gain->Sink is successful.
 TEST_F(DiagramBuilderSolePortsTest, SourceGainSink) {
-  EXPECT_NO_THROW(builder_.Connect(*out1_, *in1out1_));
-  EXPECT_NO_THROW(builder_.Connect(*in1out1_, *in1_));
-  EXPECT_NO_THROW(builder_.Build());
+  DRAKE_EXPECT_NO_THROW(builder_.Connect(*out1_, *in1out1_));
+  DRAKE_EXPECT_NO_THROW(builder_.Connect(*in1out1_, *in1_));
+  DRAKE_EXPECT_NO_THROW(builder_.Build());
 }
 
 // The cascade synonym also works.
 TEST_F(DiagramBuilderSolePortsTest, SourceGainSinkCascade) {
-  EXPECT_NO_THROW(builder_.Cascade(*out1_, *in1out1_));
-  EXPECT_NO_THROW(builder_.Cascade(*in1out1_, *in1_));
-  EXPECT_NO_THROW(builder_.Build());
+  DRAKE_EXPECT_NO_THROW(builder_.Cascade(*out1_, *in1out1_));
+  DRAKE_EXPECT_NO_THROW(builder_.Cascade(*in1out1_, *in1_));
+  DRAKE_EXPECT_NO_THROW(builder_.Build());
 }
 
 // A diagram of Gain->Source is has too few dest inputs.

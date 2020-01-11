@@ -13,7 +13,7 @@ Drake ("dragon" in Middle English) is a C++ toolbox started by the
 grown significantly </credits>`, with core development led by the `Toyota Research Institute`_.
 It is a collection of tools for analyzing the dynamics of our robots and building control systems for them, with a heavy emphasis on optimization-based design/analysis.
 
-While there are an increasing number of simulation tools available for robotics, most of them function like a black box: commands go in, sensors come out.  Drake aims to simulate even very complex dynamics of robots (e.g. including friction, contact, aerodynamics, ...), but always with an emphasis on exposing the structure in the governing equations (sparsity, analytical gradients, polynomial structure, uncertainty quantification, ...) and making this information available for advanced planning, control, and analysis algorithms.  Drake provides interfaces to high-level languages (MATLAB, Python, ...) to enable rapid-prototyping of new algorithms, and also aims to provide solid open-source implementations for many state-of-the-art algorithms.  Finally, we hope Drake provides many compelling examples that can help people get started and provide much needed benchmarks.   We are excited to accept user contributions to improve the coverage.
+While there are an increasing number of simulation tools available for robotics, most of them function like a black box: commands go in, sensors come out.  Drake aims to simulate even very complex dynamics of robots (e.g. including friction, contact, aerodynamics, ...), but always with an emphasis on exposing the structure in the governing equations (sparsity, analytical gradients, polynomial structure, uncertainty quantification, ...) and making this information available for advanced planning, control, and analysis algorithms.  Drake provides an interface to Python to enable rapid-prototyping of new algorithms, and also aims to provide solid open-source implementations for many state-of-the-art algorithms.  Finally, we hope Drake provides many compelling examples that can help people get started and provide much needed benchmarks.   We are excited to accept user contributions to improve the coverage.
 
 We hope you find this tool useful.  Please see :ref:`getting_help` if you wish
 to share your comments, questions, success stories, or frustrations.  And please contribute your best bug fixes, features, and examples!
@@ -24,32 +24,51 @@ Core Library
 
 .. raw:: html
 
-    <table align="center" style="border-spacing: 50px">
+    <table align="center">
         <tr>
-            <td style="text-align:center;vertical-align:top" width="200px" height="150px">
-                <a href="https://drake.mit.edu/doxygen_cxx/group__systems.html">Modeling Dynamical Systems</a>
-                <p/>
+            <td style="text-align:center" width="220px">
+                Modeling Dynamical Systems
+            </td>
+            <td style="text-align:center"  width="220px">
+                Solving Mathematical Programs
+            <td style="text-align:center"  width="220px">
+                Multibody Kinematics and Dynamics
+            </td>
+        </tr>
+        <tr>
+            <td style="text-align:center">
                 <img src="_images/systems.svg" width="195px"/>
             </td>
-            <td style="text-align:center;vertical-align:top" width="200px">
-                <a target="_mathematical_program" href="https://colab.research.google.com/github/RussTedrake/underactuated/blob/master/src/mathematical_program_examples.ipynb">
-                Solving Mathematical Programs</a>
-                <p/>
+            <td style="text-align:center">
                 <img src="_images/mathematical_program.svg" width="150px"/>
             </td>
-            <td style="text-align:center;vertical-align:top" width="200px">
-                <a href="https://drake.mit.edu/doxygen_cxx/group__multibody.html">Multibody Kinematics and Dynamics</a>
-                <p/>
+            <td style="text-align:center">
                 <img src="https://github.com/caelan/pddlstream/raw/d0eb256e88b8b5174fbd136a82867fd9e9cebc67/images/drake_kuka.png" width="195px"/>
+            </td>
+        </tr>
+        <tr>
+            <td style="text-align:center">
+                <a target="_doc" href="https://drake.mit.edu/doxygen_cxx/group__systems.html">doc</a> | <a target="_tutorial" href="https://mybinder.org/v2/gh/RobotLocomotion/drake/master?filepath=tutorials/dynamical_systems.ipynb">tutorial</a>
+            </td>
+            <td style="text-align:center">
+                <a target="_doc" href="https://drake.mit.edu/doxygen_cxx/group__solvers.html">doc</a> | <a target="_tutorial" href="https://mybinder.org/v2/gh/RobotLocomotion/drake/master?filepath=tutorials/mathematical_program.ipynb">tutorial</a>
+            </td>
+            <td style="text-align:center">
+                <a target="_doc" href="https://drake.mit.edu/doxygen_cxx/group__multibody.html">doc</a>
             </td>
         </tr>
     </table>
 
-********
-Examples
-********
+**********************
+Tutorials and Examples
+**********************
 
 .. TODO(russt): make this a table with different algorithms, too.
+
+We have Python tutorials implemented as Jupyter Notebooks in
+`the tutorials directory of the source tree
+<https://github.com/RobotLocomotion/drake/tree/master/tutorials>`_, with
+text explaining the high-level concepts and each of the main steps.
 
 We have a number of use cases demonstrated in `the examples directory of
 the source tree
@@ -91,14 +110,15 @@ Next steps
 .. toctree::
    :maxdepth: 1
 
-   installation
    gallery
-   getting_help
+   installation
+   Tutorials <https://mybinder.org/v2/gh/RobotLocomotion/drake/master?filepath=tutorials>
    API Documentation (C++) <doxygen_cxx/index.html#://>
    API Documentation (Python) <pydrake/index.html#://>
-   GitHub <https://github.com/RobotLocomotion/drake>
+   getting_help
    developers
    credits
+   GitHub <https://github.com/RobotLocomotion/drake>
 
 
 ********************************************
@@ -109,5 +129,3 @@ Using Drake from other Programming Languages
 
 		python_bindings
 		julia_bindings
-		matlab_bindings
-

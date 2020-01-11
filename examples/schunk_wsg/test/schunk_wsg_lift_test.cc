@@ -106,7 +106,6 @@ class Sinusoid : public systems::LeafSystem<double> {
 // stepping approach.
 class SchunkWsgLiftTest : public ::testing::TestWithParam<bool> {
  protected:
-
   // Finds the single end-effector from a RigidBodyTree and returns it. Aborts
   // if there is more than one end-effector or more than one base link.
   RigidBody<double>* FindEndEffector(RigidBodyTree<double>* tree) {
@@ -414,8 +413,7 @@ TEST_P(SchunkWsgLiftTest, BoxLiftTest) {
   // with our current models is yielding much slower running times without
   // discernible improvements in accuracy.
   const double dt = 1e-4;
-  simulator.reset_integrator<RungeKutta2Integrator<double>>(
-      *model, dt, &context);
+  simulator.reset_integrator<RungeKutta2Integrator<double>>(dt);
   simulator.Initialize();
 
   // Simulate to one second beyond the trajectory motion.
@@ -445,15 +443,6 @@ TEST_P(SchunkWsgLiftTest, BoxLiftTest) {
   model->CalcOutput(simulator.get_context(), state_output.get());
   const auto final_output_data =
       state_output->get_vector_data(plant_output_port)->get_value();
-
-  drake::log()->debug("Final state:");
-  const int num_movable_links = plant->get_num_positions();
-  for (int link_index = 0; link_index < num_movable_links; link_index++) {
-    drake::log()->debug("  {} {}: {} (v={})",
-                        link_index, tree.get_position_name(link_index),
-                        final_output_data[link_index],
-                        final_output_data[link_index + num_movable_links]);
-  }
 
   // Expect that the gripper is open (even though clamping force is
   // being applied).
@@ -523,7 +512,7 @@ TEST_P(SchunkWsgLiftTest, BoxLiftTest) {
 }
 
 // Instantiate the tests.
-INSTANTIATE_TEST_CASE_P(CompliantAndTimeSteppingTest, SchunkWsgLiftTest,
+INSTANTIATE_TEST_SUITE_P(CompliantAndTimeSteppingTest, SchunkWsgLiftTest,
                         ::testing::Bool());
 
 }  // namespace

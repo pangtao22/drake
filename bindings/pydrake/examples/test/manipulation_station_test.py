@@ -1,10 +1,10 @@
-
 import unittest
 import numpy as np
 
 from pydrake.common import FindResourceOrThrow
 from pydrake.examples.manipulation_station import (
-    CreateDefaultYcbObjectList,
+    CreateClutterClearingYcbObjectList,
+    CreateManipulationClassYcbObjectList,
     IiwaCollisionModel,
     ManipulationStation,
     ManipulationStationHardwareInterface
@@ -19,7 +19,7 @@ class TestManipulationStation(unittest.TestCase):
     def test_manipulation_station(self):
         # Just check the spelling.
         station = ManipulationStation(time_step=0.001)
-        station.SetupDefaultStation()
+        station.SetupManipulationClassStation()
         station.SetWsgGains(0.1, 0.1)
         station.SetIiwaPositionGains(np.ones(7))
         station.SetIiwaVelocityGains(np.ones(7))
@@ -87,6 +87,7 @@ class TestManipulationStation(unittest.TestCase):
 
         # Finalize
         station.Finalize()
+        self.assertEqual(station.num_iiwa_joints(), 7)
 
         # This WSG gripper model has 2 independent dof, and the IIWA model
         # has 7.
@@ -100,11 +101,12 @@ class TestManipulationStation(unittest.TestCase):
         num_station_bodies = (
             station.get_multibody_plant().num_model_instances())
 
-        ycb_objects = CreateDefaultYcbObjectList()
+        ycb_objects = CreateClutterClearingYcbObjectList()
         for model_file, X_WObject in ycb_objects:
             station.AddManipulandFromFile(model_file, X_WObject)
 
         station.Finalize()
+        self.assertEqual(station.num_iiwa_joints(), 7)
 
         context = station.CreateDefaultContext()
         q = np.linspace(0.04, 0.6, num=7)
@@ -125,6 +127,27 @@ class TestManipulationStation(unittest.TestCase):
         self.assertEqual(station.get_multibody_plant().num_model_instances(),
                          num_station_bodies + len(ycb_objects))
 
+    def test_planar_iiwa_setup(self):
+        station = ManipulationStation(time_step=0.001)
+        station.SetupPlanarIiwaStation()
+        station.Finalize()
+        self.assertEqual(station.num_iiwa_joints(), 3)
+
+        context = station.CreateDefaultContext()
+        q = np.linspace(0.04, 0.6, num=3)
+        v = np.linspace(-2.3, 0.5, num=3)
+        station.SetIiwaPosition(context, q)
+        np.testing.assert_array_equal(q, station.GetIiwaPosition(context))
+        station.SetIiwaVelocity(context, v)
+        np.testing.assert_array_equal(v, station.GetIiwaVelocity(context))
+
+        q = 0.0423
+        v = 0.0851
+        station.SetWsgPosition(context, q)
+        self.assertEqual(q, station.GetWsgPosition(context))
+        station.SetWsgVelocity(context, v)
+        self.assertEqual(v, station.GetWsgVelocity(context))
+
     def test_iiwa_collision_model(self):
         # Check that all of the elements of the enum were spelled correctly.
         IiwaCollisionModel.kNoCollision
@@ -138,5 +161,8 @@ class TestManipulationStation(unittest.TestCase):
         self.assertEqual(len(station.get_camera_names()), 2)
 
     def test_ycb_object_creation(self):
-        ycb_objects = CreateDefaultYcbObjectList()
+        ycb_objects = CreateClutterClearingYcbObjectList()
         self.assertEqual(len(ycb_objects), 6)
+
+        ycb_objects = CreateManipulationClassYcbObjectList()
+        self.assertEqual(len(ycb_objects), 5)

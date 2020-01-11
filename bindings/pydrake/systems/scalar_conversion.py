@@ -1,13 +1,14 @@
 """Provides utilities to aid in scalar type conversion."""
 
 import copy
+from functools import partial
 
 from pydrake.systems.framework import (
     LeafSystem_,
     SystemScalarConverter,
 )
 from pydrake.common.cpp_template import (
-    _get_module_name_from_stack,
+    _get_module_from_stack,
     TemplateClass,
 )
 
@@ -71,7 +72,7 @@ class TemplateSystem(TemplateClass):
     # TODO(eric.cousineau): Figure out if there is a way to avoid needing to
     # pass around converters in user code, avoiding the need to have Python
     # users deal with `SystemScalarConverter`.
-    def __init__(self, name, T_list=None, T_pairs=None, module_name=None):
+    def __init__(self, name, T_list=None, T_pairs=None, scope=None):
         """Constructs ``TemplateSystem``.
 
         Args:
@@ -81,12 +82,11 @@ class TemplateSystem(TemplateClass):
                 scalar type of U to T. If None, this will use all possible
                 pairs that the Python bindings of ``SystemScalarConverter``
                 support.
-            module_name: Defining ``module_name``, per ``TemplateClass``'s
-                constructor.
+            scope: Defining ``scope``, per ``TemplateClass``'s constructor.
         """
-        if module_name is None:
-            module_name = _get_module_name_from_stack()
-        TemplateClass.__init__(self, name, module_name=module_name)
+        if scope is None:
+            scope = _get_module_from_stack()
+        TemplateClass.__init__(self, name, scope=scope)
 
         # Check scalar types and conversions, using defaults if unspecified.
         if T_list is None:
@@ -199,23 +199,22 @@ class TemplateSystem(TemplateClass):
                 return True
         return False
 
+    def _make(self, T, U, system_U):
+        # Converts system_U (of scalar type U) to an instance of scalar type
+        # T. This should mirror the logic in
+        # `system_scalar_converter_internal::Make` under the file
+        # `system_scalar_converter.h`.
+        assert isinstance(system_U, self[U])
+        result_T = self[T](system_U)
+        result_T.set_name(system_U.get_name())
+        return result_T
+
     def _make_converter(self):
         # Creates system scalar converter for the template class.
         converter = SystemScalarConverter()
-
-        # Define capture to ensure the current values are bound, and do not
-        # change through iteration.
         # N.B. This does not directly instantiate the template; it is deferred
         # to when the conversion is called.
-        def add_captured(T_pair):
-            T, U = T_pair
-
-            def conversion(system):
-                assert isinstance(system, self[U])
-                return self[T](system)
-
+        for (T, U) in self._T_pairs:
+            conversion = partial(self._make, T, U)
             converter.Add[T, U](conversion)
-
-        for T_pair in self._T_pairs:
-            add_captured(T_pair)
         return converter

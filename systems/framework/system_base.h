@@ -92,7 +92,7 @@ class SystemBase : public internal::SystemMessageInterface {
     // We depend on derived classes to call our InitializeContextBase() method
     // after allocating the appropriate concrete Context.
     DRAKE_DEMAND(
-        detail::SystemBaseContextBaseAttorney::is_context_base_initialized(
+        internal::SystemBaseContextBaseAttorney::is_context_base_initialized(
             *context));
 
     return context;
@@ -218,6 +218,9 @@ class SystemBase : public internal::SystemMessageInterface {
   - 0 ≤ u < m,
   - 0 ≤ v < n,
   - and there _might_ be a direct feedthrough from input iᵤ to each output oᵥ.
+
+  See @ref DeclareLeafOutputPort_feedthrough "DeclareLeafOutputPort"
+  documentation for how leaf systems can report their feedthrough.
   */
   virtual std::multimap<int, int> GetDirectFeedthroughs() const = 0;
 
@@ -766,25 +769,6 @@ class SystemBase : public internal::SystemMessageInterface {
   }
   //@}
 
-#ifndef DRAKE_DOXYGEN_CXX
-  DRAKE_DEPRECATED("2019-07-01", "Use num_total_inputs() instead.")
-  int get_num_total_inputs() const {
-    return num_total_inputs();
-  }
-  DRAKE_DEPRECATED("2019-07-01", "Use num_total_outputs() instead.")
-  int get_num_total_outputs() const {
-    return num_total_outputs();
-  }
-  DRAKE_DEPRECATED("2019-07-01", "Use num_input_ports() instead.")
-  int get_num_input_ports() const {
-    return num_input_ports();
-  }
-  DRAKE_DEPRECATED("2019-07-01", "Use num_output_ports() instead.")
-  int get_num_output_ports() const {
-    return num_output_ports();
-  }
-#endif
-
  protected:
   /** (Internal use only) Default constructor. */
   SystemBase() = default;
@@ -844,11 +828,11 @@ class SystemBase : public internal::SystemMessageInterface {
   from the next available input port index.
   @pre `given_name` must not be empty. */
   std::string NextInputPortName(
-      variant<std::string, UseDefaultName> given_name) const {
+      std::variant<std::string, UseDefaultName> given_name) const {
     const std::string result =
         given_name == kUseDefaultName
            ? std::string("u") + std::to_string(num_input_ports())
-           : get<std::string>(std::move(given_name));
+           : std::get<std::string>(std::move(given_name));
     DRAKE_DEMAND(!result.empty());
     return result;
   }
@@ -858,11 +842,11 @@ class SystemBase : public internal::SystemMessageInterface {
   from the next available output port index.
   @pre `given_name` must not be empty. */
   std::string NextOutputPortName(
-      variant<std::string, UseDefaultName> given_name) const {
+      std::variant<std::string, UseDefaultName> given_name) const {
     const std::string result =
         given_name == kUseDefaultName
            ? std::string("y") + std::to_string(num_output_ports())
-           : get<std::string>(std::move(given_name));
+           : std::get<std::string>(std::move(given_name));
     DRAKE_DEMAND(!result.empty());
     return result;
   }

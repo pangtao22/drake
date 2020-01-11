@@ -2,6 +2,7 @@
 
 #include "drake/bindings/pydrake/common/cpp_template_pybind.h"
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
+#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/common/wrap_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
@@ -23,6 +24,9 @@ PYBIND11_MODULE(analysis, m) {
   m.doc() = "Bindings for the analysis portion of the Systems framework.";
 
   py::module::import("pydrake.systems.framework");
+
+  py::class_<SimulatorStatus>(
+      m, "SimulatorStatus", pydrake_doc.drake.systems.SimulatorStatus.doc);
 
   auto bind_scalar_types = [m](auto dummy) {
     constexpr auto& doc = pydrake_doc.drake.systems;
@@ -60,9 +64,9 @@ PYBIND11_MODULE(analysis, m) {
         .def(py::init<const System<T>&, const T&, Context<T>*>(),
             py::arg("system"), py::arg("max_step_size"),
             py::arg("context") = nullptr,
-            // Keep alive, reference: `self` keeps `System` alive.
+            // Keep alive, reference: `self` keeps `system` alive.
             py::keep_alive<1, 2>(),
-            // Keep alive, reference: `self` keeps `Context` alive.
+            // Keep alive, reference: `self` keeps `context` alive.
             py::keep_alive<1, 4>(), doc.RungeKutta2Integrator.ctor.doc);
 
     DefineTemplateClassWithDefault<RungeKutta3Integrator<T>, IntegratorBase<T>>(
@@ -70,23 +74,26 @@ PYBIND11_MODULE(analysis, m) {
         doc.RungeKutta3Integrator.doc)
         .def(py::init<const System<T>&, Context<T>*>(), py::arg("system"),
             py::arg("context") = nullptr,
-            // Keep alive, reference: `self` keeps `System` alive.
+            // Keep alive, reference: `self` keeps `system` alive.
             py::keep_alive<1, 2>(),
-            // Keep alive, reference: `self` keeps `Context` alive.
+            // Keep alive, reference: `self` keeps `context` alive.
             py::keep_alive<1, 3>(), doc.RungeKutta3Integrator.ctor.doc);
 
-    DefineTemplateClassWithDefault<Simulator<T>>(
-        m, "Simulator", GetPyParam<T>(), doc.Simulator.doc)
+    auto cls = DefineTemplateClassWithDefault<Simulator<T>>(
+        m, "Simulator", GetPyParam<T>(), doc.Simulator.doc);
+    cls  // BR
         .def(py::init<const System<T>&, unique_ptr<Context<T>>>(),
             py::arg("system"), py::arg("context") = nullptr,
-            // Keep alive, reference: `self` keeps `System` alive.
+            // Keep alive, reference: `self` keeps `system` alive.
             py::keep_alive<1, 2>(),
-            // Keep alive, ownership: `Context` keeps `self` alive.
+            // Keep alive, ownership: `context` keeps `self` alive.
             py::keep_alive<3, 1>(), doc.Simulator.ctor.doc)
         .def("Initialize", &Simulator<T>::Initialize,
             doc.Simulator.Initialize.doc)
-        .def("AdvanceTo", &Simulator<T>::AdvanceTo, doc.Simulator.AdvanceTo.doc)
-        .def("StepTo", &Simulator<T>::StepTo, "Use AdvanceTo() instead.")
+        .def("AdvanceTo", &Simulator<T>::AdvanceTo, py::arg("boundary_time"),
+            doc.Simulator.AdvanceTo.doc)
+        .def("AdvancePendingEvents", &Simulator<T>::AdvancePendingEvents,
+            doc.Simulator.AdvancePendingEvents.doc)
         .def("get_context", &Simulator<T>::get_context, py_reference_internal,
             doc.Simulator.get_context.doc)
         .def("get_integrator", &Simulator<T>::get_integrator,
@@ -95,14 +102,28 @@ PYBIND11_MODULE(analysis, m) {
             py_reference_internal, doc.Simulator.get_mutable_integrator.doc)
         .def("get_mutable_context", &Simulator<T>::get_mutable_context,
             py_reference_internal, doc.Simulator.get_mutable_context.doc)
+        .def("has_context", &Simulator<T>::has_context,
+            doc.Simulator.has_context.doc)
+        .def("reset_context", &Simulator<T>::reset_context, py::arg("context"),
+            // Keep alive, ownership: `context` keeps `self` alive.
+            py::keep_alive<2, 1>(), doc.Simulator.reset_context.doc);
+    // TODO(eric.cousineau): Bind `release_context` once some form of the
+    // PR RobotLocomotion/pybind11#33 lands. Presently, it fails.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    cls  // BR
         .def("reset_integrator",
-            [](Simulator<T>* self,
-                std::unique_ptr<IntegratorBase<T>> integrator) {
-              return self->reset_integrator(std::move(integrator));
-            },
-            // Keep alive, ownership: `Integrator` keeps `self` alive.
+            WrapDeprecated(doc.Simulator.reset_integrator.doc_deprecated_1args,
+                [](Simulator<T>* self,
+                    std::unique_ptr<IntegratorBase<T>> integrator) {
+                  return self->reset_integrator(std::move(integrator));
+                }),
+            py::arg("integrator"),
+            // Keep alive, ownership: `integrator` keeps `self` alive.
             py::keep_alive<2, 1>(),
-            doc.Simulator.reset_integrator.doc_1args_stduniqueptr)
+            doc.Simulator.reset_integrator.doc_deprecated_1args);
+#pragma GCC diagnostic pop
+    cls  // BR
         .def("set_publish_every_time_step",
             &Simulator<T>::set_publish_every_time_step,
             doc.Simulator.set_publish_every_time_step.doc)

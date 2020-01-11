@@ -144,6 +144,8 @@ namespace geometry {
 
 /** The set of properties for geometry used in a _proximity_ role.
 
+ <!-- TODO(SeanCurtis-TRI): When the hydroelastic geometry module is written,
+  put a reference to the discussion of ProximityProperties here.  -->
  Examples of functionality that depends on the proximity role:
    - n/a
  */
@@ -151,22 +153,19 @@ class ProximityProperties final : public GeometryProperties {
  public:
   DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(ProximityProperties);
   // TODO(SeanCurtis-TRI): Should this have the physical properties built in?
-
-  // TODO(SeanCurtis-TRI): Consider adding ProximityIndex to this.
   ProximityProperties() = default;
 };
 
 /** The set of properties for geometry used in a "perception" role.
 
  Examples of functionality that depends on the perception role:
-   - n/a
+   - render::RenderEngineVtk
+   - render::RenderEngineOspray
  */
 class PerceptionProperties final : public GeometryProperties{
  public:
   DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(PerceptionProperties);
   // TODO(SeanCurtis-TRI): Should this have a render label built in?
-
-  // TODO(SeanCurtis-TRI): Consider adding PerceptionIndex to this.
   PerceptionProperties() = default;
 };
 
@@ -189,6 +188,16 @@ enum class Role {
   kProximity = 0x1,
   kIllustration = 0x2,
   kPerception = 0x4
+};
+
+// NOTE: Currently this only includes new and replace; but someday it could also
+// include other operations: merge, subtract, etc.
+/** The operations that can be performed on the given properties when assigning
+ roles to geometry.  */
+enum class RoleAssign {
+  kNew,      ///< Assign the properties to a geometry that doesn't already have
+             ///< the role.
+  kReplace   ///< Replace the existing role properties completely.
 };
 
 /** @name  Geometry role to string conversions

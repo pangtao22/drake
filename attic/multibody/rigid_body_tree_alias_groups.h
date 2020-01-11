@@ -9,8 +9,8 @@
 
 /**
  * This class provides a way to create aliases to groups of RigidBody or
- * DrakeJoint objects. The creation of these groups can be done either
- * programmatically or via an AliasGroups protobuf config file.
+ * DrakeJoint objects. The creation of these groups can be done
+ * programmatically.
  *
  * For example, suppose we have a RigidBodyTree with 6 links named
  * [link0 ~ link5], and 6 joints [base, joint0 ~ joint4]. We can "rename"
@@ -42,18 +42,6 @@ class RigidBodyTreeAliasGroups {
    */
   explicit RigidBodyTreeAliasGroups(const RigidBodyTree<T>* tree)
       : tree_(*tree) {}
-
-  /**
-   * Parses body groups and joint groups from a config file.
-   *
-   * @param config Path to text-format AliasGroups file.
-   *
-   * @throws std::logic_error if body_namei or joint_namei cannot be found in
-   * the RigidBodyTree provided at construction time.
-   * @throws std::runtime_error if joint names or body names cannot be parsed
-   * correctly.
-   */
-  void LoadFromFile(const std::string& path);
 
   /**
    * Creates a body group named @p group_name whose elements have names from

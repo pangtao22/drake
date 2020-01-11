@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <iterator>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -13,11 +15,11 @@
 #include "drake/common/default_scalars.h"
 #include "drake/common/drake_copyable.h"
 #include "drake/common/drake_deprecated.h"
-#include "drake/common/drake_optional.h"
 #include "drake/common/pointer_cast.h"
 #include "drake/common/random.h"
 #include "drake/math/rigid_transform.h"
 #include "drake/multibody/tree/acceleration_kinematics_cache.h"
+#include "drake/multibody/tree/articulated_body_force_bias_cache.h"
 #include "drake/multibody/tree/articulated_body_inertia_cache.h"
 #include "drake/multibody/tree/multibody_forces.h"
 #include "drake/multibody/tree/multibody_tree_system.h"
@@ -381,6 +383,11 @@ class MultibodyTree {
   /// arguments to this method `args` are forwarded to `ForceElementType`'s
   /// constructor.
   ///
+  /// This method can only be called once for elements of type
+  /// UniformGravityFieldElement. That is, gravity can only be specified once
+  /// and std::runtime_error is thrown if the model already contains a gravity
+  /// field element.
+  ///
   /// The newly created `ForceElementType` object will be specialized on the
   /// scalar type T of this %MultibodyTree.
   template <template<typename Scalar> class ForceElementType>
@@ -408,27 +415,7 @@ class MultibodyTree {
   /// force element is defined.
   /// @throws std::exception if gravity was already added to the model.
   template<template<typename Scalar> class ForceElementType, typename... Args>
-#ifdef DRAKE_DOXYGEN_CXX
-  const ForceElementType<T>&
-#else
-  typename std::enable_if<!std::is_same<
-      ForceElementType<T>,
-      UniformGravityFieldElement<T>>::value, const ForceElementType<T>&>::type
-#endif
-  AddForceElement(Args&&... args);
-
-  // SFINAE overload for ForceElementType = UniformGravityFieldElement.
-  // This allow us to keep track of the gravity field parameters.
-  // TODO(amcastro-tri): This specialization pattern leads to difficult to
-  // mantain indirection layers between MBP/MBT and can cause difficult to find
-  // bugs, see #11051. It is bad practice and should removed, see #11080.
-  template<template<typename Scalar> class ForceElementType, typename... Args>
-  DRAKE_DEPRECATED("2019-09-01",
-                   "Use mutable_gravity_field().set_gravity_vector() instead.")
-  typename std::enable_if<std::is_same<
-      ForceElementType<T>,
-      UniformGravityFieldElement<T>>::value, const ForceElementType<T>&>::type
-  AddForceElement(Args&&... args);
+  const ForceElementType<T>& AddForceElement(Args&&... args);
 
   /// See MultibodyPlant documentation.
   template <template<typename Scalar> class JointType>
@@ -506,8 +493,10 @@ class MultibodyTree {
   template<template<typename> class JointType, typename... Args>
   const JointType<T>& AddJoint(
       const std::string& name,
-      const Body<T>& parent, const optional<math::RigidTransform<double>>& X_PF,
-      const Body<T>& child, const optional<math::RigidTransform<double>>& X_BM,
+      const Body<T>& parent,
+      const std::optional<math::RigidTransform<double>>& X_PF,
+      const Body<T>& child,
+      const std::optional<math::RigidTransform<double>>& X_BM,
       Args&&... args);
 
   /// Creates and adds a JointActuator model for an actuator acting on a given
@@ -522,6 +511,9 @@ class MultibodyTree {
   ///   HasJointActuatorNamed().
   /// @param[in] joint
   ///   The Joint to be actuated by the new JointActuator.
+  /// @param[in] effort_limit
+  ///   The maximum effort for the actuator. It must be greater than 0. If
+  ///   the user does not set this value, the default value is +∞.
   /// @returns A constant reference to the new JointActuator just added, which
   /// will remain valid for the lifetime of `this` %MultibodyTree.
   /// @throws std::exception if `this` model already contains a joint actuator
@@ -530,7 +522,8 @@ class MultibodyTree {
   // TODO(amcastro-tri): consider adding sugar method to declare an actuated
   // joint with a single call. Maybe MBT::AddActuatedJoint() or the like.
   const JointActuator<T>& AddJointActuator(
-      const std::string& name, const Joint<T>& joint);
+      const std::string& name, const Joint<T>& joint,
+      double effort_limit = std::numeric_limits<double>::infinity());
 
   /// Creates a new model instance.  Returns the index for a new model
   /// instance (as there is no concrete object beyond the index).
@@ -682,6 +675,34 @@ class MultibodyTree {
   const Mobilizer<T>& get_mobilizer(MobilizerIndex mobilizer_index) const {
     DRAKE_THROW_UNLESS(mobilizer_index < num_mobilizers());
     return *owned_mobilizers_[mobilizer_index];
+  }
+
+  /// See MultibodyPlant method.
+  template <template <typename> class ForceElementType = ForceElement>
+  const ForceElementType<T>& GetForceElement(
+      ForceElementIndex force_element_index) const {
+    static_assert(
+        std::is_base_of<ForceElement<T>, ForceElementType<T>>::value,
+        "ForceElementType<T> must be a sub-class of ForceElement<T>.");
+    const ForceElement<T>* force_element =
+        &get_force_element(force_element_index);
+
+    const ForceElementType<T>* typed_force_element =
+        dynamic_cast<const ForceElementType<T>*>(force_element);
+    if (typed_force_element == nullptr) {
+      throw std::logic_error("ForceElement is not of type '" +
+                             NiceTypeName::Get<ForceElementType<T>>() +
+                             "' but of type '" +
+                             NiceTypeName::Get(*force_element) + "'.");
+    }
+
+    return *typed_force_element;
+  }
+
+  const ForceElement<T>& get_force_element(
+      ForceElementIndex force_element_index) const {
+    DRAKE_THROW_UNLESS(force_element_index < num_force_elements());
+    return *owned_force_elements_[force_element_index];
   }
 
   /// An accessor to the current gravity field.
@@ -928,7 +949,7 @@ class MultibodyTree {
   template <template <typename> class JointType = Joint>
   const JointType<T>& GetJointByName(
       const std::string& name,
-      optional<ModelInstanceIndex> model_instance = nullopt) const {
+      std::optional<ModelInstanceIndex> model_instance = std::nullopt) const {
     static_assert(std::is_base_of<Joint<T>, JointType<T>>::value,
                   "JointType<T> must be a sub-class of Joint<T>.");
 
@@ -967,7 +988,7 @@ class MultibodyTree {
   template <template <typename> class JointType = Joint>
   JointType<T>& GetMutableJointByName(
       const std::string& name,
-      optional<ModelInstanceIndex> model_instance = nullopt) {
+      std::optional<ModelInstanceIndex> model_instance = std::nullopt) {
     const JointType<T>& const_joint =
         GetJointByName<JointType>(name, model_instance);
 
@@ -1026,12 +1047,24 @@ class MultibodyTree {
   /// retrieve a local copy of their topology.
   const MultibodyTreeTopology& get_topology() const { return topology_; }
 
+  /// Returns the mobilizer model for joint with index `joint_index`. The index
+  /// is invalid if the joint is not modeled with a mobilizer.
+  MobilizerIndex get_joint_mobilizer(JointIndex joint_index) const {
+    DRAKE_DEMAND(joint_index < num_joints());
+    return joint_to_mobilizer_[joint_index];
+  }
+
   /// @name Model instance accessors
   /// Many functions on %MultibodyTree expect vectors of tree state or
   /// joint actuator inputs which encompass the entire tree.  Methods
   /// in this section are convenience accessors for the portion of
   /// those vectors which apply to a single model instance only.
   /// @{
+
+  /// See MultibodyPlant method.
+  VectorX<T> GetActuationFromArray(
+      ModelInstanceIndex model_instance,
+      const Eigen::Ref<const VectorX<T>>& u) const;
 
   /// See MultibodyPlant method.
   void SetActuationInArray(
@@ -1215,7 +1248,14 @@ class MultibodyTree {
   /// See MultibodyPlant method.
   math::RigidTransform<T> CalcRelativeTransform(
       const systems::Context<T>& context,
-      const Frame<T>& frame_A, const Frame<T>& frame_B) const;
+      const Frame<T>& frame_F,
+      const Frame<T>& frame_G) const;
+
+  /// See MultibodyPlant method.
+  math::RotationMatrix<T> CalcRelativeRotationMatrix(
+      const systems::Context<T>& context,
+      const Frame<T>& frame_F,
+      const Frame<T>& frame_G) const;
 
   /// See MultibodyPlant method.
   void CalcPointsPositions(
@@ -1224,6 +1264,38 @@ class MultibodyTree {
       const Eigen::Ref<const MatrixX<T>>& p_BQi,
       const Frame<T>& frame_A,
       EigenPtr<MatrixX<T>> p_AQi) const;
+
+  /// See MultibodyPlant method.
+  Vector3<T> CalcCenterOfMassPosition(const systems::Context<T>& context) const;
+
+  /// See MultibodyPlant method.
+  Vector3<T> CalcCenterOfMassPosition(
+      const systems::Context<T>& context,
+      const std::vector<ModelInstanceIndex>& model_instances) const;
+
+  /// This method computes the center of mass position p_WCcm of specified
+  /// bodies measured and expressed in world frame W. The specified bodies
+  /// are considered as a single composite body C, whose center of mass
+  /// `composite_mass` is located at Ccm. The bodies are selected by a vector of
+  /// body indexes `body_indexes`. This function does not distinguish between
+  /// welded bodies, joint connected bodies and floating bodies. The
+  /// world_body() is ignored.
+  ///
+  /// @param[in] context
+  ///   The context containing the state of the model. It stores the
+  ///   generalized positions q of the model.
+  /// @param[in] body_indexes
+  ///   The vector of selected bodies. `body_indexes` **must** not be empty.
+  /// @retval p_WCcm
+  ///   The output position of center of mass in the world frame W.
+  ///
+  /// @throws std::runtime_error if `MultibodyPlant` has no body except
+  ///   `world_body()`.
+  /// @throws std::runtime_error if `body_indexes.empty() == true`.
+  /// @throws std::runtime_error unless `composite_mass > 0`.
+  Vector3<T> CalcCenterOfMassPosition(
+      const systems::Context<T>& context,
+      const std::vector<BodyIndex>& body_indexes) const;
 
   /// See MultibodyPlant method.
   const math::RigidTransform<T>& EvalBodyPoseInWorld(
@@ -1242,18 +1314,6 @@ class MultibodyTree {
   /// @{
 
   /// See MultibodyPlant method.
-  void CalcPointsGeometricJacobianExpressedInWorld(
-      const systems::Context<T>& context,
-      const Frame<T>& frame_F, const Eigen::Ref<const MatrixX<T>>& p_FP_list,
-      EigenPtr<MatrixX<T>> p_WP_list, EigenPtr<MatrixX<T>> Jv_WFp) const;
-
-  /// See MultibodyPlant method.
-  void CalcPointsGeometricJacobianExpressedInWorld(
-      const systems::Context<T>& context,
-      const Frame<T>& frame_F, const Eigen::Ref<const MatrixX<T>>& p_WP_list,
-      EigenPtr<MatrixX<T>> Jv_WFp) const;
-
-  /// See MultibodyPlant method.
   VectorX<T> CalcBiasForJacobianTranslationalVelocity(
       const systems::Context<T>& context,
       JacobianWrtVariable with_respect_to,
@@ -1261,18 +1321,6 @@ class MultibodyTree {
       const Eigen::Ref<const MatrixX<T>>& p_FP_list,
       const Frame<T>& frame_A,
       const Frame<T>& frame_E) const;
-
-  /// See MultibodyPlant method.
-  void CalcPointsAnalyticalJacobianExpressedInWorld(
-      const systems::Context<T>& context,
-      const Frame<T>& frame_F, const Eigen::Ref<const MatrixX<T>>& p_FP_list,
-      EigenPtr<MatrixX<T>> p_WP_list, EigenPtr<MatrixX<T>> Jq_WFp) const;
-
-  /// See MultibodyPlant method.
-  void CalcFrameGeometricJacobianExpressedInWorld(
-      const systems::Context<T>& context,
-      const Frame<T>& frame_F, const Eigen::Ref<const Vector3<T>>& p_FP,
-      EigenPtr<MatrixX<T>> Jv_WFp) const;
 
   /// See MultibodyPlant method.
   Vector6<T> CalcBiasForJacobianSpatialVelocity(
@@ -1297,14 +1345,52 @@ class MultibodyTree {
                                    const Frame<T>& frame_B,
                                    const Frame<T>& frame_A,
                                    const Frame<T>& frame_E,
-                                   EigenPtr<MatrixX<T>> Js_w_AB_E) const;
+                                   EigenPtr<Matrix3X<T>> Js_w_AB_E) const;
 
-  /// See MultibodyPlant method.
+  /// Return a point's translational velocity Jacobian in a frame A with respect
+  /// to "speeds" 𝑠, where 𝑠 is either q̇ ≜ [q̇₁ ... q̇ⱼ]ᵀ (time-derivatives of
+  /// j generalized positions) or v ≜ [v₁ ... vₖ]ᵀ (k generalized velocities).
+  /// For each point Bi of (fixed to) a frame B whose translational velocity
+  /// `v_ABi` in a frame A is characterized by speeds 𝑠, Bi's translational
+  /// velocity Jacobian in A with respect to 𝑠 is defined as
+  /// <pre>
+  ///      Js_v_ABi = [ ∂(v_ABi)/∂𝑠₁,  ...  ∂(v_ABi)/∂𝑠ₙ ]    (n is j or k)
+  /// </pre>
+  /// Point Bi's velocity in A is linear in 𝑠₁, ... 𝑠ₙ and can be written
+  /// `v_ABi = Js_v_ABi ⋅ 𝑠`  where 𝑠 is [𝑠₁ ... 𝑠ₙ]ᵀ.
+  ///
+  /// @param[in] context The state of the multibody system.
+  /// @param[in] with_respect_to Enum equal to JacobianWrtVariable::kQDot or
+  /// JacobianWrtVariable::kV, indicating whether the Jacobian `Js_v_ABi` is
+  /// partial derivatives with respect to 𝑠 = q̇ (time-derivatives of generalized
+  /// positions) or with respect to 𝑠 = v (generalized velocities).
+  /// @param[in] frame_B The frame on which point Bi is fixed (e.g., welded).
+  /// @param[in] frame_F The frame associated with `p_FoBi_F` (next argument),
+  /// which is usually (but is not necessarily) frame_B or the world frame W.
+  /// @param[in] p_FoBi_F A position vector or list of position vectors from
+  /// Fo (frame_F's origin) to points Bi (regarded as fixed to B), where each
+  /// position vector is expressed in frame F.
+  /// @param[in] frame_A The frame that measures `v_ABi` (Bi's velocity in A).
+  /// @param[in] frame_E The frame in which `v_ABi` is expressed on input and
+  /// the frame in which the Jacobian `Js_v_ABi` is expressed on output.
+  /// @param[out] Js_v_ABi_E Point Bi's velocity Jacobian in frame A with
+  /// respect to speeds 𝑠 (which is either q̇ or v), expressed in frame E.
+  /// `Js_v_ABi_E` is a `3 x n` matrix, where n is the number of elements in 𝑠.
+  /// The Jacobian is a function of only generalized positions q (which are
+  /// pulled from the context).
+  /// @throws std::exception if `Js_v_ABi_E` is nullptr or not of size `3 x n`.
+  ///
+  /// Note: This method is more general than the corresponding MultibodyPlant
+  /// method as it also contains the argument `frame_F`.
   void CalcJacobianTranslationalVelocity(
       const systems::Context<T>& context,
-      JacobianWrtVariable with_respect_to, const Frame<T>& frame_B,
-      const Eigen::Ref<const Vector3<T>>& p_BoBp_B, const Frame<T>& frame_A,
-      const Frame<T>& frame_E, EigenPtr<MatrixX<T>> Js_v_ABp_E) const;
+      JacobianWrtVariable with_respect_to,
+      const Frame<T>& frame_B,
+      const Frame<T>& frame_F,
+      const Eigen::Ref<const Matrix3X<T>>& p_FoBi_F,
+      const Frame<T>& frame_A,
+      const Frame<T>& frame_E,
+      EigenPtr<MatrixX<T>> Js_v_ABi_E) const;
 
   /// @}
   // End of multibody Jacobian methods section.
@@ -1327,7 +1413,7 @@ class MultibodyTree {
   ///   body B.
   /// - Pose `X_WB` of each body B in the model as measured and expressed in
   ///   the world frame W.
-  /// - Across-mobilizer Jacobian matrices `H_FM` and `H_PB_W`.
+  /// - Across-mobilizer and across-node hinge matrices `H_FM` and `H_PB_W`.
   /// - Body specific quantities such as `com_W` and `M_Bo_W`.
   ///
   /// Aborts if `pc` is nullptr.
@@ -1366,21 +1452,21 @@ class MultibodyTree {
       const systems::Context<T>& context,
       std::vector<SpatialInertia<T>>* M_B_W_cache) const;
 
-  /// Computes the bias term `b_Bo_W(q, v)` for each body in the model.
-  /// For a body B, this is the bias term `b_Bo_W` in the equation
-  /// `F_BBo_W = M_Bo_W * A_WB + b_Bo_W`, where `M_Bo_W` is the spatial inertia
+  /// Computes the bias term `Fb_Bo_W(q, v)` for each body in the model.
+  /// For a body B, this is the bias term `Fb_Bo_W` in the equation
+  /// `F_BBo_W = M_Bo_W * A_WB + Fb_Bo_W`, where `M_Bo_W` is the spatial inertia
   /// about B's origin Bo, `A_WB` is the spatial acceleration of B in W and
   /// `F_BBo_W` is the spatial force applied on B about Bo, expressed in W.
   /// @param[in] context
   ///   The context storing the state of the model.
-  /// @param[out] b_Bo_W_cache
-  ///   For each body in the model, entry Body::node_index() in b_Bo_W_cache
-  ///   contains the updated bias term `b_Bo_W(q, v)` for that body. On input it
-  ///   must be a valid pointer to a vector of size num_bodies().
-  /// @throws std::exception if b_Bo_W_cache is nullptr or if its size is not
+  /// @param[out] Fb_Bo_W_cache
+  ///   For each body in the model, entry Body::node_index() in Fb_Bo_W_cache
+  ///   contains the updated bias term `Fb_Bo_W(q, v)` for that body. On input
+  ///   it must be a valid pointer to a vector of size num_bodies().
+  /// @throws std::exception if Fb_Bo_W_cache is nullptr or if its size is not
   /// num_bodies().
   void CalcDynamicBiasCache(const systems::Context<T>& context,
-                            std::vector<SpatialForce<T>>* b_Bo_W_cache) const;
+                            std::vector<SpatialForce<T>>* Fb_Bo_W_cache) const;
 
   /// Computes all the kinematic quantities that depend on the generalized
   /// accelerations that is, the generalized velocities' time derivatives, and
@@ -1443,8 +1529,9 @@ class MultibodyTree {
   /// of a vector applied generalized forces. The last term is a summation over
   /// all bodies in the model where `Fapp_Bo_W` is an applied spatial force on
   /// body B at `Bo` which gets projected into the space of generalized forces
-  /// with the geometric Jacobian `J_WB(q)` which maps generalized velocities
-  /// into body B spatial velocity as `V_WB = J_WB(q)v`.
+  /// with the transpose of `Jv_V_WB(q)` (where `Jv_V_WB` is B's spatial
+  /// velocity Jacobian in W with respect to generalized velocities v).
+  /// Note: B's spatial velocity in W can be written as `V_WB = Jv_V_WB * v`.
   /// This method does not compute explicit expressions for the mass matrix nor
   /// for the bias term, which would be of at least `O(n²)` complexity, but it
   /// implements an `O(n)` Newton-Euler recursive algorithm, where n is the
@@ -1544,6 +1631,28 @@ class MultibodyTree {
       std::vector<SpatialForce<T>>* F_BMo_W_array,
       EigenPtr<VectorX<T>> tau_array) const;
 
+  /// Given the state stored in `context` and a
+  /// known vector of generalized accelerations `vdot`, this method computes the
+  /// set of generalized forces `tau_id` that would need to be applied at each
+  /// Mobilizer in order to attain the specified generalized accelerations.
+  /// Mathematically, this method computes: <pre>
+  ///   tau_id = M(q)v̇ + C(q, v)v - tau_app - ∑ J_WBᵀ(q) Fapp_Bo_W
+  /// </pre>
+  /// where `M(q)` is the mass matrix, `C(q, v)v` is the bias
+  /// term containing Coriolis and gyroscopic effects and `tau_app` consists
+  /// of a vector applied generalized forces.
+  ///
+  /// iff `ignore_velocities = true` velocity values stored in `context` are
+  /// ignored and are assumed to be zero. Therefore, C(q, v)v = 0 and it is not
+  /// computed to avoid unnecessary work.
+  void CalcInverseDynamics(
+      const systems::Context<T>& context, const VectorX<T>& known_vdot,
+      const std::vector<SpatialForce<T>>& Fapplied_Bo_W_array,
+      const Eigen::Ref<const VectorX<T>>& tau_applied_array,
+      bool ignore_velocities, std::vector<SpatialAcceleration<T>>* A_WB_array,
+      std::vector<SpatialForce<T>>* F_BMo_W_array,
+      EigenPtr<VectorX<T>> tau_array) const;
+
   /// See MultibodyPlant method.
   void CalcForceElementsContribution(
       const systems::Context<T>& context,
@@ -1581,30 +1690,283 @@ class MultibodyTree {
       const Eigen::Ref<const VectorX<T>>& qdot,
       EigenPtr<VectorX<T>> v) const;
 
-  /// Computes all the quantities that are required in the final pass of the
-  /// articulated body algorithm and stores them in the articulated body cache
-  /// `abc`.
-  ///
-  /// These include:
-  /// - Articulated body inertia `Pplus_PB_W`, which can be thought of as the
-  ///   articulated body inertia of parent body P as though it were inertialess,
-  ///   but taken about Bo and expressed in W.
-  ///
-  /// @param[in] context
-  ///   The context containing the state of the %MultibodyTree model.
-  /// @param[in] pc
-  ///   A position kinematics cache object already updated to be in sync with
-  ///   `context`.
-  /// @param[out] abc
-  ///   A pointer to a valid, non nullptr, articulated body cache. This method
-  ///   throws an exception if `abc` is a nullptr.
-  ///
-  /// @pre The position kinematics `pc` must have been previously updated with a
-  /// call to CalcPositionKinematicsCache() using the same `context`  .
+  /**
+  @anchor internal_forward_dynamics
+  @name Articulated Body Algorithm Forward Dynamics.
+  The Articulated %Body Algorithm (ABA) implements a forward dynamics
+  computation with O(n) complexity. The algorithm is implemented in terms of
+  three main passes:
+  1. CalcArticulatedBodyInertiaCache(): which performs a tip-to-base pass to
+     compute the ArticulatedBodyInertia for each body along with other ABA
+     quantities that are configuration dependent only.
+  2. CalcArticulatedBodyForceBiasCache(): a second tip-to-base pass which
+     essentially computes the bias terms in the ABA equations. These are a
+     function of the full state x = [q; v] and externally applied actuation and
+     forces.
+  3. CalcArticulatedBodyAccelerations(): which performs a final base-to-tip
+     recursion to compute the acceleration of each body in the model. These
+     accelerations are a function of the ArticulatedBodyForceBiasCache
+     previously computed by CalcArticulatedBodyForces(). That is, accelerations
+     are a function of state x and applied forces.
+
+  The Newton-Euler equations governing the motion of a rigid body are: <pre>
+    Fapp_B = M_B * A_WB + Fb_B
+  </pre>
+  which describe the effect of the total applied spatial forces Fapp_B on the
+  spatial acceleration A_WB of a **rigid body** B with spatial inertia M_B.
+  Fb_B is the spatial force bias containing gyroscopic terms. 
+
+  Similarly, it is possible to show that there exists a linear relationship
+  between the spatial acceleration and external forces for a body that belongs
+  to a system of rigid bodies or **articulated body**. In particular, if this
+  body is the root (or handle) of an articulated body system, the reaction force
+  needed to enforce its the motion with acceleration A_WB is given by: <pre>
+    F_B = P_B * A_WB + Z_B                                                   (1)
+  </pre>
+  where F_B is now the spatial force needed to induce the spatial acceleration
+  A_WB of this root body B being part of a larger articulated system. Z_B is
+  the articulated body spatial forces bias term and P_B the articulated body
+  inertia, see documentation in the ArticulatedBodyInertia class. The existence
+  of P_B and Z_B can be proved by induction, see [Jain 2010, §6.2.1] and
+  [Featherstone 2008, §7.2].
+
+  In Drake we closely follow the notation and spatial algebra described in [Jain
+  2010]. However, we follow the algebraic steps of ABA as described in
+  [Featherstone 2008]. The main difference between the two presentations becomes
+  apparent when contrasting [Jain 2010, Eq. 7.34] with [Featherstone, 2008, Eq.
+  7.25] which show how to compute joint reaction forces for an articulated body.
+  A more in depth analysis reveals that this difference stems from a different
+  definition of the articulated force bias, see @ref abi_and_bias_force
+  "Articulated Body Inertia and Bias Force". That is, Featherstone's and Jain's
+  force biases have different numerical values.
+
+  Both algorithms are equivalent but in Drake we like the neat parallelism
+  between the Newton-Euler equations and the ABA equations as presented by
+  [Featherstone, 2008]. That is, with Featherstone's definition of the force
+  bias we can write F_B_W = P_B_W * A_WB + Z_B_W [Featherstone, 2008, Eq. 7.25]
+  while Jain needs to first subtract the acceleration bias as in F_B_W = P_B_W *
+  (A_WB - Ab_WB) + Z_B_W [Jain 2010, Eq. 7.34].
+
+  The section below on @ref forward_dynamics_notation "Notation" summarizes the
+  main differences in notation between [Featherstone, 2008], [Jain, 2010] and
+  Drake, as well as it provides equations numbers for each reference.
+
+  @anchor abi_and_bias_force
+  <h3> Articulated %Body Inertia and Force Bias </h3>
+
+  We can prove the existence of P_B and Z_B for all bodies in a multibody
+  system using an induction argument on Eq. (1). [Featherstone, 2008] does this
+  in a very clear and compact form in Section 7.2.2 while at the same time
+  deriving the recursive relations to compute these quantities. Here we limit
+  ourselves to 1) introduce these equations with Drake's notation, making
+  reference to the respective equations in [Featherstone, 2008], and
+  2) to highlight the differences with the formulation in [Jain, 2010] for
+     reference.
+
+  Articulated body inertias and force biases can be computed by a recursive tip
+  to base assembly process (Eqs. 7.21-7.24 in [Featherstone, 2008]): <pre>
+    P_B_W = M_B_W + Σᵢ Pplus_BCib_W                                          (2)
+    Z_B_W = Fb_B_W - Fapp_B_W + Σᵢ Zplus_Cib_W                               (3)
+  </pre>
+  where M_B_W is the SpatialInertia of body B, P_B_W its
+  ArticulatedBodyInertia, Fapp_B_W are the externally applied forces, and
+  Pplus_BCib_W and Zplus_Cib_W are the effective ABI and force bias of an
+  articulated body with a massless handle at B and including all bodies outboard
+  of Ci. Both Pplus_BCib_W and Zplus_Cib_W are shifted to B and expressed in W.
+  The role of Pplus_BCib_W and Zplus_Cib_W is clearer when considering the
+  equation to compute the reaction force at the mobilizer constraining the
+  motion of body B (Eq. 7.25 in [Featherstone, 2008]): <pre>
+    F_B_W = Pplus_PB_W * Aplus_WB + Zplus_B_W                                (4)
+  </pre>
+  This equation mirrors Eq. (1) but it is written in terms of the rigidly
+  shifted spatial acceleration `Aplus_WB = Φᵀ(p_PB) * A_WP`, or
+  Aplus_WB.Shift(p_PB_W) in code.
+
+  The articulated body inertia Pplus can be computed once P_B_W is obtained from
+  Eq. (2): <pre>
+     Pplus_PB_W = P_B_W - P_B_W * H_PB_W * D_B⁻¹ * H_PB_Wᵀ * P_B_W
+                = P_B_W - g_B_W * U_B_W                                      (5)
+  </pre>
+  where: <pre>
+    D_B = H_PB_Wᵀ * P_B_W * H_PB_W ∈ ℝᵐˣᵐ                                    (6)
+    U_B_W = H_PB_Wᵀ * P_B_W ∈ ℝᵐˣ⁶                                           (7)
+    g_B_W = U_B_Wᵀ * D_B⁻¹ ∈ ℝ⁶ˣᵐ                                            (8)
+  </pre>
+  with m the number of mobilities of body B. U_B_W and g_B_W are useful
+  configuration dependent quantities that appear several times in the ABA. The
+  force bias Zplus across the mobilizer is computed once the Z_B_W is obtained
+  from Eq. (3): <pre>
+    Zplus_B_W = Z_B_W + Pplus_PB_W * Ab_WB + g_B_W * e_B                     (9)
+    e_B = tau_B - H_PB_Wᵀ * Z_B_W                                           (10)
+  </pre>
+  where tau_B are the applied generalized forces on body B's mobilizer. Notice
+  that, given their definition in Eqs. (3) and (9), the ABA force bias terms
+  Z_B_W and Zplus_B_W are not only a function of the velocity dependent
+  gyroscopic terms Ab_WB and Fb_B_W, but also of the externally applied forces
+  and actuation.
+
+  @note Even though we use H as the symbol for the "hinge matrix" ("joint's
+  motion subspace matrix" in Featherstone) as introduced by Jain, this matrix is
+  the **transpose** of Jain's matrix so that it acts as any other Jacobian. For
+  instance in Drake we read `V_PB_W = H_PB_W * v_B` while H_PB_W would be
+  transposed in Jain's book.
+
+  Terms that are only a function of the configuration q such as P_B_W,
+  Pplus_PB_W, D_B, and g_B_W are computed in the first pass of the ABA by
+  CalcArticulatedBodyInertiaCache(). The second pass implemented in
+  CalcArticulatedBodyForces() computes the acceleration bias Ab_WB_W,
+  articulated body force biases Z_B_W, Zplus_B_W, and e_B. These terms are
+  function of the full state including configuration and velocities and of the
+  applied external forcing. Ab_WB_W is zero when velocities are zero. Z_B_W,
+  Zplus_B_W, and e_B are zero when velocities and externally applied forces are
+  zero.
+
+  @note [Featherstone, 2008] and [Jain, 2010] use a different definition of
+  Z_B_W. When comparing the two algorithms, we'll denote with Zj_B_W,
+  Zjplus_B_W, and ej_B the bias terms as defined by Jain. They have different
+  numerical values than those introduced by [Featherstone, 2008] (even after
+  making the conversion from Plücker to Jain's spatial algebra.)
+  A detailed analysis of the two reveals that: <pre>
+    Zjplus_B_W = Zplus_B_W
+    Zj_B_W = Z_B_W + P_B_W * Ab_WB
+    ej_B = e_B - H_PB_Wᵀ * P_B_W * Ab_WB
+  </pre>
+  which then translates into the differences we observe with [Jain, 2010,
+  Algorithm 7.2]: <pre>
+    Zj_B_W = Fb_B_W - Fapp_B_W + Σᵢ Zplus_Cib_W + P_B_W * Ab_WB
+    Z_B_W  = Fb_B_W - Fapp_B_W + Σᵢ Zplus_Cib_W,                    from Eq. (3)
+  </pre>
+  where the term with Ab_WB does not appear in our Eq. (3).
+  <pre>
+    Zjplus_B_W = Zj_B_W + g_B_W * ej_B
+    Zplus_B_W  = Z_B_W  + g_B_W * e_B + Pplus_PB_W * Ab_WB,         from Eq. (9)
+  </pre>
+  where notice our Eq. (9) has the additional term Pplus_PB_W * Ab_WB. However,
+  as mentioned above, the numerical values of Zplus_B_W and Zjplus_B_W are
+  exactly the same given the difference cancels out through the additional terms
+  present in ej_B, see below. Finally:
+  <pre>
+    ej_B = tau_B - H_PB_Wᵀ * Zj_B_W
+    e_B  = tau_B - H_PB_Wᵀ * Z_B_W,                                from Eq. (10)
+  </pre>
+  which is deceivingly the same as our Eq. (10), however the result is
+  different given it has Zj_B_W in it, which numerically differs from Z_B_W.
+  This different definition of the force bias leads to a different expression
+  for the computation of reaction forces in terms of the articulated body
+  quantities: <pre>
+    F_B = P_B * A_WB + Z_B,             [Featherstone, 2008, Eq. 7.25]
+    F_B = P_B * (A_WB - Ab_WB) + Zj_B,  [Jain, 2010, Eq. 7.34]
+  </pre>
+  In Drake we prefer Featherstone's definition of the force bias terms given the
+  parallelism of the joint reaction forces equation with the Newton-Euler
+  equations.
+
+  @anchor abi_computing_accelerations
+  <h3> Computing Accelerations </h3>
+  Once ABA inertias and force bias terms are computed according to Eqs.
+  (2)-(10), the computation of accelerations is remarkably simple. The last base
+  to tip pass of the algorithm stems from combining the following three
+  equations: <pre>
+    A_WB = Aplus_WB + Ab_WB + H_PB_W * vdot_B                              (11a)
+    F_B_W = P_B_W * A_WB + Z_B_W                                           (11b)
+    tau_B = H_PB_Wᵀ * F_B_W                                                (11c)
+  </pre>
+  Equation (11a) is the motion constraint imposed by the body's mobilizer,
+  where the spatial acceleration bias Ab_WB = Ac_WB + Ab_PB includes the
+  centrifugal and Coriolis terms Ac_WB documented in
+  SpatialAcceleration::ComposeWithMovingFrameAcceleration() and the bias
+  term across the mobilizer Ab_PB (A_PB = H_PB * vdot_B + Ab_PB.)
+  Equation (11b) is the articulated body force balance from Eq. (1) and Eq.
+  (11c) projects the reaction force F_B to obtain the generalized forces tau_B.
+  We substitute Eqs. (11a) and (11b) into (11c) to obtain: <pre>
+    H_PB_Wᵀ*[P_B_W * (Aplus_WB + Ab_WB + H_PB_W * vdot_B) + Z_B_W] = tau_B  (12)
+  </pre>
+  we then factor out terms grouping vdot_B, acceleration biases and forcing:
+  <pre>
+    (H_PB_Wᵀ*P_B_W*H_PB_W) * vdot_B + (H_PB_Wᵀ*P_B_W) * (Aplus_WB + Ab_WB ) =
+      tau_B - H_PB_Wᵀ * Z_B_W                                               (13)
+  </pre>
+  using the definitions in Eqs. (6)-(8), we can rewrite (13) as: <pre>
+    D_B * vdot_B + U_B_W * (Aplus_WB + Ab_WB) = e_B                         (14)
+  </pre>
+  Therefore the last base-to-tip pass updates generalized accelerations and
+  spatial accelerations according to: <pre>
+    vdot_B = D_B⁻¹ * e_B - g_B_Wᵀ * (Aplus_WB + Ab_WB)                      (15)
+    A_WB = Aplus_WB + Ab_WB + H_PB_W * vdot_B                               (16)
+  </pre>
+  This is implemented in CalcArticulatedBodyAccelerations().
+
+  @note Given the different definition of Z and Zplus used by [Featherstone,
+  2008] and [Jain, 2010], the acceleration update used by Jain is: <pre>
+    vdot_B = D_B⁻¹ * e_B  - g_B_Wᵀ * (Aplus_WB + Ab_WB),           from Eq. (15)
+    vdot_B = D_B⁻¹ * ej_B - g_B_Wᵀ * Aplus_WB,            [Jain, 2010. Alg. 7.2]
+  </pre>
+
+  <h3> Notation </h3>
+  @anchor forward_dynamics_notation
+
+  Since we use the ABA algorithm as described in [Featherstone 2008], with
+  spatial algebra and symbols from [Jain, 2010] and monogram notation as
+  described in @ref multibody_notation, here we present a table that compares
+  the different symbols across these three different sources. This is
+  especially useful when studying the particulars of ABA as introduced in
+  [Jain, 2010] and [Featherstone 2008] or as implemented in Drake.
+
+  Quantity                            |    Featherstone 2008 †    |              Jain 2010 ††              | Drake monogram †††
+  ------------------------------------|:-------------------------:|:--------------------------------------:|:-------------------
+  %Body spatial acceleration          |  𝒂ᵢ                       |  α(k)                                  | A_WB
+  Rigidly shifted acceleration        |  N/A                      |  α⁺(k) (6.9)                           | Aplus_WB
+  Hinge matrix                        |  𝑺ᵢ (3.33)                |  H*(k)                                 | H_PB_W
+  Acceleration bias                   |  𝒄ᵢ (7.31)                |  𝔞(k)   (5.21)                         | Ab _WB
+  Outboard body spatial acceleration  | 𝒂ᵢ = 𝒂ₗ + 𝒄ᵢ + 𝑺ᵢq̈ᵢ (7.31) | α(k) = α⁺(k) + 𝔞(k) + H*(k)v(k) (5.21) | A_WB = Aplus_WB + Ab_WB + H_PB_W * vdot_B
+  Articulated %Body Inertia (ABI)     |  𝑰ᴬᵢ                (7.2)  | P(k)   (6.6)                          | P_B_W
+  ABI across the mobilizer            |  𝑰ᵃᵢ                (7.23) | P⁺(k)  (6.24)                         | Pplus_B_W
+  ABA force bias                      |  𝒑ᴬᵢ                (7.2)  | 𝔷(k)   (6.6)                           | Z_B_W
+  ABA force bias across the mobilizer |  𝒑ᵃᵢ                (7.24) | 𝔷⁺(k)  (6.33)                          | Zplus_B_W
+
+  † Featherstone's spatial vectors are Plücker vectors, see §2.
+
+  †† Jain's spatial vectors are the concatenation of two ordinary
+  three-dimensional vectors.
+
+  ††† In Drake's source we often specify the expressed-in frame explicitly.
+  However we often write derivations in vector form and omit the expressed-in
+  frame.
+
+  - [Jain 2010] Jain, A., 2010. Robot and multibody dynamics: analysis and
+                algorithms. Springer Science & Business Media, pp. 123-130.
+  - [Featherstone 2008] Featherstone, R., 2008. Rigid body dynamics algorithms.
+                        Springer.
+   @{
+  */
+
+  /// Performs a tip-to-base pass to compute the ArticulatedBodyInertia for each
+  /// body as a function of the configuration q stored in `context`. The
+  /// computation is stored in `abic` along with other Articulated Body
+  /// Algorithm (ABA) quantities.
   void CalcArticulatedBodyInertiaCache(
       const systems::Context<T>& context,
-      const PositionKinematicsCache<T>& pc,
-      ArticulatedBodyInertiaCache<T>* abc) const;
+      ArticulatedBodyInertiaCache<T>* abic) const;
+
+  /// Performs a tip-to-base pass which essentially computes the force bias
+  /// terms in the ABA equations. These are a function of the full state
+  /// `x = [q; v]`, stored in `context`, and externally applied `forces`.
+  /// Refer to @ref abi_and_bias_force "Articulated Body Inertia and Force Bias"
+  /// for further details.
+  void CalcArticulatedBodyForceBiasCache(
+      const systems::Context<T>& context, const MultibodyForces<T>& forces,
+      ArticulatedBodyForceBiasCache<T>* aba_force_bias_cache) const;
+
+  /// Performs the final base-to-tip pass of ABA to compute the acceleration of
+  /// each body in the model into output `ac`.
+  /// Refer to @ref abi_computing_accelerations "Computing Accelerations" for
+  /// further details.
+  void CalcArticulatedBodyAccelerations(
+    const systems::Context<T>& context,
+    const ArticulatedBodyForceBiasCache<T>& aba_force_bias_cache,
+    AccelerationKinematicsCache<T>* ac) const;
+
+  /// @}
 
   /// @}
   // Closes "Computational methods" Doxygen section.
@@ -1847,6 +2209,7 @@ class MultibodyTree {
     tree_clone->actuator_name_to_index_ = this->actuator_name_to_index_;
     tree_clone->instance_name_to_index_ = this->instance_name_to_index_;
     tree_clone->instance_index_to_name_ = this->instance_index_to_name_;
+    tree_clone->joint_to_mobilizer_ = this->joint_to_mobilizer_;
 
     // All other internals templated on T are created with the following call to
     // FinalizeInternals().
@@ -1873,6 +2236,19 @@ class MultibodyTree {
       const systems::Context<T>& context) const {
     DRAKE_ASSERT(tree_system_ != nullptr);
     return tree_system_->EvalVelocityKinematics(context);
+  }
+
+  // Evaluate the cache entry storing articulated body inertias in `context`.
+  const ArticulatedBodyInertiaCache<T>& EvalArticulatedBodyInertiaCache(
+      const systems::Context<T>& context) const {
+    return tree_system_->EvalArticulatedBodyInertiaCache(context);
+  }
+
+  // Evaluate the cache entry storing the across node Jacobian H_PB_W in
+  // `context`.
+  const std::vector<Vector6<T>>& EvalAcrossNodeJacobianWrtVExpressedInWorld(
+      const systems::Context<T>& context) const {
+    return tree_system_->EvalAcrossNodeJacobianWrtVExpressedInWorld(context);
   }
 
   /// @name                 State access methods
@@ -1998,6 +2374,13 @@ class MultibodyTree {
   }
   //@}
 
+  /// Returns the MultibodyTreeSystem that owns this MultibodyTree.
+  /// @pre There is an owning MultibodyTreeSystem.
+  const MultibodyTreeSystem<T>& tree_system() const {
+    DRAKE_DEMAND(tree_system_ != nullptr);
+    return *tree_system_;
+  }
+
   /// (Internal use only) Informs the MultibodyTree how to access its resources
   /// within a Context.
   void set_tree_system(MultibodyTreeSystem<T>* tree_system) {
@@ -2005,17 +2388,15 @@ class MultibodyTree {
     tree_system_ = tree_system;
   }
 
-  /// (Internal) Computes the cache entry associated with the geometric Jacobian
-  /// H_PB_W for each node.
-  /// The geometric Jacobian `H_PB_W` relates to the spatial velocity of B in P
-  /// by `V_PB_W = H_PB_W(q)⋅v_B`, where `v_B` corresponds to the generalized
-  /// velocities associated to body B. `H_PB_W` has size `6 x nm` with `nm` the
-  /// number of mobilities associated with body B.
-  /// `H_PB_W_cache` stores the Jacobian matrices for all nodes in the tree as a
-  /// vector of the columns of these matrices. Therefore `H_PB_W_cache` has as
-  /// many entries as number of generalized velocities in the tree.
-  // TODO(amcastro-tri): Rework this method as per issue #10155.
-  void CalcAcrossNodeGeometricJacobianExpressedInWorld(
+  /// (Internal) For a body B, calculates the cache entry associated with
+  /// H_PB_W for each node, where H_PB_W is
+  /// the `6 x nm` hinge matrix that relates `V_PB_W` (body B's spatial
+  /// velocity in its parent body P, expressed in world W) to this node's `nm`
+  /// generalized velocities (or mobilities) `v_B` as `V_PB_W = H_PB_W * v_B`.
+  /// `H_PB_W_cache` stores the Jacobian matrices for all nodes in the tree as
+  /// a vector of the columns of these matrices. Therefore `H_PB_W_cache` has
+  /// as many entries as number of generalized velocities in the tree.
+  void CalcAcrossNodeJacobianWrtVExpressedInWorld(
       const systems::Context<T>& context,
       const PositionKinematicsCache<T>& pc,
       std::vector<Vector6<T>>* H_PB_W_cache) const;
@@ -2121,8 +2502,8 @@ class MultibodyTree {
     return tree_system_->EvalSpatialInertiaInWorldCache(context);
   }
 
-  // Evaluates the cache entry stored in context with the bias term b_Bo_W(q, v)
-  // for each body. These will be updated as needed.
+  // Evaluates the cache entry stored in context with the bias term
+  // Fb_Bo_W(q, v) for each body. These will be updated as needed.
   const std::vector<SpatialForce<T>>& EvalDynamicBiasCache(
       const systems::Context<T>& context) const {
     DRAKE_ASSERT(tree_system_ != nullptr);
@@ -2143,98 +2524,63 @@ class MultibodyTree {
       bool ignore_velocities,
       std::vector<SpatialAcceleration<T>>* A_WB_array) const;
 
-  // Given the state stored in `context` and a
-  // known vector of generalized accelerations `vdot`, this method computes the
-  // set of generalized forces `tau_id` that would need to be applied at each
-  // Mobilizer in order to attain the specified generalized accelerations.
-  // Mathematically, this method computes: <pre>
-  //   tau_id = M(q)v̇ + C(q, v)v - tau_app - ∑ J_WBᵀ(q) Fapp_Bo_W
-  // </pre>
-  // where `M(q)` is the mass matrix, `C(q, v)v` is the bias
-  // term containing Coriolis and gyroscopic effects and `tau_app` consists
-  // of a vector applied generalized forces.
-  //
-  // iff `ignore_velocities = true` velocity values stored in `context` are
-  // ignored and are assumed to be zero. Therefore, C(q, v)v = 0 and it is not
-  // computed to avoid unnecessary work.
-  void CalcInverseDynamics(
-      const systems::Context<T>& context, const VectorX<T>& known_vdot,
-      const std::vector<SpatialForce<T>>& Fapplied_Bo_W_array,
-      const Eigen::Ref<const VectorX<T>>& tau_applied_array,
-      bool ignore_velocities, std::vector<SpatialAcceleration<T>>* A_WB_array,
-      std::vector<SpatialForce<T>>* F_BMo_W_array,
-      EigenPtr<VectorX<T>> tau_array) const;
-
-  // Helper method to compute the rotational part of the frame Jacobian Jr_WFq
-  // and the translational part of the frame Jacobian Jt_WFq for a list of
-  // points Q which instantaneously move with frame F that is, the position
-  // of these points Q is fixed in frame F.
-  // Jacobians Jr_WFq and Jt_WFq are defined such that the angular velocity
-  // w_WFq and the translational velocity v_WFq of frame F shifted (see
-  // SpatialVelocity::Shift() for a description of the shift operation) to a
-  // frame Fq with origin at a point Q are given by:
-  //   w_WFq = Jr_WFq⋅v
-  //   v_WFq = Jt_WFq⋅v
-  // when computed in terms of generalized velocities
-  // (with_respect_to = JacobianWrtVariable::kV) or by:
-  //   w_WFq = Jr_WFq⋅q̇
-  //   v_WFq = Jt_WFq⋅q̇
-  // when computed in terms of the time derivatives of the generalized
-  // positions (with_respect_to = JacobianWrtVariable::kQDot).
-  //
-  // This method provides the option to specify whether angular and/or
-  // translational terms need to be computed, however the caller must at least
-  // request one of them.
-  // If Jr_WFq is nullptr, then angular terms are not computed.
-  // If Jt_WFq is nullptr, then translational terms are not computed.
-  //
-  //
-  //               Format of the Jacobian matrix Jr_WFq
-  //
-  // Notice that, the angular velocity of frame F shifted to a frame Fq with
-  // origin at a point Q is the same as that of frame F, for any point Q.
-  // That is, w_WFq = w_WF for any point Q. With this in mind, Jr_WFq is
-  // defined so that:
-  //   w_WFq = w_WF = Jr_WFq⋅v  if with_respect_to = JacobianWrtVariable::kV
-  //   w_WFq = w_WF = Jr_WFq⋅q̇  if with_respect_to = JacobianWrtVariable::kQDot
-  // and therefore Jr_WFq is a matrix with 3 rows and
-  // nv columns if with_respect_to = JacobianWrtVariable::kV or
-  // nq columns if with_respect_to = JacobianWrtVariable::kQDot, where nv and nq
-  // are the number of generalized velocities and positions, respectively.
-  // If not nullptr on input, matrix Jr_WFq **must** have the documented size
-  // or this method throws a std::runtime_error exception.
-  //
-  //               Format of the Jacobian matrix Jt_WFq
-  //
-  // We stack the translational velocity of each point Q into a column vector
-  // v_WFq = [v_WFq1; v_WFq2; ...] of size 3⋅np, with np the number of
-  // points in the input list. Then the translational velocities Jacobian is
-  // defined such that:
-  //   v_WFq = Jt_WFq⋅v, if with_respect_to = JacobianWrtVariable::kV
-  //   v_WFq = Jt_WFq⋅q̇, if with_respect_to = JacobianWrtVariable::kQDot
-  //
-  // Therefore Jt_WFq is a matrix with 3⋅np rows and
-  // nv columns if with_respect_to = JacobianWrtVariable::kV or
-  // nq columns if with_respect_to = JacobianWrtVariable::kQDot
-  // If not nullptr on input, matrix Jt_WFq **must** have the required size or
-  // this method throws a std::runtime_error exception.
-  //
-  // This helper throws std::runtime_error when:
-  // - The number of rows in p_WQ_list does not equal three. That is, p_WQ_list
-  //   must be a matrix with each column being a 3D vector for each point Q.
-  // - Jr_WFq and Jt_WFq are both nullptr (caller must request at least one
-  //   Jacobian).
-  // - The number of columns of Jr_WFq and/or Jt_WFq does not equal
-  //   num_velocities() if with_respect_to = JacobianWrtVariable::kV or
-  //   num_positions()  if with_respect_to = JacobianWrtVariable::kQDot.
-  // - The number of rows of Jr_WFq does not equal 3.
-  // - The number of rows of Jt_WFq does not equal 3⋅np.
-  void CalcFrameJacobianExpressedInWorld(
+  // Helper method for Jacobian methods, namely CalcJacobianAngularVelocity(),
+  // CalcJacobianTranslationalVelocity(), and CalcJacobianSpatialVelocity().
+  // @param[in] context The state of the multibody system.
+  // @param[in] with_respect_to Enum equal to JacobianWrtVariable::kQDot or
+  // JacobianWrtVariable::kV, indicating whether Jacobians Js_w_WF and Js_v_WFpi
+  // are partial derivatives with respect to 𝑠 = q̇ (time-derivatives of
+  // generalized positions) or with respect to 𝑠 = v (generalized velocities).
+  // If 𝑠 = q̇, `w_WF = Js_w_WF ⋅ q̇`  and  `v_WFpi = Js_v_WFpi ⋅ q̇`.
+  // If 𝑠 = v, `w_WF = Js_w_WF ⋅ v`  and  `v_WFpi = Js_v_WFpi ⋅ v`.
+  // @param[in] frame_F The frame on which point Fpi is fixed (e.g., welded).
+  // @param[in] p_WoFpi_W A position vector or list of position vectors from
+  // Wo (world frame W's origin) to points Fpi (regarded as fixed/welded to F),
+  // where each position vector is expressed in frame W.
+  // @param[out] Js_w_WF_W Frame B's angular velocity Jacobian in frame W with
+  // respect to speeds 𝑠 (which is either q̇ or v), expressed in frame W.
+  // `Js_w_WF_W` is either nullptr or a `3 x n` matrix, where n is the number of
+  // elements in 𝑠.
+  // @param[out] Js_v_WFpi_W Point Fpi's velocity Jacobian in world frame W with
+  // respect to speeds 𝑠 (which is either q̇ or v), expressed in frame W.
+  // `Js_v_WFpi_W` is either nullptr or a `3*p x n` matrix, where p is the
+  // number of points in Fpi and n is the number of elements in 𝑠.
+  // @throws std::exception if any of the following occurs:
+  // - The size of `p_WoFpi_W' differs from `3 x n`.
+  // - `Js_w_WF_W` and `Js_v_WFpi_W` are both nullptr.
+  // - `Js_w_WF_W` is not nullptr and its size differs from `3 x n`.
+  // - `Js_v_WFpi_W` is not nullptr and its size differs from `3*p x n`.
+  void CalcJacobianAngularAndOrTranslationalVelocityInWorld(
       const systems::Context<T>& context,
-      const Frame<T>& frame_F,
-      const Eigen::Ref<const MatrixX<T>>& p_WQ_list,
       JacobianWrtVariable with_respect_to,
-      EigenPtr<MatrixX<T>> Jr_WFq, EigenPtr<MatrixX<T>> Jt_WFq) const;
+      const Frame<T>& frame_F,
+      const Eigen::Ref<const Matrix3X<T>>& p_WoFpi_W,
+      EigenPtr<Matrix3X<T>> Js_w_WF_W,
+      EigenPtr<MatrixX<T>> Js_v_WFpi_W) const;
+
+  // Helper method for CalcJacobianTranslationalVelocity().
+  // @param[in] context The state of the multibody system.
+  // @param[in] with_respect_to Enum equal to JacobianWrtVariable::kQDot or
+  // JacobianWrtVariable::kV, indicating whether the Jacobian `Js_v_ABi` is
+  // partial derivatives with respect to 𝑠 = q̇ (time-derivatives of generalized
+  // positions) or with respect to 𝑠 = v (generalized velocities).
+  // @param[in] frame_B The frame on which point Bi is fixed (e.g., welded).
+  // @param[in] p_WoBi_W A position vector or list of p position vectors from
+  // Wo (world frame W's origin) to points Bi (regarded as fixed to B),
+  // where each position vector is expressed in frame W.
+  // @param[in] frame_A The frame that measures `v_ABi` (Bi's velocity in A).
+  // @param[out] Js_v_ABi_W Point Bi's velocity Jacobian in frame A with
+  // respect to speeds 𝑠 (which is either q̇ or v), expressed in world frame W.
+  // `Js_v_ABi_W` is a `3*p x n` matrix, where p is the number of points Bi and
+  // n is the number of elements in 𝑠.
+  // @throws std::exception if `Js_v_ABi_W` is nullptr or not sized `3*p x n`.
+  void CalcJacobianTranslationalVelocityHelper(
+      const systems::Context<T>& context,
+      JacobianWrtVariable with_respect_to,
+      const Frame<T>& frame_B,
+      const Eigen::Ref<const Matrix3X<T>>& p_WoBi_W,
+      const Frame<T>& frame_A,
+      EigenPtr<MatrixX<T>> Js_v_ABi_W) const;
 
   // Helper method to apply forces due to damping at the joints.
   // MultibodyTree treats damping forces separately from other ForceElement
@@ -2457,6 +2803,12 @@ class MultibodyTree {
   // i-th level body_node_levels_[i] contains the list of all body node indexes
   // in that level.
   std::vector<std::vector<BodyNodeIndex>> body_node_levels_;
+
+  // Joint to Mobilizer map, of size num_joints(). For a joint with index
+  // joint_index, mobilizer_index = joint_to_mobilizer_[joint_index] maps to the
+  // mobilizer model of the joint, or an invalid index if the joint is modeled
+  // with constraints instead.
+  std::vector<MobilizerIndex> joint_to_mobilizer_;
 
   MultibodyTreeTopology topology_;
 

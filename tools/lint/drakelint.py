@@ -1,14 +1,7 @@
 import os
 import sys
 
-import six
-
 from drake.tools.lint.formatter import IncludeFormatter
-
-if six.PY3:
-    _open = open
-
-    def open(filename, mode="r"): return _open(filename, mode, encoding="utf8")
 
 
 def _check_invalid_line_endings(filename):
@@ -16,7 +9,7 @@ def _check_invalid_line_endings(filename):
     otherwise.
     """
     # Ask Python to read the file and determine the newlines convention.
-    with open(filename, 'rU') as file:
+    with open(filename, mode='r', encoding='utf-8') as file:
         if not file:
             print("ERROR: unable to open " + filename)
             return 1
@@ -40,7 +33,7 @@ def _check_includes(filename):
     try:
         tool = IncludeFormatter(filename)
     except Exception as e:
-        print("ERROR: " + filename + ":0: " + e.message)
+        print("ERROR: " + filename + ":0: " + str(e))
         return 1
     tool.format_includes()
     first_difference = tool.get_first_differing_original_index()
@@ -49,6 +42,9 @@ def _check_includes(filename):
               "the #include ordering is incorrect")
         print("note: fix via bazel-bin/tools/lint/clang-format-includes " +
               filename)
+        print("note: if that program does not exist, " +
+              "you might need to compile it first: " +
+              "bazel build //tools/lint/...")
         return 1
     return 0
 
@@ -63,7 +59,7 @@ def _check_shebang(filename, disallow_executable):
         print("ERROR: {} is executable, but should not be".format(filename))
         print("note: fix via chmod a-x '{}'".format(filename))
         return 1
-    with open(filename, 'r') as file:
+    with open(filename, mode='r', encoding='utf8') as file:
         shebang = file.readline().rstrip("\n")
         has_shebang = shebang.startswith("#!")
     if is_executable and not has_shebang:
@@ -76,13 +72,12 @@ def _check_shebang(filename, disallow_executable):
         return 1
     shebang_whitelist = {
         "bash": "#!/bin/bash",
-        "python": "#!/usr/bin/env python2",
-        "python3": "#!/usr/bin/env python3",
+        "python": "#!/usr/bin/env python3",
     }
-    if has_shebang and shebang not in shebang_whitelist.values():
+    if has_shebang and shebang not in list(shebang_whitelist.values()):
         print(("ERROR: shebang '{}' in the file '{}' is not in the shebang "
               "whitelist").format(shebang, filename))
-        for hint, replacement_shebang in shebang_whitelist.iteritems():
+        for hint, replacement_shebang in shebang_whitelist.items():
             if hint in shebang:
                 print(("note: fix by replacing the shebang with "
                       "'{}'").format(replacement_shebang))

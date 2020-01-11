@@ -1,6 +1,7 @@
 #include "drake/solvers/solver_type_converter.h"
 
 #include "drake/common/drake_assert.h"
+#include "drake/solvers/csdp_solver.h"
 #include "drake/solvers/dreal_solver.h"
 #include "drake/solvers/equality_constrained_qp_solver.h"
 #include "drake/solvers/gurobi_solver.h"
@@ -19,6 +20,8 @@ namespace solvers {
 
 SolverId SolverTypeConverter::TypeToId(SolverType solver_type) {
   switch (solver_type) {
+    case SolverType::kCsdp:
+      return CsdpSolver::id();
     case SolverType::kDReal:
       return DrealSolver::id();
     case SolverType::kEqualityConstrainedQP:
@@ -47,8 +50,10 @@ SolverId SolverTypeConverter::TypeToId(SolverType solver_type) {
   DRAKE_UNREACHABLE();
 }
 
-optional<SolverType> SolverTypeConverter::IdToType(SolverId solver_id) {
-  if (solver_id == DrealSolver::id()) {
+std::optional<SolverType> SolverTypeConverter::IdToType(SolverId solver_id) {
+  if (solver_id == CsdpSolver::id()) {
+    return SolverType::kCsdp;
+  } else if (solver_id == DrealSolver::id()) {
     return SolverType::kDReal;
   } else if (solver_id == EqualityConstrainedQPSolver::id()) {
     return SolverType::kEqualityConstrainedQP;
@@ -73,7 +78,7 @@ optional<SolverType> SolverTypeConverter::IdToType(SolverId solver_id) {
   } else if (solver_id == UnrevisedLemkeSolverId::id()) {
     return SolverType::kUnrevisedLemke;
   } else {
-    return nullopt;
+    return std::nullopt;
   }
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <initializer_list>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -8,7 +9,6 @@
 #include "drake/common/drake_assert.h"
 #include "drake/common/drake_copyable.h"
 #include "drake/common/drake_deprecated.h"
-#include "drake/common/drake_optional.h"
 #include "drake/common/eigen_types.h"
 #include "drake/geometry/geometry_ids.h"
 #include "drake/geometry/utilities.h"
@@ -47,7 +47,7 @@ namespace geometry {
    }
 
    std::vector<FrameId> frame_ids_;
-   std::vector<Isometry3<T>> poses_;
+   std::vector<RigidTransform<T>> poses_;
  };
  ```
 
@@ -57,7 +57,7 @@ namespace geometry {
  ```
    void CalcFramePoseOutput(const Context<T>& context,
                             geometry::FramePoseVector<T>* poses) const {
-     const Isometry3<T>& pose = ...;
+     const RigidTransform<T>& pose = ...;
      *poses = {{frame_id_, pose}};
    }
  ```
@@ -75,19 +75,20 @@ namespace geometry {
  One should never interact with the %FrameKinematicsVector class directly.
  Instead, the FramePoseVector, FrameVelocityVector, and FrameAccelerationVector
  classes are aliases of the %FrameKinematicsVector instantiated on specific
- data types (Isometry3, SpatialVector, and SpatialAcceleration, respectively).
- Each of these data types are templated on Eigen scalars. All supported
- combinations of data type and scalar type are already available to link against
- in the containing library. No other values for KinematicsValue are supported.
+ data types (RigidTransform, SpatialVector, and SpatialAcceleration,
+ respectively). Each of these data types are templated on Eigen scalars. All
+ supported combinations of data type and scalar type are already available to
+ link against in the containing library. No other values for KinematicsValue are
+ supported.
 
  Currently, the following data types with the following scalar types are
  supported:
 
-  Alias           | Instantiation                            | Scalar types
- -----------------|------------------------------------------|--------------
-  FramePoseVector | FrameKinematicsVector<Isometry3<Scalar>> | double
-  FramePoseVector | FrameKinematicsVector<Isometry3<Scalar>> | AutoDiffXd
-  FramePoseVector | FrameKinematicsVector<Isometry3<Scalar>> | Expression
+  Alias           | Instantiation                                 | Scalar types
+ -----------------|-----------------------------------------------|-------------
+  FramePoseVector | FrameKinematicsVector<RigidTransform<Scalar>> | double
+  FramePoseVector | FrameKinematicsVector<RigidTransform<Scalar>> | AutoDiffXd
+  FramePoseVector | FrameKinematicsVector<RigidTransform<Scalar>> | Expression
   */
 template <class KinematicsValue>
 class FrameKinematicsVector {
@@ -96,11 +97,6 @@ class FrameKinematicsVector {
 
   /** Initializes the vector using an invalid SourceId with no frames .*/
   FrameKinematicsVector();
-
-  /** Initializes the vector to the given source ID and frame IDs, using a
-  default value for each frame. */
-  DRAKE_DEPRECATED("2019-08-01", "Simply use the default constructor.")
-  FrameKinematicsVector(SourceId source_id, const std::vector<FrameId>& ids);
 
   /** Initializes the vector using an invalid SourceId and the given frames and
   kinematics values. */
@@ -116,11 +112,6 @@ class FrameKinematicsVector {
 
   /** Sets the kinematics `value` for the frame indicated by the given `id`. */
   void set_value(FrameId id, const KinematicsValue& value);
-
-  DRAKE_DEPRECATED("2019-08-01",
-      "The source_id is being removed from FrameKinematicsVector; "
-      "the SceneGraph no longer requires that it be set.")
-  SourceId source_id() const { return source_id_; }
 
   /** Returns number of frame_ids(). */
   int size() const {
@@ -150,11 +141,6 @@ class FrameKinematicsVector {
  private:
   void CheckInvariants() const;
 
-  // TODO(jwnimmer-tri) This field is only here to support the deprecated
-  // source_id() method; when that method is removed, this field should be
-  // removed also.
-  SourceId source_id_;
-
   // Mapping from frame id to its current pose.  If the map's optional value is
   // nullopt, we treat it as if the map key were absent instead.  We do this in
   // order to avoid reallocating map nodes as we repeatedly clear() and then
@@ -163,7 +149,7 @@ class FrameKinematicsVector {
   // replace this unordered_map with a flat_hash_map (where the entire storage
   // is a single heap slab); in that case, the complicated implementation in
   // the cc file would become simplified.
-  std::unordered_map<FrameId, optional<KinematicsValue>> values_;
+  std::unordered_map<FrameId, std::optional<KinematicsValue>> values_;
 
   // The count of non-nullopt items in values_.  We could recompute this from
   // values_, but we store it separately so that size() is still constant-time.
@@ -185,7 +171,7 @@ class FrameKinematicsVector {
  No other values for T are currently supported.
  */
 template <typename T>
-using FramePoseVector = FrameKinematicsVector<Isometry3<T>>;
+using FramePoseVector = FrameKinematicsVector<math::RigidTransform<T>>;
 
 }  // namespace geometry
 }  // namespace drake

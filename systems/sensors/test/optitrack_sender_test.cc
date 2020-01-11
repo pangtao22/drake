@@ -4,12 +4,14 @@
 #include "optitrack/optitrack_frame_t.hpp"
 
 #include "drake/geometry/frame_kinematics_vector.h"
+#include "drake/math/rigid_transform.h"
 #include "drake/systems/framework/context.h"
 
 namespace drake {
 namespace systems {
 namespace sensors {
 
+using math::RigidTransformd;
 using optitrack::optitrack_frame_t;
 
 // This test sets up a systems::sensors::TrackedBody structure to be passed
@@ -33,21 +35,17 @@ GTEST_TEST(OptitrackSenderTest, OptitrackLcmSenderTest) {
 
   // Sets up a test body with an arbitrarily chosen pose.
   Eigen::Vector3d axis(1 / sqrt(3), 1 / sqrt(3), 1 / sqrt(3));
-  const geometry::FramePoseVector<double> pose_vector{{
-      frame_id,
-      Eigen::Isometry3d(Eigen::AngleAxis<double>(0.2, axis)).
-          pretranslate(Eigen::Vector3d(tx, ty, tz))}};
+  const geometry::FramePoseVector<double> pose_vector{
+      {frame_id, RigidTransformd(Eigen::AngleAxis<double>(0.2, axis),
+                                 Eigen::Vector3d(tx, ty, tz))}};
 
   EXPECT_EQ(pose_vector.value(frame_id).translation()[0], tx);
   EXPECT_EQ(pose_vector.value(frame_id).translation()[1], ty);
   EXPECT_EQ(pose_vector.value(frame_id).translation()[2], tz);
 
-  std::unique_ptr<AbstractValue> input(
-      new Value<geometry::FramePoseVector<double>>(pose_vector));
-
   auto context = dut.CreateDefaultContext();
   auto output = dut.AllocateOutput();
-  context->FixInputPort(0 /* input port ID*/, std::move(input));
+  dut.get_input_port(0).FixValue(context.get(), pose_vector);
 
   dut.CalcUnrestrictedUpdate(*context, &context->get_mutable_state());
   dut.CalcOutput(*context, output.get());

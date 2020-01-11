@@ -241,6 +241,15 @@ class Class {
   /// The const one.
   void get_foo() const;
 
+  /// Docstring 1.
+  /// @pydrake_mkdoc_identifier{stuff_1}
+  void do_stuff(double);
+
+  /// Docstring 2.
+  /// @pydrake_mkdoc_identifier{stuff_2}
+  template <typename T>
+  void do_stuff(T);
+
  protected:
   /// @protected
   /// Protected method. **Bold**. Nibh sed pulvinar proin gravida hendrerit.
@@ -356,9 +365,7 @@ enum Enum {
 /// Enumeration class. Malesuada fames ac turpis egestas integer eget aliquet
 /// nibh praesent.
 enum EnumClass {
-  /// Enumeration class constant. Vestibulum mattis ullamcorper velit sed
-  /// ullamcorper.
-  EnumClassConstant,
+  EnumClassConstant,  ///< Enumeration class constant. Vestibulum mattis.
 };
 
 /// Anonymous values are ignored.

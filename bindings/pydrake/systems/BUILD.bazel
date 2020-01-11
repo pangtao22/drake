@@ -18,6 +18,7 @@ load(
     "drake_py_unittest",
 )
 load("//bindings/pydrake:pydrake.bzl", "add_lint_tests_pydrake")
+load("//tools/skylark:test_tags.bzl", "vtk_test_tags")
 
 package(default_visibility = [
     "//bindings/pydrake:__subpackages__",
@@ -40,21 +41,6 @@ drake_py_library(
     ],
 )
 
-drake_cc_library(
-    name = "systems_pybind",
-    hdrs = ["systems_pybind.h"],
-    declare_installed_headers = 0,
-    deprecation = "This will be removed on or around 2019-08-01. Please " +
-                  "use constituent libraries instead.",
-    tags = ["manual"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//bindings/pydrake:pydrake_pybind",
-        "//bindings/pydrake/common:default_scalars_pybind",
-        "//bindings/pydrake/common:value_pybind",
-    ],
-)
-
 drake_pybind_library(
     name = "framework_py",
     cc_deps = [
@@ -62,8 +48,6 @@ drake_pybind_library(
         "//bindings/pydrake/common:cpp_template_pybind",
         "//bindings/pydrake/common:default_scalars_pybind",
         "//bindings/pydrake/common:deprecation_pybind",
-        "//bindings/pydrake/common:drake_optional_pybind",
-        "//bindings/pydrake/common:drake_variant_pybind",
         "//bindings/pydrake/common:eigen_pybind",
         "//bindings/pydrake/common:type_safe_index_pybind",
         "//bindings/pydrake/common:value_pybind",
@@ -103,8 +87,6 @@ drake_pybind_library(
         "//bindings/pydrake:documentation_pybind",
         "//bindings/pydrake/common:cpp_template_pybind",
         "//bindings/pydrake/common:default_scalars_pybind",
-        "//bindings/pydrake/common:drake_optional_pybind",
-        "//bindings/pydrake/common:drake_variant_pybind",
     ],
     cc_srcs = ["primitives_py.cc"],
     package_info = PACKAGE_INFO,
@@ -120,6 +102,7 @@ drake_pybind_library(
         "//bindings/pydrake:documentation_pybind",
         "//bindings/pydrake/common:cpp_template_pybind",
         "//bindings/pydrake/common:default_scalars_pybind",
+        "//bindings/pydrake/common:deprecation_pybind",
         "//bindings/pydrake/common:wrap_pybind",
     ],
     cc_srcs = ["analysis_py.cc"],
@@ -145,9 +128,8 @@ drake_pybind_library(
         ":primitives_py",
         "//bindings/pydrake:math_py",
         "//bindings/pydrake:symbolic_py",
-        "//bindings/pydrake/multibody:multibody_tree_py",
+        "//bindings/pydrake/multibody:plant_py",
     ],
-    py_srcs = ["_controllers_extra.py"],
 )
 
 drake_pybind_library(
@@ -183,8 +165,8 @@ drake_pybind_library(
         ":module_py",
         "//bindings/pydrake/common:cpp_template_py",
         "//bindings/pydrake/common:eigen_geometry_py",
+        "//bindings/pydrake:geometry_py",
     ],
-    py_srcs = ["_sensors_extra.py"],
 )
 
 drake_pybind_library(
@@ -193,7 +175,6 @@ drake_pybind_library(
         "//bindings/pydrake:documentation_pybind",
         "//bindings/pydrake:symbolic_types_pybind",
         "//bindings/pydrake/common:deprecation_pybind",
-        "//bindings/pydrake/common:drake_variant_pybind",
     ],
     cc_srcs = ["trajectory_optimization_py.cc"],
     package_info = PACKAGE_INFO,
@@ -288,6 +269,31 @@ drake_py_library(
     ],
 )
 
+drake_py_library(
+    name = "planar_scenegraph_visualizer_py",
+    srcs = ["planar_scenegraph_visualizer.py"],
+    imports = PACKAGE_INFO.py_imports,
+    deps = [
+        ":framework_py",
+        ":module_py",
+        ":pyplot_visualizer_py",
+        ":rendering_py",
+        "//bindings/pydrake:lcm_py",
+    ],
+)
+
+drake_py_library(
+    name = "pyplot_visualizer_py",
+    srcs = ["pyplot_visualizer.py"],
+    imports = PACKAGE_INFO.py_imports,
+    deps = [
+        ":framework_py",
+        ":module_py",
+        ":primitives_py",
+        "//bindings/pydrake:trajectories_py",
+    ],
+)
+
 PY_LIBRARIES_WITH_INSTALL = [
     ":analysis_py",
     ":controllers_py",
@@ -305,6 +311,8 @@ PY_LIBRARIES = [
     ":scalar_conversion_py",
     ":module_py",
     ":perception_py",
+    ":planar_scenegraph_visualizer_py",
+    ":pyplot_visualizer_py",
 ]
 
 # Symbol roll-up (for user ease).
@@ -353,7 +361,8 @@ drake_py_binary(
         ":primitives_py",
         "//bindings/pydrake:geometry_py",
         "//bindings/pydrake:lcm_py",
-        "//bindings/pydrake/multibody:multibody_tree_py",
+        "//bindings/pydrake/multibody:parsing_py",
+        "//bindings/pydrake/multibody:plant_py",
     ],
 )
 
@@ -413,7 +422,9 @@ drake_py_unittest(
     deps = [
         ":controllers_py",
         "//bindings/pydrake/examples:pendulum_py",
+        "//bindings/pydrake/multibody:parsing_py",
         "//bindings/pydrake/multibody:plant_py",
+        "//bindings/pydrake/multibody:tree_py",
     ],
 )
 
@@ -425,6 +436,11 @@ drake_py_unittest(
         "//examples/quadrotor:models",
         "//manipulation/models/iiwa_description:models",
         "//systems/sensors:test_models",
+    ],
+    # Defects related to ZMQ when run under DRD or Helgrind.
+    tags = [
+        "no_drd",
+        "no_helgrind",
     ],
     deps = [
         ":analysis_py",
@@ -456,6 +472,34 @@ drake_py_unittest(
         ":primitives_py",
         ":test_util_py",
         "//bindings/pydrake:trajectories_py",
+        "//bindings/pydrake/common/test_utilities:deprecation_py",
+        "//bindings/pydrake/common/test_utilities:numpy_compare_py",
+    ],
+)
+
+drake_py_unittest(
+    name = "planar_scenegraph_visualizer_test",
+    data = [
+        "//examples/multibody/cart_pole:models",
+        "//manipulation/models/iiwa_description:models",
+    ],
+    deps = [
+        ":analysis_py",
+        ":framework_py",
+        ":planar_scenegraph_visualizer_py",
+        "//bindings/pydrake:geometry_py",
+        "//bindings/pydrake/multibody",
+    ],
+)
+
+drake_py_unittest(
+    name = "pyplot_visualizer_test",
+    deps = [
+        ":analysis_py",
+        ":framework_py",
+        ":primitives_py",
+        ":pyplot_visualizer_py",
+        "//bindings/pydrake:trajectories_py",
     ],
 )
 
@@ -464,7 +508,9 @@ drake_py_unittest(
     data = ["//multibody/benchmarks/acrobot:models"],
     deps = [
         ":rendering_py",
-        "//bindings/pydrake/multibody:multibody_tree_py",
+        "//bindings/pydrake/multibody:math_py",
+        "//bindings/pydrake/multibody:parsing_py",
+        "//bindings/pydrake/multibody:plant_py",
     ],
 )
 
@@ -481,7 +527,12 @@ drake_py_unittest(
     data = [
         "//systems/sensors:test_models",
     ],
-    deps = [":sensors_py"],
+    tags = vtk_test_tags(),
+    deps = [
+        ":sensors_py",
+        "//bindings/pydrake:geometry_py",
+        "//bindings/pydrake/common/test_utilities",
+    ],
 )
 
 drake_py_unittest(

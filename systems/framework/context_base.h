@@ -19,10 +19,10 @@ namespace drake {
 namespace systems {
 
 #ifndef DRAKE_DOXYGEN_CXX
-namespace detail {
+namespace internal {
 // This provides SystemBase limited "friend" access to ContextBase.
 class SystemBaseContextBaseAttorney;
-}  // namespace detail
+}  // namespace internal
 #endif
 
 /** Provides non-templatized Context functionality shared by the templatized
@@ -47,7 +47,8 @@ class ContextBase : public internal::ContextMessageInterface {
   ContextBase& operator=(ContextBase&&) = delete;
   /** @} */
 
-  /** Creates an identical copy of the concrete context object. */
+  /** Creates an identical copy of the concrete context object.
+  @throws std::logic_error if this is not the root context. */
   std::unique_ptr<ContextBase> Clone() const;
 
   ~ContextBase() override;
@@ -262,12 +263,8 @@ class ContextBase : public internal::ContextMessageInterface {
     return ++context->current_change_event_;
   }
 
-#ifndef DRAKE_DOXYGEN_CXX
-  DRAKE_DEPRECATED("2019-07-01", "Use num_input_ports() instead.")
-  int get_num_input_ports() const { return num_input_ports(); }
-  DRAKE_DEPRECATED("2019-07-01", "Use num_output_ports() instead.")
-  int get_num_output_ports() const { return num_output_ports(); }
-#endif
+  /** Returns true if this context has no parent. */
+  bool is_root_context() const { return parent_ == nullptr; }
 
  protected:
   /** Default constructor creates an empty ContextBase but initializes all the
@@ -444,9 +441,6 @@ class ContextBase : public internal::ContextMessageInterface {
   }
   //@}
 
-  /** Returns true if this context has no parent. */
-  bool is_root_context() const { return parent_ == nullptr; }
-
   /** (Internal use only) Returns true if this context provides resources for
   its own individual state variables or parameters. That means those variables
   or parameters were declared by this context's corresponding System. Currently
@@ -588,7 +582,7 @@ class ContextBase : public internal::ContextMessageInterface {
   }
 
  private:
-  friend class detail::SystemBaseContextBaseAttorney;
+  friend class internal::SystemBaseContextBaseAttorney;
 
   // Returns the parent Context or `nullptr` if this is the root Context.
   const ContextBase* get_parent_base() const { return parent_; }
@@ -668,7 +662,7 @@ class ContextBase : public internal::ContextMessageInterface {
 
 #ifndef DRAKE_DOXYGEN_CXX
 class SystemBase;
-namespace detail {
+namespace internal {
 
 // This is an attorney-client pattern class providing SystemBase with access to
 // certain specific ContextBase private methods, and nothing else.
@@ -742,7 +736,7 @@ class SystemBaseContextBaseAttorney {
   }
 };
 
-}  // namespace detail
+}  // namespace internal
 #endif
 
 }  // namespace systems

@@ -6,9 +6,6 @@ namespace drake {
 namespace systems {
 namespace rendering {
 
-// Linkage for kSize.
-template <typename T> constexpr int PoseVector<T>::kSize;
-
 template <typename T>
 PoseVector<T>::PoseVector()
     : PoseVector<T>::PoseVector(Eigen::Quaternion<T>::Identity(),

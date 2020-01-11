@@ -5,7 +5,6 @@
 #include "drake/common/drake_assert.h"
 #include "drake/common/drake_bool.h"
 #include "drake/common/drake_copyable.h"
-#include "drake/common/drake_deprecated.h"
 #include "drake/common/eigen_types.h"
 #include "drake/common/never_destroyed.h"
 #include "drake/math/rotation_matrix.h"
@@ -14,14 +13,16 @@ namespace drake {
 namespace math {
 
 /// This class represents a proper rigid transform between two frames which can
-/// be regarded in two ways.  It can be regarded as a distance-preserving linear
-/// operator that can rotate and/or translate a rigid body without changing its
-/// shape or size (rigid) and without mirroring/reflecting the body (proper),
-/// e.g., it can add one position vector to another and express the result in a
-/// particular basis as `p_AoQ_A = X_AB * p_BoQ_B` (Q is any point).
-/// Alternately, a rigid transform describes the pose between two frames A and B
-/// (i.e., the relative orientation and position of A to B).  Herein, the terms
-/// rotation/orientation and translation/position are used interchangeably.
+/// be regarded in two ways.  A rigid transform describes the "pose" between two
+/// frames A and B (i.e., the relative orientation and position of A to B).
+/// Alternately, it can be regarded as a distance-preserving operator that can
+/// rotate and/or translate a rigid body without changing its shape or size
+/// (rigid) and without mirroring/reflecting the body (proper), e.g., it can add
+/// one position vector to another and express the result in a particular basis
+/// as `p_AoQ_A = X_AB * p_BoQ_B` (Q is any point).  In many ways, this rigid
+/// transform class is conceptually similar to using a homogeneous matrix as a
+/// linear operator.  See operator* documentation for an exception.
+///
 /// The class stores a RotationMatrix that relates right-handed orthogonal
 /// unit vectors Ax, Ay, Az fixed in frame A to right-handed orthogonal
 /// unit vectors Bx, By, Bz fixed in frame B.
@@ -37,9 +38,11 @@ namespace math {
 /// multiply %RigidTransforms as `X_AB * X_BC`, but not `X_AB * X_CB`.
 ///
 /// @note This class is not a 4x4 transformation matrix -- even though its
-/// operator*() methods act like 4x4 matrix multiplication.  Instead, this class
-/// contains a rotation matrix class as well as a 3x1 position vector.  To form
-/// a 4x4 matrix, use GetAsMatrix().  GetAsIsometry() is treated similarly.
+/// operator*() methods act mostly like 4x4 matrix multiplication.  Instead,
+/// this class contains a 3x3 rotation matrix class and a 3x1 position vector.
+/// To convert this to a 3x4 matrix, use GetAsMatrix34().
+/// To convert this to a 4x4 matrix, use GetAsMatrix4().
+/// To convert this to an Eigen::Isometry, use GetAsIsometry().
 ///
 /// @note An isometry is sometimes regarded as synonymous with rigid transform.
 /// The %RigidTransform class has important advantages over Eigen::Isometry.
@@ -102,7 +105,7 @@ class RigidTransform {
   RigidTransform(const Eigen::Quaternion<T>& quaternion, const Vector3<T>& p)
       : RigidTransform(RotationMatrix<T>(quaternion), p) {}
 
-  /// Constructs a %RigidTransform from a AngleAxis and a position vector.
+  /// Constructs a %RigidTransform from an AngleAxis and a position vector.
   /// @param[in] theta_lambda an Eigen::AngleAxis whose associated axis (vector
   /// direction herein called `lambda`) is non-zero and finite, but which may or
   /// may not have unit length [i.e., `lambda.norm()` does not have to be 1].
@@ -121,8 +124,8 @@ class RigidTransform {
     set(R, Vector3<T>::Zero());
   }
 
-  /// Constructs a %RigidTransform with an identity RotationMatrix and a given
-  /// position vector `p`.
+  /// Constructs a %RigidTransform that contains an identity RotationMatrix and
+  /// a given position vector `p`.
   /// @param[in] p position vector from frame A's origin to frame B's origin,
   /// expressed in frame A.  In monogram notation p is denoted `p_AoBo_A`.
   explicit RigidTransform(const Vector3<T>& p) { set_translation(p); }
@@ -150,6 +153,99 @@ class RigidTransform {
   /// @note No attempt is made to orthogonalize the 3x3 rotation matrix part of
   /// `pose`.  As needed, use RotationMatrix::ProjectToRotationMatrix().
   explicit RigidTransform(const Isometry3<T>& pose) { SetFromIsometry3(pose); }
+
+  /// Constructs a %RigidTransform from a 3x4 matrix whose structure is below.
+  /// @param[in] pose 3x4 matrix that contains an allegedly valid 3x3 rotation
+  /// matrix `R_AB` and also a 3x1 position vector `p_AoBo_A` (the position
+  /// vector from frame A's origin to frame B's origin, expressed in frame A).
+  /// <pre>
+  ///  ┌                ┐
+  ///  │ R_AB  p_AoBo_A │
+  ///  └                ┘
+  /// </pre>
+  /// @throws std::logic_error in debug builds if the `R_AB` part of `pose` is
+  /// not a proper orthonormal 3x3 rotation matrix.
+  /// @note No attempt is made to orthogonalize the 3x3 rotation matrix part of
+  /// `pose`.  As needed, use RotationMatrix::ProjectToRotationMatrix().
+  /// @exclude_from_pydrake_mkdoc{This overload is not bound in pydrake.}
+  explicit RigidTransform(const Eigen::Matrix<T, 3, 4> pose) {
+    set_rotation(RotationMatrix<T>(pose.template block<3, 3>(0, 0)));
+    set_translation(pose.template block<3, 1>(0, 3));
+  }
+
+  /// Constructs a %RigidTransform from a 4x4 matrix whose structure is below.
+  /// @param[in] pose 4x4 matrix that contains an allegedly valid 3x3 rotation
+  /// matrix `R_AB` and also a 3x1 position vector `p_AoBo_A` (the position
+  /// vector from frame A's origin to frame B's origin, expressed in frame A).
+  /// <pre>
+  ///  ┌                ┐
+  ///  │ R_AB  p_AoBo_A │
+  ///  │                │
+  ///  │   0      1     │
+  ///  └                ┘
+  /// </pre>
+  /// @throws std::logic_error in debug builds if the `R_AB` part of `pose`
+  /// is not a proper orthonormal 3x3 rotation matrix or if `pose` is a 4x4
+  /// matrix whose final row is not `[0, 0, 0, 1]`.
+  /// @note No attempt is made to orthogonalize the 3x3 rotation matrix part of
+  /// `pose`.  As needed, use RotationMatrix::ProjectToRotationMatrix().
+  /// @exclude_from_pydrake_mkdoc{This overload is not bound in pydrake.}
+  explicit RigidTransform(const Matrix4<T>& pose) {
+    DRAKE_ASSERT_VOID(ThrowIfInvalidBottomRow(pose));
+    set_rotation(RotationMatrix<T>(pose.template block<3, 3>(0, 0)));
+    set_translation(pose.template block<3, 1>(0, 3));
+  }
+
+  /// Constructs a %RigidTransform from an appropriate Eigen <b>expression</b>.
+  /// @param[in] pose Generic Eigen matrix <b>expression</b>.
+  /// @throws std::logic_error if the Eigen <b>expression</b> in pose does not
+  /// resolve to a Vector3 or 3x4 matrix or 4x4 matrix or if the rotational part
+  /// of `pose` is not a proper orthonormal 3x3 rotation matrix or if `pose` is
+  /// a 4x4 matrix whose final row is not `[0, 0, 0, 1]`.
+  /// @note No attempt is made to orthogonalize the 3x3 rotation matrix part of
+  /// `pose`.  As needed, use RotationMatrix::ProjectToRotationMatrix().
+  /// @note This constructor prevents ambiguity that would otherwise exist for a
+  /// %RigidTransform constructor whose argument is an Eigen <b>expression</b>.
+  /// @code{.cc}
+  /// const Vector3<double> position(4, 5, 6);
+  /// const RigidTransform<double> X1(3 * position);
+  /// ----------------------------------------------
+  /// const RotationMatrix<double> R(RollPitchYaw<double>(1, 2, 3));
+  /// Eigen::Matrix<double, 3, 4> pose34;
+  /// pose34 << R.matrix(), position;
+  /// const RigidTransform<double> X2(1.0 * pose34);
+  /// ----------------------------------------------
+  /// Eigen::Matrix<double, 4, 4> pose4;
+  /// pose4 << R.matrix(), position,
+  ///          0, 0, 0, 1;
+  /// const RigidTransform<double> X3(pose4 * pose4);
+  /// @endcode
+  template <typename Derived>
+  explicit RigidTransform(const Eigen::MatrixBase<Derived>& pose) {
+    // TODO(Mitiguy) Consider C++ 17 if(constexpr) to specialize for each type.
+    const int num_rows = pose.rows(), num_cols = pose.cols();
+    if (num_rows == 3 && num_cols == 1) {
+      // The next line cannot use set_translation(pose.cols(0)) since this
+      // templated class must compile for 4x4 matrices.  If pose is a 4x4 matrix
+      // pose.cols(0) would be a 4x1 matrix --which would cause a compiler
+      // error since set_translation() requires a 3x1 matrix.
+      // Hence, the block method below must be used as it avoids Eigen static
+      // assertions that would otherwise cause a compiler error.  In runtime,
+      // the line below is executed only if pose is actually a 3x1 matrix.
+      set_translation(pose.template block<3, 1>(0, 0));
+    } else if (num_rows == 3 && num_cols == 4) {
+      set_rotation(RotationMatrix<T>(pose.template block<3, 3>(0, 0)));
+      set_translation(pose.template block<3, 1>(0, 3));
+    } else if (num_rows == 4 && num_cols == 4) {
+      DRAKE_ASSERT_VOID(ThrowIfInvalidBottomRow(pose));
+      set_rotation(RotationMatrix<T>(pose.template block<3, 3>(0, 0)));
+      set_translation(pose.template block<3, 1>(0, 3));
+    } else {
+      throw std::logic_error("Error: RigidTransform constructor argument is "
+                             "not an Eigen expression that can resolve to"
+                             "a Vector3 or 3x4 matrix or 4x4 matrix.");
+    }
+  }
 
   /// Sets `this` %RigidTransform from a RotationMatrix and a position vector.
   /// @param[in] R rotation matrix relating frames A and B (e.g., `R_AB`).
@@ -210,6 +306,30 @@ class RigidTransform {
   /// Sets the %RotationMatrix portion of `this` %RigidTransform.
   /// @param[in] R rotation matrix relating frames A and B (e.g., `R_AB`).
   void set_rotation(const RotationMatrix<T>& R) { R_AB_ = R; }
+
+  /// Sets the rotation part of `this` %RigidTransform from a RollPitchYaw.
+  /// @param[in] rpy "roll-pitch-yaw" angles.
+  /// @see RotationMatrix::RotationMatrix(const RollPitchYaw<T>&) which
+  /// describes the parameter, preconditions, etc.
+  void set_rotation(const RollPitchYaw<T>& rpy) {
+    set_rotation(RotationMatrix<T>(rpy));
+  }
+
+  /// Sets the rotation part of `this` %RigidTransform from a Quaternion.
+  /// @param[in] quaternion a quaternion which may or may not have unit length.
+  /// @see RotationMatrix::RotationMatrix(const Eigen::Quaternion<T>&) which
+  /// describes the parameter, preconditions, exception conditions, etc.
+  void set_rotation(const Eigen::Quaternion<T>& quaternion) {
+    set_rotation(RotationMatrix<T>(quaternion));
+  }
+
+  /// Sets the rotation part of `this` %RigidTransform from an AngleAxis.
+  /// @param[in] theta_lambda an angle `theta` (in radians) and vector `lambda`.
+  /// @see RotationMatrix::RotationMatrix(const Eigen::AngleAxis<T>&) which
+  /// describes the parameter, preconditions, exception conditions, etc.
+  void set_rotation(const Eigen::AngleAxis<T>& theta_lambda) {
+    set_rotation(RotationMatrix<T>(theta_lambda));
+  }
 
   /// Returns `p_AoBo_A`, the position vector portion of `this` %RigidTransform,
   /// i.e., position vector from Ao (frame A's origin) to Bo (frame B's origin).
@@ -306,19 +426,13 @@ class RigidTransform {
   }
 
 #ifndef DRAKE_DOXYGEN_CXX
-  /// Until #9865 is resolved, this operator temporarily allows users mixing the
-  /// use of %RigidTransform with Isometry3.
-  DRAKE_DEPRECATED("2019-07-01",
-                   "Do not mix RigidTransform with Isometry3. Only use "
-                   "RigidTransform per #9865.")
-  RigidTransform<T> operator*(const Isometry3<T>& isometry3) const {
-    return *this * RigidTransform<T>(isometry3);
-  }
-
   // DO NOT USE. These methods will soon be deprecated as #9865 is resolved.
-  // They are only provided to support backwards compatibility with
-  // Isometry3 as we migrate Drake's codebase to use RigidTransform. New uses of
-  // Isometry3 are discouraged.
+  // They are only provided to support backwards compatibility with Isometry3
+  // as we migrate Drake's codebase to use RigidTransform. New uses of
+  // Isometry3 are discouraged. These methods will remain intact (though
+  // possibly marked as deprecated) until at least 2020-04-01. N.B. Keep the
+  // deprecation date here in sync with the deprecation comment inside
+  // drake/bindings/pydrake/math_py.cc.
   operator Isometry3<T>() const { return GetAsIsometry3(); }
   const Matrix3<T>& linear() const { return R_AB_.matrix(); }
   Matrix4<T> matrix() const { return GetAsMatrix4(); }
@@ -378,9 +492,17 @@ class RigidTransform {
   /// Multiplies `this` %RigidTransform `X_AB` by the n position vectors
   /// `p_BoQ1_B` ... `p_BoQn_B`, where `p_BoQi_B` is the iᵗʰ position vector
   /// from Bo (frame B's origin) to an arbitrary point Qi, expressed in frame B.
-  /// @param[in] p_BoQ_B `3 x n` matrix with n position vectors `p_BoQi_B`.
+  /// @param[in] p_BoQ_B `3 x n` matrix with n position vectors `p_BoQi_B` or
+  /// an expression that resolves to a `3 x n` matrix of position vectors.
   /// @retval p_AoQ_A `3 x n` matrix with n position vectors `p_AoQi_A`, i.e., n
   /// position vectors from Ao (frame A's origin) to Qi, expressed in frame A.
+  /// Specifically, this operator* is defined so that `X_AB * p_BoQ_B` returns
+  /// `p_AoQ_A = p_AoBo_A + R_AB * p_BoQ_B`, where
+  /// `p_AoBo_A` is the position vector from Ao to Bo expressed in A and
+  /// `R_AB` is the rotation matrix relating the orientation of frames A and B.
+  /// @note As needed, use parentheses.  This operator* is not associative.
+  /// To see this, let `p = p_AoBo_A`, `q = p_BoQ_B` and note
+  /// (X_AB * q) * 7 = (p + R_AB * q) * 7 ≠ X_AB * (q * 7) = p + R_AB * (q * 7).
   /// @code{.cc}
   /// const RollPitchYaw<double> rpy(0.1, 0.2, 0.3);
   /// const RigidTransform<double> X_AB(rpy, Vector3d(1, 2, 3));
@@ -399,9 +521,9 @@ class RigidTransform {
     // Express position vectors in terms of frame A as p_BoQ_A = R_AB * p_BoQ_B.
     const RotationMatrix<typename Derived::Scalar> &R_AB = rotation();
     const Eigen::Matrix<typename Derived::Scalar, 3, Derived::ColsAtCompileTime>
-        p_BoQ_A = R_AB.matrix() * p_BoQ_B;
+        p_BoQ_A = R_AB * p_BoQ_B;
 
-    // Reserve space (on stack on heap) to store the result.
+    // Reserve space (on stack or heap) to store the result.
     const int number_of_position_vectors = p_BoQ_B.cols();
     Eigen::Matrix<typename Derived::Scalar, 3, Derived::ColsAtCompileTime>
         p_AoQ_A(3, number_of_position_vectors);
@@ -463,6 +585,26 @@ class RigidTransform {
   // constructor.
   template <typename U>
   friend class RigidTransform;
+
+  // Declares the allowable tolerance (small multiplier of double-precision
+  // epsilon) used to check whether or not a matrix is homogeneous.
+  static constexpr double kInternalToleranceForHomogeneousCheck{
+      4 * std::numeric_limits<double>::epsilon() };
+
+  // Throw an exception if the bottom row of a 4x4 matrix is not [0, 0, 0, 1].
+  // Note: To allow this method to be used with other %RigidTransform methods
+  // that use Eigen <b>expressions</b> (as distinct from Eigen <b>types</b>)
+  // the `pose` argument is an Eigen::MatrixBase<Derived> (not a Matrix4 type).
+  template <typename Derived>
+  static void ThrowIfInvalidBottomRow(const Eigen::MatrixBase<Derived>& pose) {
+    const int num_rows = pose.rows(), num_cols = pose.cols();
+    DRAKE_DEMAND(num_rows == 4 && num_cols == 4);
+    if (pose(3, 0) != 0 || pose(3, 1) != 0 ||
+        pose(3, 2) != 0 || pose(3, 3) != 1) {
+      throw std::logic_error(fmt::format(
+          "Error: Bottom row of 4x4 matrix differs from [0, 0, 0, 1]"));
+    }
+  }
 
   // Rotation matrix relating two frames, e.g. frame A and frame B.
   // The default constructor for R_AB_ is an identity matrix.

@@ -4,17 +4,8 @@
 #include "pybind11/pybind11.h"
 
 #include "drake/bindings/pydrake/common/cpp_template_pybind.h"
-#ifndef __clang__
-// N.B. Without this, GCC 7.4.0 on Ubuntu complains about
-// `AutoDiffScalar(const AutoDiffScalar& other)` having uninitialized values.
-// TODO(eric.cousineau): Figure out why?
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
-#pragma GCC diagnostic pop
-#else
-#include "drake/bindings/pydrake/common/default_scalars_pybind.h"
-#endif  // __clang__
+#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/common/eigen_geometry_pybind.h"
 #include "drake/bindings/pydrake/common/type_pack.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
@@ -37,6 +28,7 @@ using std::abs;
 // N.B. Use a loose tolerance, so that we don't have to be super strict with
 // C++.
 const double kCheckTolerance = 1e-5;
+constexpr char kCastDoc[] = "Cast to desired scalar type.";
 
 using symbolic::Expression;
 
@@ -97,7 +89,7 @@ void CheckAngleAxis(const Eigen::AngleAxis<Expression>&) {}
 }  // namespace
 
 template <typename T>
-void DoDefinitions(py::module m, T) {
+void DoScalarDependentDefinitions(py::module m, T) {
   // Do not return references to matrices (e.g. `Eigen::Ref<>`) so that we have
   // tighter control over validation.
 
@@ -176,16 +168,24 @@ void DoDefinitions(py::module m, T) {
             [](py::object self) { return py::str(self.attr("matrix")()); })
         .def("multiply",
             [](const Class& self, const Class& other) { return self * other; },
-            py::arg("other"))
+            py::arg("other"), "RigidTransform multiplication")
         .def("multiply",
             [](const Class& self, const Vector3<T>& position) {
               return self * position;
             },
-            py::arg("position"))
-        .def("inverse", [](const Class* self) { return self->inverse(); });
+            py::arg("position"), "Position vector multiplication")
+        .def("multiply",
+            [](const Class& self, const Matrix3X<T>& position) {
+              return self * position;
+            },
+            py::arg("position"), "Position vector list multiplication")
+        .def("inverse", [](const Class* self) { return self->inverse(); })
+        .def(py::pickle([](const Class& self) { return self.matrix(); },
+            [](const Matrix4<T>& matrix) { return Class(matrix); }));
     cls.attr("__matmul__") = cls.attr("multiply");
     py::implicitly_convertible<Matrix4<T>, Class>();
     DefCopyAndDeepCopy(&cls);
+    DefCast<T>(&cls, kCastDoc);
   }
 
   // Quaternion.
@@ -265,16 +265,35 @@ void DoDefinitions(py::module m, T) {
                       self->y(), self->z());
             })
         .def("multiply",
-            [](const Class& self, const Class& other) { return self * other; })
-        .def("multiply",
-            [](const Class& self, const Vector3<T>& position) {
-              return self * position;
-            },
-            py::arg("position"))
+            [](const Class& self, const Class& other) { return self * other; },
+            "Quaternion multiplication");
+    auto multiply_vector = [](const Class& self, const Vector3<T>& vector) {
+      return self * vector;
+    };
+    auto multiply_vector_list = [](const Class& self,
+                                    const Matrix3X<T>& vector) {
+      Matrix3X<T> out(vector.rows(), vector.cols());
+      for (int i = 0; i < vector.cols(); ++i) {
+        out.col(i) = self * vector.col(i);
+      }
+      return out;
+    };
+    cls  // BR
+        .def("multiply", multiply_vector, py::arg("vector"),
+            "Multiplication by a vector expressed in a frame")
+        .def("multiply", multiply_vector_list, py::arg("vector"),
+            "Multiplication by a list of vectors expressed in the same frame")
         .def("inverse", [](const Class* self) { return self->inverse(); })
-        .def("conjugate", [](const Class* self) { return self->conjugate(); });
+        .def("conjugate", [](const Class* self) { return self->conjugate(); })
+        .def(py::pickle(
+            // Leverage Python API so we can easily use `wxyz` form.
+            [](py::object self) { return self.attr("wxyz")(); },
+            [py_class_obj](py::object wxyz) -> Class {
+              return py_class_obj(wxyz).cast<Class>();
+            }));
     cls.attr("__matmul__") = cls.attr("multiply");
     DefCopyAndDeepCopy(&cls);
+    DefCast<T>(&cls, kCastDoc);
   }
 
   // Angle-axis.
@@ -332,7 +351,8 @@ void DoDefinitions(py::module m, T) {
               Class update(rotation);
               CheckAngleAxis(update);
               *self = update;
-            })
+            },
+            py::arg("rotation"))
         .def("quaternion",
             [](const Class* self) { return Eigen::Quaternion<T>(*self); })
         .def("set_quaternion",
@@ -341,7 +361,8 @@ void DoDefinitions(py::module m, T) {
               Class update(q);
               CheckAngleAxis(update);
               *self = update;
-            })
+            },
+            py::arg("q"))
         .def("__str__",
             [py_class_obj](const Class* self) {
               return py::str("{}(angle={}, axis={})")
@@ -349,10 +370,20 @@ void DoDefinitions(py::module m, T) {
                       self->axis());
             })
         .def("multiply",
-            [](const Class& self, const Class& other) { return self * other; })
-        .def("inverse", [](const Class* self) { return self->inverse(); });
+            [](const Class& self, const Class& other) { return self * other; },
+            py::arg("other"))
+        .def("inverse", [](const Class* self) { return self->inverse(); })
+        .def(py::pickle(
+            [](const Class& self) {
+              return py::make_tuple(self.angle(), self.axis());
+            },
+            [](py::tuple t) {
+              DRAKE_THROW_UNLESS(t.size() == 2);
+              return Class(t[0].cast<T>(), t[1].cast<Vector3<T>>());
+            }));
     cls.attr("__matmul__") = cls.attr("multiply");
     DefCopyAndDeepCopy(&cls);
+    DefCast<T>(&cls, kCastDoc);
   }
 }
 
@@ -361,7 +392,8 @@ PYBIND11_MODULE(eigen_geometry, m) {
 
   py::module::import("pydrake.autodiffutils");
   py::module::import("pydrake.symbolic");
-  type_visit([m](auto dummy) { DoDefinitions(m, dummy); }, CommonScalarPack{});
+  type_visit([m](auto dummy) { DoScalarDependentDefinitions(m, dummy); },
+      CommonScalarPack{});
 }
 
 }  // namespace pydrake

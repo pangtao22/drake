@@ -5,7 +5,7 @@
 namespace drake {
 namespace geometry {
 
-GeometryInstance::GeometryInstance(const Isometry3<double>& X_PG,
+GeometryInstance::GeometryInstance(const math::RigidTransform<double>& X_PG,
                                    std::unique_ptr<Shape> shape,
                                    const std::string& name)
     : id_(GeometryId::get_new_id()),

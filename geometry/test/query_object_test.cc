@@ -9,6 +9,7 @@
 #include "drake/geometry/geometry_frame.h"
 #include "drake/geometry/geometry_instance.h"
 #include "drake/geometry/scene_graph.h"
+#include "drake/math/rigid_transform.h"
 
 namespace drake {
 namespace geometry {
@@ -105,9 +106,15 @@ class QueryObjectTester {
 
 namespace {
 
+using Eigen::Vector3d;
+using math::RigidTransformd;
+using render::DepthCameraProperties;
 using std::make_unique;
 using std::unique_ptr;
 using systems::Context;
+using systems::sensors::ImageDepth32F;
+using systems::sensors::ImageLabel16I;
+using systems::sensors::ImageRgba8U;
 
 class QueryObjectTest : public ::testing::Test {
  protected:
@@ -164,19 +171,44 @@ TEST_F(QueryObjectTest, DefaultQueryThrows) {
   EXPECT_DEFAULT_ERROR(QOT::ThrowIfNotCallable(*default_object));
 
   // Enumerate *all* queries to confirm they throw the proper exception.
+
+  // Scalar-dependent state queries.
+  EXPECT_DEFAULT_ERROR(default_object->X_WF(FrameId::get_new_id()));
+  EXPECT_DEFAULT_ERROR(default_object->X_PF(FrameId::get_new_id()));
+  EXPECT_DEFAULT_ERROR(default_object->X_WG(GeometryId::get_new_id()));
+
+  // Penetration queries.
   EXPECT_DEFAULT_ERROR(default_object->ComputePointPairPenetration());
+  EXPECT_DEFAULT_ERROR(default_object->ComputeContactSurfaces());
+
+  // Signed distance queries.
   EXPECT_DEFAULT_ERROR(
       default_object->ComputeSignedDistancePairwiseClosestPoints());
+  EXPECT_DEFAULT_ERROR(default_object->ComputeSignedDistancePairClosestPoints(
+      GeometryId::get_new_id(), GeometryId::get_new_id()));
   EXPECT_DEFAULT_ERROR(
       default_object->ComputeSignedDistanceToPoint(Vector3<double>::Zero()));
-  EXPECT_DEFAULT_ERROR(
-      default_object->ComputeContactSurfaces());
-  EXPECT_DEFAULT_ERROR(
-      default_object->X_WF(FrameId::get_new_id()));
-  EXPECT_DEFAULT_ERROR(
-      default_object->X_PF(FrameId::get_new_id()));
-  EXPECT_DEFAULT_ERROR(
-      default_object->X_WG(GeometryId::get_new_id()));
+
+  EXPECT_DEFAULT_ERROR(default_object->FindCollisionCandidates());
+  EXPECT_DEFAULT_ERROR(default_object->HasCollisions());
+  EXPECT_DEFAULT_ERROR(default_object->X_WF(FrameId::get_new_id()));
+  EXPECT_DEFAULT_ERROR(default_object->X_PF(FrameId::get_new_id()));
+  EXPECT_DEFAULT_ERROR(default_object->X_WG(GeometryId::get_new_id()));
+
+  // Render queries.
+  DepthCameraProperties properties(2, 2, M_PI, "dummy_renderer", 0.1, 5.0);
+  RigidTransformd X_WC = RigidTransformd::Identity();
+  ImageRgba8U color;
+  EXPECT_DEFAULT_ERROR(default_object->RenderColorImage(
+      properties, FrameId::get_new_id(), X_WC, false, &color));
+
+  ImageDepth32F depth;
+  EXPECT_DEFAULT_ERROR(default_object->RenderDepthImage(
+      properties, FrameId::get_new_id(), X_WC, &depth));
+
+  ImageLabel16I label;
+  EXPECT_DEFAULT_ERROR(default_object->RenderLabelImage(
+      properties, FrameId::get_new_id(), X_WC, false, &label));
 #undef EXPECT_DEFAULT_ERROR
 }
 
@@ -185,7 +217,7 @@ TEST_F(QueryObjectTest, DefaultQueryThrows) {
 GTEST_TEST(QueryObjectInspectTest, CreateValidInspector) {
   SceneGraph<double> scene_graph;
   SourceId source_id = scene_graph.RegisterSource("source");
-  auto identity = Isometry3<double>::Identity();
+  auto identity = RigidTransformd::Identity();
   FrameId frame_id =
       scene_graph.RegisterFrame(source_id, GeometryFrame("frame"));
   GeometryId geometry_id = scene_graph.RegisterGeometry(
@@ -213,7 +245,7 @@ GTEST_TEST(QueryObjectBakeTest, BakedCopyHasFullUpdate) {
   SourceId s_id = scene_graph.RegisterSource("BakeTest");
   FrameId frame_id = scene_graph.RegisterFrame(s_id, GeometryFrame("frame"));
   unique_ptr<Context<double>> context = scene_graph.AllocateContext();
-  Isometry3<double> X_WF{Translation3<double>{1, 2, 3}};
+  RigidTransformd X_WF{Vector3d{1, 2, 3}};
   FramePoseVector<double> poses{{frame_id, X_WF}};
   scene_graph.get_source_pose_port(s_id).FixValue(context.get(), poses);
   const auto& query_object =
@@ -229,13 +261,15 @@ GTEST_TEST(QueryObjectBakeTest, BakedCopyHasFullUpdate) {
   const GeometryState<double>& state = QOT::state(query_object);
   const auto& stale_pose = state.get_pose_in_world(frame_id);
   // Confirm the live state hasn't been updated yet.
-  EXPECT_FALSE(CompareMatrices(stale_pose.matrix(), X_WF.matrix()));
+  EXPECT_FALSE(
+      CompareMatrices(stale_pose.GetAsMatrix34(), X_WF.GetAsMatrix34()));
 
   const QueryObject<double> baked(query_object);
 
   const GeometryState<double>& baked_state = QOT::state(query_object);
   const auto& baked_pose = baked_state.get_pose_in_world(frame_id);
-  EXPECT_TRUE(CompareMatrices(baked_pose.matrix(), X_WF.matrix()));
+  EXPECT_TRUE(
+      CompareMatrices(baked_pose.GetAsMatrix34(), X_WF.GetAsMatrix34()));
 }
 
 }  // namespace

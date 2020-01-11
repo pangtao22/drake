@@ -7,7 +7,6 @@
 #include "pybind11/stl.h"
 
 #include "drake/bindings/pydrake/autodiff_types_pybind.h"
-#include "drake/bindings/pydrake/common/drake_optional_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
 #include "drake/bindings/pydrake/symbolic_types_pybind.h"
@@ -162,10 +161,51 @@ class PyFunctionConstraint : public Constraint {
   const AutoDiffFunc autodiff_func_;
 };
 
+// pybind11 trampoline class to permit overriding virtual functions in Python.
+class PySolverInterface : public py::wrapper<solvers::SolverInterface> {
+ public:
+  using Base = py::wrapper<solvers::SolverInterface>;
+
+  PySolverInterface() : Base() {}
+
+  // The following methods are for the pybind11 trampoline class to permit C++
+  // to call the correct Python override. This code path is only activated for
+  // Python implementations of the class (whose inheritance will pass through
+  // `PySolverInterface`). C++ implementations will use the bindings on the
+  // interface below.
+
+  bool available() const override {
+    PYBIND11_OVERLOAD_PURE(bool, solvers::SolverInterface, available);
+  }
+
+  void Solve(const solvers::MathematicalProgram& prog,
+      const std::optional<Eigen::VectorXd>& initial_guess,
+      const std::optional<solvers::SolverOptions>& solver_options,
+      solvers::MathematicalProgramResult* result) const override {
+    PYBIND11_OVERLOAD_PURE(void, solvers::SolverInterface, Solve, prog,
+        initial_guess, solver_options, result);
+  }
+
+  solvers::SolverId solver_id() const override {
+    PYBIND11_OVERLOAD_PURE(
+        solvers::SolverId, solvers::SolverInterface, solver_id);
+  }
+
+  bool AreProgramAttributesSatisfied(
+      const solvers::MathematicalProgram& prog) const override {
+    PYBIND11_OVERLOAD_PURE(
+        bool, solvers::SolverInterface, AreProgramAttributesSatisfied, prog);
+  }
+};
 }  // namespace
 
 PYBIND11_MODULE(mathematicalprogram, m) {
-  m.doc() = "Drake MathematicalProgram Bindings";
+  m.doc() = R"""(
+Bindings for MathematicalProgram
+
+If you are formulating constraints using symbolic formulas, please review the
+top-level documentation for :py:mod:`pydrake.math`.
+)""";
   constexpr auto& doc = pydrake_doc.drake.solvers;
 
   py::module::import("pydrake.autodiffutils");
@@ -176,26 +216,39 @@ PYBIND11_MODULE(mathematicalprogram, m) {
       py::module::import("pydrake.symbolic").attr("Expression");
   py::object formula = py::module::import("pydrake.symbolic").attr("Formula");
 
-  py::class_<SolverInterface>(m, "SolverInterface", doc.SolverInterface.doc)
+  py::class_<SolverInterface, PySolverInterface>(
+      m, "SolverInterface", doc.SolverInterface.doc)
+      .def(py::init([]() { return std::make_unique<PySolverInterface>(); }),
+          doc.SolverInterface.ctor.doc)
+      // The following bindings are present to allow Python to call C++
+      // implementations of this interface.
       .def("available", &SolverInterface::available,
           doc.SolverInterface.available.doc)
       .def("solver_id", &SolverInterface::solver_id,
           doc.SolverInterface.solver_id.doc)
       .def("AreProgramAttributesSatisfied",
-          &SolverInterface::AreProgramAttributesSatisfied, py::arg("prog"),
+          [](const SolverInterface& self,
+              const solvers::MathematicalProgram& prog) {
+            return self.AreProgramAttributesSatisfied(prog);
+          },
+          py::arg("prog"),
           doc.SolverInterface.AreProgramAttributesSatisfied.doc)
       .def("Solve",
-          pydrake::overload_cast_explicit<void, const MathematicalProgram&,
-              const optional<Eigen::VectorXd>&, const optional<SolverOptions>&,
-              MathematicalProgramResult*>(&SolverInterface::Solve),
+          [](const SolverInterface& self,
+              const solvers::MathematicalProgram& prog,
+              const std::optional<Eigen::VectorXd>& initial_guess,
+              const std::optional<solvers::SolverOptions>& solver_options,
+              solvers::MathematicalProgramResult* result) {
+            self.Solve(prog, initial_guess, solver_options, result);
+          },
           py::arg("prog"), py::arg("initial_guess"), py::arg("solver_options"),
           py::arg("result"), doc.SolverInterface.Solve.doc)
       .def("Solve",
           // This method really lives on SolverBase, but we manually write it
           // out here to avoid all of the overloading / inheritance hassles.
           [](const SolverInterface& self, const MathematicalProgram& prog,
-              const optional<Eigen::VectorXd>& initial_guess,
-              const optional<SolverOptions>& solver_options) {
+              const std::optional<Eigen::VectorXd>& initial_guess,
+              const std::optional<SolverOptions>& solver_options) {
             MathematicalProgramResult result;
             self.Solve(prog, initial_guess, solver_options, &result);
             return result;
@@ -211,6 +264,7 @@ PYBIND11_MODULE(mathematicalprogram, m) {
           [](const SolverInterface& self) { return self.solver_id().name(); });
 
   py::class_<SolverId>(m, "SolverId", doc.SolverId.doc)
+      .def(py::init<std::string>(), py::arg("name"), doc.SolverId.ctor.doc)
       .def("name", &SolverId::name, doc.SolverId.name.doc);
 
   py::enum_<SolverType>(m, "SolverType", doc.SolverType.doc)
@@ -225,11 +279,37 @@ PYBIND11_MODULE(mathematicalprogram, m) {
       .value("kMosek", SolverType::kMosek, doc.SolverType.kMosek.doc)
       .value("kNlopt", SolverType::kNlopt, doc.SolverType.kNlopt.doc)
       .value("kOsqp", SolverType::kOsqp, doc.SolverType.kOsqp.doc)
+      .value("kScs", SolverType::kScs, doc.SolverType.kScs.doc)
       .value("kSnopt", SolverType::kSnopt, doc.SolverType.kSnopt.doc);
 
   // TODO(jwnimmer-tri) Bind the accessors for SolverOptions.
   py::class_<SolverOptions>(m, "SolverOptions", doc.SolverOptions.doc)
-      .def(py::init<>(), doc.SolverOptions.ctor.doc);
+      .def(py::init<>(), doc.SolverOptions.ctor.doc)
+      .def("SetOption",
+          py::overload_cast<const SolverId&, const std::string&, double>(
+              &SolverOptions::SetOption),
+          py::arg("solver_id"), py::arg("solver_option"),
+          py::arg("option_value"), doc.SolverOptions.SetOption.doc)
+      .def("SetOption",
+          py::overload_cast<const SolverId&, const std::string&, int>(
+              &SolverOptions::SetOption),
+          py::arg("solver_id"), py::arg("solver_option"),
+          py::arg("option_value"), doc.SolverOptions.SetOption.doc)
+      .def("SetOption",
+          py::overload_cast<const SolverId&, const std::string&,
+              const std::string&>(&SolverOptions::SetOption),
+          py::arg("solver_id"), py::arg("solver_option"),
+          py::arg("option_value"), doc.SolverOptions.SetOption.doc)
+      .def("GetOptions",
+          [](const SolverOptions& solver_options, SolverId solver_id) {
+            py::dict out;
+            py::object update = out.attr("update");
+            update(solver_options.GetOptionsDouble(solver_id));
+            update(solver_options.GetOptionsInt(solver_id));
+            update(solver_options.GetOptionsStr(solver_id));
+            return out;
+          },
+          py::arg("solver_id"), doc.SolverOptions.GetOptionsDouble.doc);
 
   py::class_<MathematicalProgramResult>(
       m, "MathematicalProgramResult", doc.MathematicalProgramResult.doc)
@@ -385,6 +465,12 @@ PYBIND11_MODULE(mathematicalprogram, m) {
               const std::string&)>(&MathematicalProgram::NewIndeterminates),
           py::arg("rows"), py::arg("cols"), py::arg("name") = "X",
           doc.MathematicalProgram.NewIndeterminates.doc_3args)
+      .def("AddIndeterminates", &MathematicalProgram::AddIndeterminates,
+          py::arg("new_indeterminates"),
+          doc.MathematicalProgram.AddIndeterminates.doc)
+      .def("AddDecisionVariables", &MathematicalProgram::AddDecisionVariables,
+          py::arg("decision_variables"),
+          doc.MathematicalProgram.AddDecisionVariables.doc)
       .def("AddBoundingBoxConstraint",
           static_cast<Binding<BoundingBoxConstraint> (MathematicalProgram::*)(
               const Eigen::Ref<const Eigen::VectorXd>&,
@@ -426,6 +512,13 @@ PYBIND11_MODULE(mathematicalprogram, m) {
           static_cast<Binding<Constraint> (MathematicalProgram::*)(
               const Formula&)>(&MathematicalProgram::AddConstraint),
           doc.MathematicalProgram.AddConstraint.doc_1args_f)
+      .def("AddConstraint",
+          static_cast<Binding<Constraint> (MathematicalProgram::*)(
+              std::shared_ptr<Constraint>,
+              const Eigen::Ref<const VectorXDecisionVariable>& vars)>(
+              &MathematicalProgram::AddConstraint),
+          py::arg("constraint"), py::arg("vars"),
+          doc.MathematicalProgram.AddConstraint.doc_2args_con_vars)
       .def("AddLinearConstraint",
           static_cast<Binding<LinearConstraint> (MathematicalProgram::*)(
               const Eigen::Ref<const Eigen::MatrixXd>&,
@@ -532,17 +625,33 @@ PYBIND11_MODULE(mathematicalprogram, m) {
           static_cast<Binding<LinearCost> (MathematicalProgram::*)(
               const Expression&)>(&MathematicalProgram::AddLinearCost),
           doc.MathematicalProgram.AddLinearCost.doc_1args)
+      .def("AddLinearCost",
+          static_cast<Binding<LinearCost> (MathematicalProgram::*)(
+              const Eigen::Ref<const Eigen::VectorXd>&, double,
+              const Eigen::Ref<const VectorXDecisionVariable>&)>(
+              &MathematicalProgram::AddLinearCost),
+          py::arg("a"), py::arg("b"), py::arg("vars"),
+          doc.MathematicalProgram.AddLinearCost.doc_3args)
       .def("AddQuadraticCost",
           static_cast<Binding<QuadraticCost> (MathematicalProgram::*)(
               const Eigen::Ref<const Eigen::MatrixXd>&,
               const Eigen::Ref<const Eigen::VectorXd>&,
               const Eigen::Ref<const VectorXDecisionVariable>&)>(
               &MathematicalProgram::AddQuadraticCost),
+          py::arg("Q"), py::arg("b"), py::arg("vars"),
           doc.MathematicalProgram.AddQuadraticCost.doc_3args)
       .def("AddQuadraticCost",
           static_cast<Binding<QuadraticCost> (MathematicalProgram::*)(
+              const Eigen::Ref<const Eigen::MatrixXd>&,
+              const Eigen::Ref<const Eigen::VectorXd>&, double,
+              const Eigen::Ref<const VectorXDecisionVariable>&)>(
+              &MathematicalProgram::AddQuadraticCost),
+          py::arg("Q"), py::arg("b"), py::arg("c"), py::arg("vars"),
+          doc.MathematicalProgram.AddQuadraticCost.doc_4args)
+      .def("AddQuadraticCost",
+          static_cast<Binding<QuadraticCost> (MathematicalProgram::*)(
               const Expression&)>(&MathematicalProgram::AddQuadraticCost),
-          doc.MathematicalProgram.AddQuadraticCost.doc_1args)
+          py::arg("e"), doc.MathematicalProgram.AddQuadraticCost.doc_1args)
       .def("AddQuadraticErrorCost",
           overload_cast_explicit<Binding<QuadraticCost>,
               const Eigen::Ref<const Eigen::MatrixXd>&,
@@ -602,6 +711,10 @@ PYBIND11_MODULE(mathematicalprogram, m) {
                   MathematicalProgram::*)(const Expression&)>(
               &MathematicalProgram::AddSosConstraint),
           doc.MathematicalProgram.AddSosConstraint.doc_1args_e)
+      .def("AddEqualityConstraintBetweenPolynomials",
+          &MathematicalProgram::AddEqualityConstraintBetweenPolynomials,
+          py::arg("p1"), py::arg("p2"),
+          doc.MathematicalProgram.AddEqualityConstraintBetweenPolynomials.doc)
       .def("AddVisualizationCallback",
           static_cast<Binding<VisualizationCallback> (MathematicalProgram::*)(
               const VisualizationCallback::CallbackFunction&,
@@ -637,6 +750,15 @@ PYBIND11_MODULE(mathematicalprogram, m) {
           doc.MathematicalProgram.num_vars.doc)
       .def("decision_variables", &MathematicalProgram::decision_variables,
           doc.MathematicalProgram.decision_variables.doc)
+      .def("decision_variable_index",
+          &MathematicalProgram::decision_variable_index,
+          doc.MathematicalProgram.decision_variable_index.doc)
+      .def("indeterminates", &MathematicalProgram::indeterminates,
+          doc.MathematicalProgram.indeterminates.doc)
+      .def("indeterminate", &MathematicalProgram::indeterminate, py::arg("i"),
+          doc.MathematicalProgram.indeterminate.doc)
+      .def("indeterminates_index", &MathematicalProgram::indeterminates_index,
+          doc.MathematicalProgram.indeterminates_index.doc)
       .def("EvalBinding",
           [](const MathematicalProgram& prog,
               const Binding<EvaluatorBase>& binding,
@@ -669,6 +791,14 @@ PYBIND11_MODULE(mathematicalprogram, m) {
           },
           py::arg("bindings"), py::arg("prog_var_vals"),
           doc.MathematicalProgram.EvalBindings.doc)
+      .def("GetBindingVariableValues",
+          [](const MathematicalProgram& prog,
+              const Binding<EvaluatorBase>& binding,
+              const VectorX<double>& prog_var_vals) {
+            return prog.GetBindingVariableValues(binding, prog_var_vals);
+          },
+          py::arg("binding"), py::arg("prog_var_vals"),
+          doc.MathematicalProgram.GetBindingVariableValues.doc)
       .def("GetInitialGuess",
           [](MathematicalProgram& prog,
               const symbolic::Variable& decision_variable) {
@@ -736,13 +866,39 @@ PYBIND11_MODULE(mathematicalprogram, m) {
           py::arg("decision_variables_new_values"), py::arg("values"),
           doc.MathematicalProgram.SetDecisionVariableValueInVector
               .doc_3args_decision_variables_decision_variables_new_values_values)
+      .def("SetSolverOption",
+          py::overload_cast<const SolverId&, const std::string&, double>(
+              &MathematicalProgram::SetSolverOption),
+          py::arg("solver_id"), py::arg("solver_option"),
+          py::arg("option_value"), doc.MathematicalProgram.SetSolverOption.doc)
+      .def("SetSolverOption",
+          py::overload_cast<const SolverId&, const std::string&, int>(
+              &MathematicalProgram::SetSolverOption),
+          py::arg("solver_id"), py::arg("solver_option"),
+          py::arg("option_value"), doc.MathematicalProgram.SetSolverOption.doc)
+      .def("SetSolverOption",
+          py::overload_cast<const SolverId&, const std::string&,
+              const std::string&>(&MathematicalProgram::SetSolverOption),
+          py::arg("solver_id"), py::arg("solver_option"),
+          py::arg("option_value"), doc.MathematicalProgram.SetSolverOption.doc)
       .def("SetSolverOption", &SetSolverOptionBySolverType<double>,
           doc.MathematicalProgram.SetSolverOption.doc)
       .def("SetSolverOption", &SetSolverOptionBySolverType<int>,
           doc.MathematicalProgram.SetSolverOption.doc)
       .def("SetSolverOption", &SetSolverOptionBySolverType<string>,
           doc.MathematicalProgram.SetSolverOption.doc)
+      .def("SetSolverOptions", &MathematicalProgram::SetSolverOptions,
+          doc.MathematicalProgram.SetSolverOptions.doc)
       // TODO(m-chaturvedi) Add Pybind11 documentation.
+      .def("GetSolverOptions",
+          [](MathematicalProgram& prog, SolverId solver_id) {
+            py::dict out;
+            py::object update = out.attr("update");
+            update(prog.GetSolverOptionsDouble(solver_id));
+            update(prog.GetSolverOptionsInt(solver_id));
+            update(prog.GetSolverOptionsStr(solver_id));
+            return out;
+          })
       .def("GetSolverOptions",
           [](MathematicalProgram& prog, SolverType solver_type) {
             py::dict out;
@@ -783,7 +939,12 @@ PYBIND11_MODULE(mathematicalprogram, m) {
         .def("get_description", &Class::get_description,
             cls_doc.get_description.doc)
         .def("set_description", &Class::set_description,
-            cls_doc.set_description.doc);
+            cls_doc.set_description.doc)
+        .def("SetGradientSparsityPattern", &Class::SetGradientSparsityPattern,
+            py::arg("gradient_sparsity_pattern"),
+            cls_doc.SetGradientSparsityPattern.doc)
+        .def("gradient_sparsity_pattern", &Class::gradient_sparsity_pattern,
+            cls_doc.gradient_sparsity_pattern.doc);
     auto bind_eval = [&cls, &cls_doc](auto dummy_x, auto dummy_y) {
       using T_x = decltype(dummy_x);
       using T_y = decltype(dummy_y);
@@ -836,6 +997,13 @@ PYBIND11_MODULE(mathematicalprogram, m) {
 
   py::class_<LinearConstraint, Constraint, std::shared_ptr<LinearConstraint>>(
       m, "LinearConstraint", doc.LinearConstraint.doc)
+      .def(py::init([](const Eigen::MatrixXd& A, const Eigen::VectorXd& lb,
+                        const Eigen::VectorXd& ub) {
+        return std::unique_ptr<LinearConstraint>(
+            new LinearConstraint(A, lb, ub));
+      }),
+          py::arg("A"), py::arg("lb"), py::arg("ub"),
+          doc.LinearConstraint.ctor.doc)
       .def("A", &LinearConstraint::A, doc.LinearConstraint.A.doc)
       .def("UpdateCoefficients",
           [](LinearConstraint& self, const Eigen::MatrixXd& new_A,
@@ -949,12 +1117,12 @@ PYBIND11_MODULE(mathematicalprogram, m) {
           "MakeSolver", &solvers::MakeSolver, py::arg("id"), doc.MakeSolver.doc)
       .def("Solve",
           py::overload_cast<const MathematicalProgram&,
-              const optional<Eigen::VectorXd>&, const optional<SolverOptions>&>(
-              &solvers::Solve),
+              const std::optional<Eigen::VectorXd>&,
+              const std::optional<SolverOptions>&>(&solvers::Solve),
           py::arg("prog"), py::arg("initial_guess") = py::none(),
           py::arg("solver_options") = py::none(), doc.Solve.doc_3args)
       .def("GetInfeasibleConstraints", &solvers::GetInfeasibleConstraints,
-          py::arg("prog"), py::arg("result"), py::arg("tol") = nullopt,
+          py::arg("prog"), py::arg("result"), py::arg("tol") = std::nullopt,
           doc.GetInfeasibleConstraints.doc);
 }  // NOLINT(readability/fn_size)
 

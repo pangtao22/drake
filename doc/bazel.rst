@@ -4,13 +4,11 @@
 Bazel build system
 ******************
 
-The Bazel build system is officially supported for a subset of Drake on Ubuntu
-Xenial and Bionic and macOS High Sierra and Mojave.
+Drake's primary build system is Bazel.  For more information about Bazel, see
+https://bazel.build/.
 
-For more information, see:
-
- * https://bazel.build/
- * https://github.com/RobotLocomotion/drake/issues/3129
+Drake also offers a CMake build system wrapper that invokes Bazel under the
+hood.
 
 Bazel Installation
 ==================
@@ -39,19 +37,16 @@ typical examples below; for more reading about target patterns, see:
 https://docs.bazel.build/versions/master/user-manual.html#target-patterns.
 
 On Ubuntu, the default compiler is the first ``gcc`` compiler in the
-``PATH``, usually GCC 5.4 on Xenial and GCC 7.3 on Bionic. On macOS, the
-default compiler is the Apple LLVM compiler. To use Clang 6.0 on Ubuntu, set
-the ``CC`` and ``CXX`` environment variables before running **bazel build**,
-**bazel test**, or any other **bazel** commands.
+``PATH``, usually GCC 7.4 on Bionic. On macOS, the default compiler is the Apple
+LLVM compiler. To use Clang 6.0 on Ubuntu, set the ``CC`` and ``CXX``
+environment variables before running **bazel build**, **bazel test**, or any
+other **bazel** commands.
 
 Cheat sheet for operating on the entire project::
 
   cd /path/to/drake
   bazel build //...                               # Build the entire project.
   bazel test //...                                # Build and test the entire project.
-
-  CC=clang-6.0 CXX=clang++-6.0 bazel build //...  # Build using Clang 6.0 on Xenial.
-  CC=clang-6.0 CXX=clang++-6.0 bazel test //...   # Build and test using Clang 6.0 on Xenial.
 
   CC=clang CXX=clang++ bazel build //...          # Build using Clang 6.0 on Bionic.
   CC=clang CXX=clang++ bazel test //...           # Build and test using Clang 6.0 on Bionic.
@@ -144,15 +139,6 @@ For more information, see https://github.com/bazelbuild/bazel/issues/2537.
 
 .. _buildifier:
 
-Python Versions
-===============
-By default, Python 2 will be used. To use Python 3 for both Bazel and the Python
-bindings, use ``--config=python3``.
-
-As an example to run all lint checks in Python 3::
-
-    bazel test --config=python3 --config=lint //...
-
 Updating BUILD files
 ====================
 
@@ -175,7 +161,7 @@ Proprietary Solvers
 The Drake Bazel build currently supports the following proprietary solvers:
 
  * Gurobi 8.0.1
- * MOSEK 8.1
+ * MOSEK 9.0
  * SNOPT 7.4
 
 .. When upgrading SNOPT to a newer revision, re-enable TestPrintFile in
@@ -212,10 +198,10 @@ these tests.  If you will be developing with Gurobi regularly, you may wish
 to specify a more convenient ``--test_tag_filters`` in a local ``.bazelrc``.
 See https://docs.bazel.build/versions/master/user-manual.html#bazelrc.
 
-MOSEK 8.1
----------
+MOSEK
+-----
 
-The Drake Bazel build system downloads MOSEK 8.1.0.51 automatically.  No manual
+The Drake Bazel build system downloads MOSEK 9.0.96 automatically.  No manual
 installation is required.  Set the location of your license file as follows:
 
 ``export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic``
@@ -262,19 +248,9 @@ these tests.  If you will be developing with SNOPT regularly, you may wish
 to specify a more convenient ``--test_tag_filters`` in a local ``.bazelrc``.
 See https://docs.bazel.build/versions/master/user-manual.html#bazelrc.
 
-Drake offers two flavors of SNOPT bindings for the MathematicalProgram:
-
- - The ``--config snopt_f2c`` option selects the legacy bindings that use the
-   f2c compiler; these bindings will be removed on 2019-07-01.
- - The ``--config snopt_fortran`` option selects the bindings that use the
-   gfortran compiler; these bindings will be supported for the foreseeable
-   future.
- - The ``--config snopt`` option selects a default choice (currently f2c, but
-   will soon change to gfortran).
-
-The gfortran bindings are superior in several ways (such as being threadsafe),
-but have a known problem with unbounded linear programs (see drake issue
-`#10423 <https://github.com/RobotLocomotion/drake/issues/10423>`_).
+SNOPT support has some known problems on certain programs (see drake issue
+`#10422 <https://github.com/RobotLocomotion/drake/issues/10422>`_ for a
+summary).
 
 Optional Tools
 ==============

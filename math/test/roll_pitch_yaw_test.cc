@@ -19,9 +19,9 @@ using Eigen::Matrix3d;
 
 const double kEpsilon = std::numeric_limits<double>::epsilon();
 
-// This data structure is used in symbolic and automotive code. If a `Matrix3`
-// overload is added to the constructors, then it creates an ambiguous overload
-// for types like this one (and things like `Eigen::Ref<>`).
+// This data structure is used in symbolic code. If a `Matrix3` overload is
+// added to the constructors, then it creates an ambiguous overload for types
+// like this one (and things like `Eigen::Ref<>`).
 using Vector3dUnaligned = Eigen::Matrix<double, 3, 1, Eigen::DontAlign>;
 
 // This tests the RollPitchYaw constructors and IsNearlyEqualTo().
@@ -132,22 +132,6 @@ GTEST_TEST(RollPitchYaw, testToQuaternion) {
   // Test SetFromRotationMatrix.
   rpy2.SetFromRotationMatrix(R1);
   EXPECT_TRUE(rpy2.IsNearlySameOrientation(rpy, kEpsilon));
-
-  // Test SetFromQuaternionAndRotationMatrix.
-  rpy2.SetFromQuaternionAndRotationMatrix(quat, R1);
-  EXPECT_TRUE(rpy2.IsNearlySameOrientation(rpy, kEpsilon));
-
-  // Test SetFromQuaternionAndRotationMatrix throws exception in debug builds
-  // if quaternion is not consistent with rotation matrix.
-  const char* expected_message =
-      "RollPitchYaw::SetFromQuaternionAndRotationMatrix()"
-      ".*An element of the RotationMatrix R"
-      ".*differs by more than"
-      ".*element of the RotationMatrix formed by the Quaternion.*";
-  const Eigen::Quaterniond quat_inconsistent(1, 0, 0, 0);
-  DRAKE_EXPECT_THROWS_MESSAGE_IF_ARMED(
-      rpy2.SetFromQuaternionAndRotationMatrix(quat_inconsistent, R1),
-      std::logic_error, expected_message);
 }
 
 // This tests the RollPitchYaw.IsValid() method.

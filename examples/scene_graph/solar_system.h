@@ -4,6 +4,7 @@
 
 #include "drake/common/drake_copyable.h"
 #include "drake/geometry/scene_graph.h"
+#include "drake/math/rigid_transform.h"
 #include "drake/systems/framework/basic_vector.h"
 #include "drake/systems/framework/context.h"
 #include "drake/systems/framework/leaf_system.h"
@@ -17,8 +18,9 @@ namespace solar_system {
 // rotations become apparent as well (and not just revolutions).
 /** A model of an orrery -- a simple mechanical model of the solar system.
 
- The orrery contains one sun and six orbiting bodies: two planets (Earth and
- Mars) each with one moon and two satellites for Earth. The orrery is
+ The orrery contains one sun and multiple orbiting bodies: two planets (Earth
+ and Mars) each with one moon and multiple satellites for Earth. The idea is
+ to represent each type of visual geometry in some form. The orrery is
  articulated by placing the _frame_ for each body at its parent's origin, and
  then displacing the geometry from that origin to its orbital distance. Then
  each orbiting frame has a single degree of freedom: its angular position
@@ -27,8 +29,8 @@ namespace solar_system {
  - The sun is stationary -- an anchored geometry.
  - Earth orbits on the xy-plane. Its moon (Luna) revolves around the earth on
    a different arbitrary plane (illustrating transform compositions).
- - Two satellites (Convex and Box) revolve around Earth in the same way as
-   Luna but at different relative angular positions around their axis of
+ - Three satellites (Convex, Box, and Capsule) revolve around Earth in the same
+   way as Luna but at different relative angular positions around their axis of
    rotation.
  - Mars orbits the sun at a farther distance on a plane that is tilted off of
    the xy-plane. Its moon (Phobos) orbits around Mars on a plane parallel to
@@ -145,13 +147,13 @@ class SolarSystem : public systems::LeafSystem<T> {
   int geometry_pose_port_{-1};
 
   // Solar system specification
-  const int kBodyCount = 6;
+  const int kBodyCount = 7;
   // The ids for each celestial body frame
   std::vector<geometry::FrameId> body_ids_;
   // The axes around each body revolves (expressed in its parent's frame)
   std::vector<Vector3<double>> axes_;
   // The translational offset of each body from its parent frame
-  std::vector<Isometry3<double>> body_offset_;
+  std::vector<math::RigidTransformd> body_offset_;
 };
 
 }  // namespace solar_system

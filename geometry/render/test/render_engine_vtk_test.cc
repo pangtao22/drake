@@ -1,19 +1,20 @@
 #include "drake/geometry/render/render_engine_vtk.h"
 
+#include <optional>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include <Eigen/Dense>
 #include <gtest/gtest.h>
 
 #include "drake/common/drake_copyable.h"
-#include "drake/common/drake_optional.h"
 #include "drake/common/find_resource.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
+#include "drake/common/test_utilities/expect_no_throw.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/geometry/render/camera_properties.h"
-#include "drake/geometry/render/render_label_manager.h"
 #include "drake/geometry/shape_specification.h"
 #include "drake/geometry/test_utilities/dummy_render_engine.h"
 #include "drake/math/rigid_transform.h"
@@ -33,6 +34,7 @@ using math::RigidTransformd;
 using math::RotationMatrixd;
 using std::make_unique;
 using std::unique_ptr;
+using std::unordered_map;
 using std::vector;
 using systems::sensors::Color;
 using systems::sensors::ColorI;
@@ -62,12 +64,31 @@ const double kColorPixelTolerance = 1.001;
 // 2 at the point of the sphere directly underneath the camera (the sphere's
 // "peak"). However, with an even-valued window dimension, we never really
 // sample that point. We sample the center of pixels all evenly arrayed around
-// that point. So, that introduces some error. As the image gets *smaller* the
-// pixels get bigger and so the distance away from the peak center increases,
-// which, in turn, increase the measured distance for the fragment. This
-// tolerance accounts for the test case where one image has pixels that are *4X*
-// larger (in area) than the default image size.
-const double kDepthTolerance = 2e-4;
+// that point. So, that introduces some error. This error is further increased
+// in ellipsoid tests when sampling around the elongated ends. As the image gets
+// *smaller* the pixels get bigger and so the distance away from the peak center
+// increases, which, in turn, increase the measured distance for the fragment.
+// This tolerance accounts for the test case where one image has pixels that are
+// *4X* larger (in area) than the default image size.
+const double kDepthTolerance = 1e-3;
+
+// Background (sky) and terrain colors.
+const ColorI kBgColor = {254u, 127u, 0u};
+const ColorD kTerrainColorD{0., 0., 0.};
+const ColorI kTerrainColorI{0, 0, 0};
+// box.png contains a single pixel with the color (4, 241, 33). If the image
+// changes, the expected color would likewise have to change.
+const ColorI kTextureColor{4, 241, 33};
+
+// Provide a default visual color for these tests -- it is intended to be
+// different from the default color of the VTK render engine.
+const ColorI kDefaultVisualColor = {229u, 229u, 229u};
+const float kDefaultDistance{3.f};
+
+// Values to be used with the "centered shape" tests.
+// The amount inset from the edge of the images to *still* expect ground plane
+// values.
+static constexpr int kInset{10};
 
 // Holds `(x, y)` indices of the screen coordinate system where the ranges of
 // `x` and `y` are [0, image_width) and [0, image_height) respectively.
@@ -105,17 +126,24 @@ std::ostream& operator<<(std::ostream& out, const RgbaColor& c) {
   return out;
 }
 
+// Tests color within tolerance.
+bool IsColorNear(
+    const RgbaColor& expected, const RgbaColor& tested,
+    double tolerance = kColorPixelTolerance) {
+  using std::abs;
+  return (abs(expected.r - tested.r) < tolerance &&
+      abs(expected.g - tested.g) < tolerance &&
+      abs(expected.b - tested.b) < tolerance &&
+      abs(expected.a - tested.a) < tolerance);
+}
+
 // Tests that the color in the given `image` located at screen coordinate `p`
 // matches the `expected` color to within the given `tolerance`.
 ::testing::AssertionResult CompareColor(
     const RgbaColor& expected, const ImageRgba8U& image, const ScreenCoord& p,
     double tolerance = kColorPixelTolerance) {
-  using std::abs;
   RgbaColor tested(image.at(p.x, p.y));
-  if (abs(expected.r - tested.r) < tolerance &&
-      abs(expected.g - tested.g) < tolerance &&
-      abs(expected.b - tested.b) < tolerance &&
-      abs(expected.a - tested.a) < tolerance) {
+  if (IsColorNear(expected, tested, tolerance)) {
     return ::testing::AssertionSuccess();
   }
   return ::testing::AssertionFailure() << "Expected: " << expected
@@ -149,7 +177,8 @@ class RenderEngineVtkTest : public ::testing::Test {
         // Looking straight down from kDefaultDistance meters above the ground.
         X_WC_(RotationMatrixd{AngleAxisd(M_PI, Vector3d::UnitY()) *
                               AngleAxisd(-M_PI_2, Vector3d::UnitZ())},
-              {0, 0, kDefaultDistance}) {}
+              {0, 0, kDefaultDistance}),
+        geometry_id_(GeometryId::get_new_id()) {}
 
  protected:
   // Method to allow the normal case (render with the built-in renderer against
@@ -283,8 +312,15 @@ class RenderEngineVtkTest : public ::testing::Test {
 
   // Tests that don't instantiate their own renderers should invoke this.
   void Init(const RigidTransformd& X_WR, bool add_terrain = false) {
-    renderer_ = make_unique<RenderEngineVtk>();
+    const Vector3d bg_rgb{
+        kBgColor.r / 255., kBgColor.g / 255., kBgColor.b / 255.};
+    RenderEngineVtkParams params{{}, {}, bg_rgb};
+    renderer_ = make_unique<RenderEngineVtk>(params);
     InitializeRenderer(X_WR, add_terrain, renderer_.get());
+    // Ensure that we truly have a non-default color.
+    EXPECT_FALSE(IsColorNear(
+        RgbaColor(kDefaultVisualColor, 1.),
+        RgbaColor(renderer_->default_diffuse())));
   }
 
   // Tests that instantiate their own renderers can initialize their renderers
@@ -294,34 +330,39 @@ class RenderEngineVtkTest : public ::testing::Test {
     engine->UpdateViewpoint(X_WR);
 
     if (add_terrain) {
-      ColorD terrain_color =
-          DummyRenderEngine::GetColorDFromLabel(RenderLabel::kDontCare);
       PerceptionProperties material;
       material.AddProperty("label", "id", RenderLabel::kDontCare);
       material.AddProperty(
           "phong", "diffuse",
-          Vector4d{terrain_color.r, terrain_color.g, terrain_color.b, 1.0});
-      engine->RegisterVisual(GeometryIndex(0), HalfSpace(), material,
+          Vector4d{kTerrainColorD.r, kTerrainColorD.g, kTerrainColorD.b, 1.0});
+      engine->RegisterVisual(GeometryId::get_new_id(), HalfSpace(), material,
                              RigidTransformd::Identity(),
                              false /** needs update */);
     }
   }
 
-  // Creates a simple perception properties set for fixed, known results.
-  PerceptionProperties simple_material() const {
+  // Creates a simple perception properties set for fixed, known results. The
+  // material color can be modified by setting default_color_ prior to invoking
+  // this method.
+  PerceptionProperties simple_material(bool use_texture = false) const {
     PerceptionProperties material;
-    Vector4d color(kDefaultVisualColor.r / 255., kDefaultVisualColor.g / 255.,
-                   kDefaultVisualColor.b / 255., 1.);
-    material.AddProperty("phong", "diffuse", color);
+    Vector4d color_n(default_color_.r / 255., default_color_.g / 255.,
+                     default_color_.b / 255., default_color_.a / 255.);
+    material.AddProperty("phong", "diffuse", color_n);
     material.AddProperty("label", "id", expected_label_);
+    if (use_texture) {
+      material.AddProperty(
+          "phong", "diffuse_map",
+          FindResourceOrThrow(
+              "drake/systems/sensors/test/models/meshes/box.png"));
+    }
     return material;
   }
 
   // Resets all expected values to the initial, default values.
   void ResetExpectations() {
     expected_color_ = RgbaColor{kDefaultVisualColor, 255};
-    expected_outlier_color_ = RgbaColor(
-        DummyRenderEngine::GetColorIFromLabel(RenderLabel::kDontCare), 255);
+    expected_outlier_color_ = RgbaColor(kTerrainColorI, 255);
     expected_outlier_depth_ = 3.f;
     expected_object_depth_ = 2.f;
     // We expect each test to explicitly set this.
@@ -331,16 +372,16 @@ class RenderEngineVtkTest : public ::testing::Test {
 
   // Populates the given renderer with the sphere required for
   // PerformCenterShapeTest().
-  void PopulateSphereTest(RenderEngineVtk* renderer) {
+  void PopulateSphereTest(RenderEngineVtk* renderer, bool use_texture = false) {
     Sphere sphere{0.5};
     expected_label_ = RenderLabel(12345);  // an arbitrary value.
-    renderer->RegisterVisual(GeometryIndex(0), sphere, simple_material(),
+    renderer->RegisterVisual(geometry_id_, sphere, simple_material(use_texture),
                              RigidTransformd::Identity(),
                              true /* needs update */);
     RigidTransformd X_WV{Vector3d{0, 0, 0.5}};
-    renderer->UpdatePoses(vector<RigidTransformd>{X_WV});
     X_WV_.clear();
-    X_WV_.push_back(X_WV);
+    X_WV_.insert({geometry_id_, X_WV});
+    renderer->UpdatePoses(X_WV_);
   }
 
   // Performs the work to test the rendering with a shape centered in the
@@ -372,22 +413,13 @@ class RenderEngineVtkTest : public ::testing::Test {
               << "Label at: " << inlier << " for test: " << name;
   }
 
-  // Provide a default visual color for these tests -- it is intended to be
-  // different from the default color of the VTK render engine.
-  const ColorI kDefaultVisualColor = {229u, 229u, 229u};
-  const float kDefaultDistance{3.f};
-
-  // Values to be used with the "centered shape" tests.
-  // The amount inset from the edge of the images to *still* expect ground plane
-  // values.
-  static constexpr int kInset{10};
-
   RgbaColor expected_color_{kDefaultVisualColor, 255};
   RgbaColor expected_outlier_color_{kDefaultVisualColor, 255};
   float expected_outlier_depth_{3.f};
   float expected_object_depth_{2.f};
   RenderLabel expected_label_;
   RenderLabel expected_outlier_label_{RenderLabel::kDontCare};
+  RgbaColor default_color_{kDefaultVisualColor, 255};
 
   const DepthCameraProperties camera_ = {kWidth, kHeight, kFovY, "unused",
                                          kZNear, kZFar};
@@ -396,9 +428,10 @@ class RenderEngineVtkTest : public ::testing::Test {
   ImageDepth32F depth_;
   ImageLabel16I label_;
   RigidTransformd X_WC_;
+  GeometryId geometry_id_;
 
   // The pose of the sphere created in PopulateSphereTest().
-  std::vector<RigidTransformd> X_WV_;
+  unordered_map<GeometryId, RigidTransformd> X_WV_;
 
   unique_ptr<RenderEngineVtk> renderer_;
 };
@@ -409,10 +442,21 @@ TEST_F(RenderEngineVtkTest, NoBodyTest) {
   Init(RigidTransformd::Identity());
   Render();
 
-  VerifyUniformColor(DummyRenderEngine::GetColorIFromLabel(RenderLabel::kEmpty),
-                     0u);
+  VerifyUniformColor(kBgColor, 0u);
   VerifyUniformLabel(RenderLabel::kEmpty);
   VerifyUniformDepth(std::numeric_limits<float>::infinity());
+}
+
+// Confirm that the color image clear color gets successfully configured.
+TEST_F(RenderEngineVtkTest, ControlBackgroundColor) {
+  std::vector<ColorI> backgrounds{{10, 20, 30}, {128, 196, 255}, {255, 10, 40}};
+  for (const auto& bg : backgrounds) {
+    RenderEngineVtkParams params{
+        {}, {}, Vector3d{bg.r / 255., bg.g / 255., bg.b / 255.}};
+    RenderEngineVtk engine(params);
+    Render(&engine);
+    VerifyUniformColor(bg, 0u);
+  }
 }
 
 // Tests an image with *only* terrain (perpendicular to the camera's forward
@@ -421,14 +465,12 @@ TEST_F(RenderEngineVtkTest, TerrainTest) {
   Init(X_WC_, true);
   const Vector3d p_WR = X_WC_.translation();
 
-  const ColorI& kTerrain =
-      DummyRenderEngine::GetColorIFromLabel(RenderLabel::kDontCare);
   // At two different distances.
   for (auto depth : std::array<float, 2>({{2.f, 4.9999f}})) {
     X_WC_.set_translation({p_WR(0), p_WR(1), depth});
     renderer_->UpdateViewpoint(X_WC_);
     Render();
-    VerifyUniformColor(kTerrain, 255u);
+    VerifyUniformColor(kTerrainColorI, 255u);
     VerifyUniformLabel(RenderLabel::kDontCare);
     VerifyUniformDepth(depth);
   }
@@ -437,7 +479,7 @@ TEST_F(RenderEngineVtkTest, TerrainTest) {
   X_WC_.set_translation({p_WR(0), p_WR(1), kZNear - 1e-5});
   renderer_->UpdateViewpoint(X_WC_);
   Render();
-  VerifyUniformColor(kTerrain, 255u);
+  VerifyUniformColor(kTerrainColorI, 255u);
   VerifyUniformLabel(RenderLabel::kDontCare);
   VerifyUniformDepth(InvalidDepth::kTooClose);
 
@@ -445,7 +487,7 @@ TEST_F(RenderEngineVtkTest, TerrainTest) {
   X_WC_.set_translation({p_WR(0), p_WR(1), kZFar + 1e-3});
   renderer_->UpdateViewpoint(X_WC_);
   Render();
-  VerifyUniformColor(kTerrain, 255u);
+  VerifyUniformColor(kTerrainColorI, 255u);
   VerifyUniformLabel(RenderLabel::kDontCare);
   // Verifies depth.
   for (int y = 0; y < kHeight; ++y) {
@@ -473,8 +515,6 @@ TEST_F(RenderEngineVtkTest, HorizonTest) {
   };
 
   // Verifies v index of horizon at three different camera heights.
-  const ColorI& kSky =
-      DummyRenderEngine::GetColorIFromLabel(RenderLabel::kEmpty);
   const Vector3d p_WR = X_WR.translation();
   for (const double z : {2., 1., 0.5}) {
     X_WR.set_translation({p_WR(0), p_WR(1), z});
@@ -484,9 +524,9 @@ TEST_F(RenderEngineVtkTest, HorizonTest) {
     int actual_horizon{0};
     for (int y = 0; y < kHeight; ++y) {
       // Looking for the boundary between the sky and the ground.
-      if ((static_cast<uint8_t>(kSky.r != color_.at(0, y)[0])) ||
-          (static_cast<uint8_t>(kSky.g != color_.at(0, y)[1])) ||
-          (static_cast<uint8_t>(kSky.b != color_.at(0, y)[2]))) {
+      if ((static_cast<uint8_t>(kBgColor.r != color_.at(0, y)[0])) ||
+          (static_cast<uint8_t>(kBgColor.g != color_.at(0, y)[1])) ||
+          (static_cast<uint8_t>(kBgColor.b != color_.at(0, y)[2]))) {
         actual_horizon = y;
         break;
       }
@@ -497,47 +537,232 @@ TEST_F(RenderEngineVtkTest, HorizonTest) {
   }
 }
 
+// TODO(SeanCurtis-TRI): Do texture tests for capsules and ellipsoids as well.
+
 // Performs the shape-centered-in-the-image test with a box.
 TEST_F(RenderEngineVtkTest, BoxTest) {
-  Init(X_WC_, true);
+  for (const bool use_texture : {false, true}) {
+    Init(X_WC_, true);
 
-  // Sets up a box.
-  Box box(1, 1, 1);
-  expected_label_ = RenderLabel(1);
-  renderer_->RegisterVisual(GeometryIndex(0), box, simple_material(),
-                            RigidTransformd::Identity(),
-                            true /* needs update */);
-  RigidTransformd X_WV{RotationMatrixd{AngleAxisd(M_PI, Vector3d::UnitX())},
-                       Vector3d{0, 0, 0.5}};
-  renderer_->UpdatePoses(vector<RigidTransformd>{X_WV});
+    // Sets up a box.
+    Box box(1, 1, 1);
+    expected_label_ = RenderLabel(1);
+    const GeometryId id = GeometryId::get_new_id();
+    renderer_->RegisterVisual(id, box, simple_material(use_texture),
+                              RigidTransformd::Identity(),
+                              true /* needs update */);
+    RigidTransformd X_WV{RotationMatrixd{AngleAxisd(M_PI, Vector3d::UnitX())},
+                         Vector3d{0, 0, 0.5}};
+    renderer_->UpdatePoses(
+        unordered_map<GeometryId, RigidTransformd>{{id, X_WV}});
 
-  PerformCenterShapeTest(renderer_.get(), "Box test");
+    expected_color_ =
+        use_texture ? RgbaColor(kTextureColor, 255) : default_color_;
+    PerformCenterShapeTest(renderer_.get(), "Box test");
+  }
 }
 
 // Performs the shape-centered-in-the-image test with a sphere.
 TEST_F(RenderEngineVtkTest, SphereTest) {
-  Init(X_WC_, true);
-
-  PopulateSphereTest(renderer_.get());
-
-  PerformCenterShapeTest(renderer_.get(), "Sphere test");
+  for (const bool use_texture : {false, true}) {
+    Init(X_WC_, true);
+    PopulateSphereTest(renderer_.get(), use_texture);
+    expected_color_ =
+        use_texture ? RgbaColor(kTextureColor, 255) : default_color_;
+    PerformCenterShapeTest(
+        renderer_.get(),
+        fmt::format("Sphere test {}", use_texture ? "textured" : "rgba")
+            .c_str());
+  }
 }
 
-// Performs the shape-centered-in-the-image test  with a cylinder.
-TEST_F(RenderEngineVtkTest, CylinderTest) {
+// Performs the shape-centered-in-the-image test with a sphere.
+TEST_F(RenderEngineVtkTest, TransparentSphereTest) {
+  RenderEngineVtk renderer;
+  InitializeRenderer(X_WC_, true /* add terrain */, &renderer);
+  const int int_alpha = 128;
+  default_color_ = RgbaColor(kDefaultVisualColor, int_alpha);
+  PopulateSphereTest(&renderer);
+  ImageRgba8U color(camera_.width, camera_.height);
+  renderer.RenderColorImage(camera_, kShowWindow, &color);
+
+  // Note: under CI this test runs with Xvfb - a virtual frame buffer. This does
+  // *not* use the OpenGL drivers and, empirically, it has shown a different
+  // alpha blending behavior.
+  // For an alpha of 128 (i.e., 50%), the correct pixel color would be a
+  // *linear* blend, i.e., 50% background and 50% foreground. However, the
+  // implementation in Xvfb seems to be a function alpha *squared*. So, we
+  // formulate this test to pass if the resultant pixel has one of two possible
+  // colors.
+  // In both cases, the resultant alpha will always be a full 255 (because the
+  // background is a full 255).
+  auto blend = [](const ColorI& c1, const ColorI& c2, double alpha) {
+    int r = static_cast<int>(c1.r * alpha + (c2.r * (1 - alpha)));
+    int g = static_cast<int>(c1.g * alpha + (c2.g * (1 - alpha)));
+    int b = static_cast<int>(c1.b * alpha + (c2.b * (1 - alpha)));
+    return ColorI{r, g, b};
+  };
+  const double linear_factor = int_alpha / 255.0;
+  const RgbaColor expect_linear{
+      blend(kDefaultVisualColor, kTerrainColorI, linear_factor), 255};
+  const double quad_factor = linear_factor * (-linear_factor + 2);
+  const RgbaColor expect_quad{
+      blend(kDefaultVisualColor, kTerrainColorI, quad_factor), 255};
+
+  const ScreenCoord inlier = GetInlier(camera_);
+  EXPECT_TRUE(CompareColor(expect_linear, color, inlier) ||
+              CompareColor(expect_quad, color, inlier));
+}
+
+// Performs the shape-centered-in-the-image test with a capsule.
+TEST_F(RenderEngineVtkTest, CapsuleTest) {
   Init(X_WC_, true);
 
-  // Sets up a cylinder.
-  Cylinder cylinder(0.2, 1.2);
+  // Sets up a capsule.
+  const double radius = 0.15;
+  const double length = 1.2;
+  Capsule capsule(radius, length);
   expected_label_ = RenderLabel(2);
-  renderer_->RegisterVisual(GeometryIndex(0), cylinder, simple_material(),
+  const GeometryId id = GeometryId::get_new_id();
+  renderer_->RegisterVisual(id, capsule, simple_material(),
                             RigidTransformd::Identity(),
                             true /* needs update */);
-  // Position the top of the cylinder to be 1 m above the terrain.
-  RigidTransformd X_WV{Vector3d{0, 0, 0.4}};
-  renderer_->UpdatePoses(vector<RigidTransformd>{X_WV});
+  // Position the top of the capsule to be 1 m above the terrain. Since the
+  // middle of the capsule is positioned at the origin 0, the top of the
+  // capsule is placed at half the length plus the radius, i.e. 1.2/2 + 0.15 =
+  // 0.75. To reach a total of 1, we need to offset it by an additional 0.25.
+  RigidTransformd X_WV{Vector3d{0, 0, 0.25}};
+  renderer_->UpdatePoses(
+      unordered_map<GeometryId, RigidTransformd>{{id, X_WV}});
 
-  PerformCenterShapeTest(renderer_.get(), "Cylinder test");
+  PerformCenterShapeTest(renderer_.get(), "Capsule test");
+}
+
+// Performs a test with a capsule centered in the image but rotated
+// perpendicularly such that the length of the capsule can be seen in the
+// camera view (as opposed to a top-down view of its spherical side).
+// |          ●●
+// |         ●  ●
+// |        ●    ●
+// |________●____●__________
+// |        ●    ●
+// |        ●    ●
+// |         ●  ●
+// |          ●●
+TEST_F(RenderEngineVtkTest, CapsuleRotatedTest) {
+  Init(X_WC_, true);
+
+  // Sets up a capsule.
+  const double radius = 0.15;
+  const double length = 1.2;
+  Capsule capsule(radius, length);
+  expected_label_ = RenderLabel(2);
+  const GeometryId id = GeometryId::get_new_id();
+  renderer_->RegisterVisual(id, capsule, simple_material(),
+                            RigidTransformd::Identity(),
+                            true /* needs update */);
+
+  // Position the capsule so that it lies along the x-axis where the highest
+  // point on the barrel is at z = 1. Capsules are by default z-axis aligned
+  // so we need to rotate it by 90 degrees. Since the radius of the capsule is
+  // 0.15, we need to shift it by an additional 0.85 along the z-axis to reach
+  // a total of 1.
+  RigidTransformd X_WV{RotationMatrixd{AngleAxisd(M_PI / 2, Vector3d::UnitY())},
+                       Vector3d{0, 0, 0.85}};
+  renderer_->UpdatePoses(
+      unordered_map<GeometryId, RigidTransformd>{{id, X_WV}});
+
+  Render(renderer_.get());
+
+  const char* name = "Capsule rotated test";
+  VerifyOutliers(*renderer_, camera_, name);
+
+  // Verifies the inliers towards the ends of the capsule and ensures its
+  // length attribute is respected as opposed to just its radius. This
+  // distinguishes it from other shape tests, such as a sphere.
+  const ScreenCoord inlier = GetInlier(camera_);
+  const int offsets[2] = {kHeight / 4, -kHeight / 4};
+  const int x = inlier.x;
+  for (const int& offset : offsets) {
+    const int y = inlier.y + offset;
+    const ScreenCoord offset_inlier = {x, y};
+    EXPECT_TRUE(CompareColor(expected_color_, color_, offset_inlier))
+        << "Color at: " << offset_inlier << " for test: " << name;
+    EXPECT_TRUE(IsExpectedDepth(depth_, offset_inlier, expected_object_depth_,
+                                kDepthTolerance))
+        << "Depth at: " << offset_inlier << " for test: " << name;
+    EXPECT_EQ(label_.at(x, y)[0], static_cast<int>(expected_label_))
+        << "Label at: " << offset_inlier << " for test: " << name;
+  }
+}
+
+// Performs the shape-centered-in-the-image test with a cylinder.
+TEST_F(RenderEngineVtkTest, CylinderTest) {
+  for (const bool use_texture : {false, true}) {
+    Init(X_WC_, true);
+
+    // Sets up a cylinder.
+    Cylinder cylinder(0.2, 1.2);
+    expected_label_ = RenderLabel(2);
+    const GeometryId id = GeometryId::get_new_id();
+    renderer_->RegisterVisual(id, cylinder, simple_material(use_texture),
+                              RigidTransformd::Identity(),
+                              true /* needs update */);
+    // Position the top of the cylinder to be 1 m above the terrain.
+    RigidTransformd X_WV{Vector3d{0, 0, 0.4}};
+    renderer_->UpdatePoses(
+        unordered_map<GeometryId, RigidTransformd>{{id, X_WV}});
+
+    expected_color_ =
+        use_texture ? RgbaColor(kTextureColor, 255) : default_color_;
+    PerformCenterShapeTest(renderer_.get(), "Cylinder test");
+  }
+}
+
+// Performs the shape-centered-in-the-image test with an ellipsoid rotated
+// three different ways for confirming each extent axis.
+TEST_F(RenderEngineVtkTest, EllipsoidTest) {
+  Init(X_WC_, true);
+
+  // Sets up an ellipsoid.
+  const double a = 0.25;
+  const double b = 0.4;
+  const double c = 0.5;
+  Ellipsoid ellipsoid(a, b, c);
+  expected_label_ = RenderLabel(2);
+  const GeometryId id = GeometryId::get_new_id();
+  renderer_->RegisterVisual(id, ellipsoid, simple_material(),
+                            RigidTransformd::Identity(),
+                            true /* needs update */);
+
+  const double target_z = 1.0;
+
+  // By default the 'c' extent of the ellipsoid is aligned with the z-axis of
+  // the world. For the test we need to align the top of the ellipsoid to be at
+  // the target height above the terrain, so we move it by (target_z - c) units
+  // along the z-axis.
+  RigidTransformd X_WV{Vector3d{0, 0, target_z - c}};
+  renderer_->UpdatePoses(
+      unordered_map<GeometryId, RigidTransformd>{{id, X_WV}});
+  PerformCenterShapeTest(renderer_.get(), "Ellipsoid test: c extent");
+
+  // Rotate the ellipsoid so that the 'b' extent is aligned with the z-axis of
+  // the world, then move it by (target_z - b) units along the z-axis.
+  X_WV =
+      RigidTransformd{RotationMatrixd{AngleAxisd(-M_PI / 2, Vector3d::UnitX())},
+                      Vector3d{0, 0, target_z - b}};
+  renderer_->UpdatePoses(
+      unordered_map<GeometryId, RigidTransformd>{{id, X_WV}});
+  PerformCenterShapeTest(renderer_.get(), "Ellipsoid test: b extent");
+
+  // Rotate the ellipsoid so that the 'a' extent is aligned with the z-axis of
+  // the world, then move it by (target_z - a) units along the z-axis.
+  X_WV =
+      RigidTransformd{RotationMatrixd{AngleAxisd(M_PI / 2, Vector3d::UnitY())},
+                      Vector3d{0, 0, target_z - a}};
+  renderer_->UpdatePoses(
+      unordered_map<GeometryId, RigidTransformd>{{id, X_WV}});
+  PerformCenterShapeTest(renderer_.get(), "Ellipsoid test: a extent");
 }
 
 // Performs the shape-centered-in-the-image test with a mesh (which happens to
@@ -553,11 +778,11 @@ TEST_F(RenderEngineVtkTest, MeshTest) {
   expected_label_ = RenderLabel(3);
   PerceptionProperties material = simple_material();
   material.AddProperty("phong", "diffuse_map", "bad_path");
-  renderer_->RegisterVisual(GeometryIndex(0), mesh, material,
-                            RigidTransformd::Identity(),
+  const GeometryId id = GeometryId::get_new_id();
+  renderer_->RegisterVisual(id, mesh, material, RigidTransformd::Identity(),
                             true /* needs update */);
-  renderer_->UpdatePoses(
-      std::vector<RigidTransformd>{RigidTransformd::Identity()});
+  renderer_->UpdatePoses(unordered_map<GeometryId, RigidTransformd>{
+      {id, RigidTransformd::Identity()}});
 
   PerformCenterShapeTest(renderer_.get(), "Mesh test");
 }
@@ -575,15 +800,13 @@ TEST_F(RenderEngineVtkTest, TextureMeshTest) {
   material.AddProperty(
       "phong", "diffuse_map",
       FindResourceOrThrow("drake/systems/sensors/test/models/meshes/box.png"));
-  renderer_->RegisterVisual(GeometryIndex(0), mesh, material,
-                            RigidTransformd::Identity(),
+  const GeometryId id = GeometryId::get_new_id();
+  renderer_->RegisterVisual(id, mesh, material, RigidTransformd::Identity(),
                             true /* needs update */);
-  renderer_->UpdatePoses(
-      std::vector<RigidTransformd>{RigidTransformd::Identity()});
+  renderer_->UpdatePoses(unordered_map<GeometryId, RigidTransformd>{
+      {id, RigidTransformd::Identity()}});
 
-  // box.png contains a single pixel with the color (4, 241, 33). If the image
-  // changes, the expected color would likewise have to change.
-  expected_color_ = RgbaColor(ColorI{4, 241, 33}, 255);
+  expected_color_ = RgbaColor(kTextureColor, 255);
   PerformCenterShapeTest(renderer_.get(), "Textured mesh test");
 
   // Now confirm that the texture survives cloning.
@@ -605,15 +828,13 @@ TEST_F(RenderEngineVtkTest, ImpliedTextureMeshTest) {
   Mesh mesh(filename);
   expected_label_ = RenderLabel(4);
   PerceptionProperties material = simple_material();
-  renderer_->RegisterVisual(GeometryIndex(0), mesh, material,
-                            RigidTransformd::Identity(),
+  const GeometryId id = GeometryId::get_new_id();
+  renderer_->RegisterVisual(id, mesh, material, RigidTransformd::Identity(),
                             true /* needs update */);
-  renderer_->UpdatePoses(
-      std::vector<RigidTransformd>{RigidTransformd::Identity()});
+  renderer_->UpdatePoses(unordered_map<GeometryId, RigidTransformd>{
+      {id, RigidTransformd::Identity()}});
 
-  // box.png contains a single pixel with the color (4, 241, 33). If the image
-  // changes, the expected color would likewise have to change.
-  expected_color_ = RgbaColor(ColorI{4, 241, 33}, 255);
+  expected_color_ = RgbaColor(kTextureColor, 255);
   PerformCenterShapeTest(renderer_.get(), "Implied textured mesh test");
 }
 
@@ -664,7 +885,7 @@ TEST_F(RenderEngineVtkTest, RemoveVisual) {
 
   // Positions a sphere centered at <0, 0, z> with the given color.
   auto add_sphere = [this](const RgbaColor& diffuse, double z,
-                           GeometryIndex geometry_index) {
+                           GeometryId geometry_id) {
     const double kRadius = 0.5;
     Sphere sphere{kRadius};
     const float depth = kDefaultDistance - kRadius - z;
@@ -676,12 +897,12 @@ TEST_F(RenderEngineVtkTest, RemoveVisual) {
     material.AddProperty("label", "id", label);
     // This will accept all registered geometries and therefore, (bool)index
     // should always be true.
-    optional<RenderIndex> index = renderer_->RegisterVisual(
-        geometry_index, sphere, material, RigidTransformd::Identity());
+    renderer_->RegisterVisual(geometry_id, sphere, material,
+                              RigidTransformd::Identity());
     RigidTransformd X_WV{Vector3d{0, 0, z}};
-    X_WV_.push_back(X_WV);
+    X_WV_.insert({geometry_id, X_WV});
     renderer_->UpdatePoses(X_WV_);
-    return std::make_tuple(*index, label, depth);
+    return std::make_tuple(label, depth);
   };
 
   // Sets the expected values prior to calling PerformCenterShapeTest().
@@ -696,8 +917,8 @@ TEST_F(RenderEngineVtkTest, RemoveVisual) {
   const RgbaColor color1(Color<int>{128, 128, 255}, 255);
   float depth1{};
   RenderLabel label1{};
-  RenderIndex index1{};
-  std::tie(index1, label1, depth1) = add_sphere(color1, 0.75, GeometryIndex(1));
+  const GeometryId id1 = GeometryId::get_new_id();
+  std::tie(label1, depth1) = add_sphere(color1, 0.75, id1);
   set_expectations(color1, depth1, label1);
   PerformCenterShapeTest(renderer_.get(), "First sphere added in remove test");
 
@@ -705,26 +926,21 @@ TEST_F(RenderEngineVtkTest, RemoveVisual) {
   const RgbaColor color2(Color<int>{128, 255, 128}, 255);
   float depth2{};
   RenderLabel label2{};
-  RenderIndex index2{};
-  std::tie(index2, label2, depth2) = add_sphere(color2, 1.0, GeometryIndex(2));
+  const GeometryId id2 = GeometryId::get_new_id();
+  std::tie(label2, depth2) = add_sphere(color2, 1.0, id2);
   set_expectations(color2, depth2, label2);
   PerformCenterShapeTest(renderer_.get(), "Second sphere added in remove test");
 
-  // Remove the first sphere added:
-  //  1. index2 should be returned as the index of the shape that got moved.
-  //  2. The test should pass without changing expectations.
-  optional<GeometryIndex> moved = renderer_->RemoveGeometry(index1);
-  EXPECT_TRUE(moved);
-  EXPECT_EQ(*moved, GeometryIndex(2));
+  // Remove the first sphere added; should report "true" and the render test
+  // should pass without changing expectations.
+  bool removed = renderer_->RemoveGeometry(id1);
+  EXPECT_TRUE(removed);
   PerformCenterShapeTest(renderer_.get(), "First added sphere removed");
 
-  // Remove the second added sphere (now indexed by index1):
-  //  1. There should be no returned index.
-  //  2. The rendering should match the default sphere test results.
-  // Confirm restoration to original image.
-  moved = nullopt;
-  moved = renderer_->RemoveGeometry(index1);
-  EXPECT_FALSE(moved);
+  // Remove the second added sphere; should report true and rendering should
+  // return to its default configuration.
+  removed = renderer_->RemoveGeometry(id2);
+  EXPECT_TRUE(removed);
   set_expectations(default_color, default_depth, default_label);
   PerformCenterShapeTest(renderer_.get(),
                          "Default image restored by removing extra geometries");
@@ -769,8 +985,8 @@ TEST_F(RenderEngineVtkTest, CloneIndependence) {
   unique_ptr<RenderEngine> clone = renderer_->Clone();
   // Move the terrain *up* 10 units in the z.
   RigidTransformd X_WT_new{Vector3d{0, 0, 10}};
-  // This assumes that the terrain is zero-indexed.
-  renderer_->UpdatePoses(std::vector<RigidTransformd>{X_WT_new});
+  renderer_->UpdatePoses(
+      unordered_map<GeometryId, RigidTransformd>{{geometry_id_, X_WT_new}});
   PerformCenterShapeTest(static_cast<RenderEngineVtk*>(clone.get()),
                          "Clone independence");
 }
@@ -842,11 +1058,12 @@ TEST_F(RenderEngineVtkTest, DefaultProperties_RenderLabel) {
   // The result should be compatible with the running the sphere test.
   auto populate_default_sphere = [](auto* engine) {
     Sphere sphere{0.5};
-    engine->RegisterVisual(GeometryIndex(0), sphere, PerceptionProperties(),
+    const GeometryId id = GeometryId::get_new_id();
+    engine->RegisterVisual(id, sphere, PerceptionProperties(),
                            RigidTransformd::Identity(),
                            true /* needs update */);
     RigidTransformd X_WV{Vector3d{0, 0, 0.5}};
-    engine->UpdatePoses(vector<RigidTransformd>{X_WV});
+    engine->UpdatePoses(unordered_map<GeometryId, RigidTransformd>{{id, X_WV}});
   };
 
   // Case: No change to render engine's default must throw.
@@ -879,7 +1096,7 @@ TEST_F(RenderEngineVtkTest, DefaultProperties_RenderLabel) {
     RenderEngineVtk renderer{{RenderLabel::kDontCare, {}}};
     InitializeRenderer(X_WC_, true /* no terrain */, &renderer);
 
-    EXPECT_NO_THROW(populate_default_sphere(&renderer));
+    DRAKE_EXPECT_NO_THROW(populate_default_sphere(&renderer));
     expected_label_ = RenderLabel::kDontCare;
     expected_color_ = RgbaColor(renderer.default_diffuse());
 

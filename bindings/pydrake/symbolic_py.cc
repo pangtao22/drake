@@ -18,7 +18,8 @@
 // that is using py::self (example: `def(py::self + py::self)`).
 // Here, we suppress the warning using `#pragma diagnostic`.
 #if (__APPLE__) && (__clang__) && (__clang_major__ >= 10) && \
-    (__clang_minor__ >= 0) && (__clang_patchlevel__ >= 1)
+    !((__clang_major__ == 10) && (__clang_minor__ == 0) &&   \
+        (__clang_patchlevel__ == 0))
 #pragma GCC diagnostic ignored "-Wself-assign-overloaded"
 #endif
 
@@ -204,7 +205,7 @@ PYBIND11_MODULE(symbolic, m) {
   });
 
   // TODO(m-chaturvedi) Add Pybind11 documentation for operator overloads, etc.
-  py::class_<Expression> expr_cls(m, "Expression");
+  py::class_<Expression> expr_cls(m, "Expression", doc.Expression.doc);
   expr_cls.def(py::init<>(), doc.Expression.ctor.doc_0args)
       .def(py::init<double>(), doc.Expression.ctor.doc_1args_d)
       .def(py::init<const Variable&>(), doc.Expression.ctor.doc_1args_var)
@@ -343,7 +344,9 @@ PYBIND11_MODULE(symbolic, m) {
       .def("min", &symbolic::min, doc.min.doc)
       .def("max", &symbolic::max, doc.max.doc)
       .def("ceil", &symbolic::ceil, doc.ceil.doc)
-      .def("floor", &symbolic::floor, doc.floor.doc);
+      .def("__ceil__", &symbolic::ceil, doc.ceil.doc)
+      .def("floor", &symbolic::floor, doc.floor.doc)
+      .def("__floor__", &symbolic::floor, doc.floor.doc);
   DefCopyAndDeepCopy(&expr_cls);
 
   // TODO(eric.cousineau): These should actually exist on the class, and should
@@ -366,7 +369,7 @@ PYBIND11_MODULE(symbolic, m) {
         return Evaluate(M, Environment{env}, random_generator);
       },
       py::arg("m"), py::arg("env") = Environment::map{},
-      py::arg("generator") = nullptr, doc.Evaluate.doc);
+      py::arg("generator") = nullptr, doc.Evaluate.doc_3args);
 
   m.def("Substitute",
       [](const MatrixX<Expression>& M, const Substitution& subst) {
@@ -451,7 +454,7 @@ PYBIND11_MODULE(symbolic, m) {
       .def("logical_not", [](const Formula& a) { return !a; });
 
   // TODO(m-chaturvedi) Add Pybind11 documentation for operator overloads, etc.
-  py::class_<Monomial>(m, "Monomial")
+  py::class_<Monomial>(m, "Monomial", doc.Monomial.doc)
       .def(py::init<const Variable&>(), doc.Monomial.ctor.doc_1args_var)
       .def(py::init<const Variable&, int>(),
           doc.Monomial.ctor.doc_2args_var_exponent)
@@ -571,6 +574,18 @@ PYBIND11_MODULE(symbolic, m) {
             return self.Evaluate(Environment{env});
           },
           doc.Polynomial.Evaluate.doc)
+      // TODO(Eric.Cousineau): add python binding for symbolic::Environment.
+      .def("EvaluatePartial",
+          [](const Polynomial& self, const Environment::map& env) {
+            return self.EvaluatePartial(Environment{env});
+          },
+          py::arg("env"), doc.Polynomial.EvaluatePartial.doc_1args)
+      .def("EvaluatePartial",
+          [](const Polynomial& self, const Variable& var, double c) {
+            return self.EvaluatePartial(var, c);
+          },
+          py::arg("var"), py::arg("c"),
+          doc.Polynomial.EvaluatePartial.doc_2args)
       .def("Jacobian",
           [](const Polynomial& p,
               const Eigen::Ref<const VectorX<Variable>>& vars) {

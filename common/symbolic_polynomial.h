@@ -5,9 +5,11 @@
 #warning Do not directly include this file. Include "drake/common/symbolic.h".
 #endif
 
+#include <algorithm>
 #include <functional>
+#include <map>
 #include <ostream>
-#include <unordered_map>
+#include <utility>
 
 #include <Eigen/Core>
 
@@ -16,6 +18,40 @@
 
 namespace drake {
 namespace symbolic {
+namespace internal {
+// Compares two monomials using the lexicographic order. It is used in
+// symbolic::Polynomial::MapType. See
+// https://en.wikipedia.org/wiki/Monomial_order for different monomial orders.
+struct CompareMonomial {
+  bool operator()(const Monomial& m1, const Monomial& m2) const {
+    const auto& powers1 = m1.get_powers();
+    const auto& powers2 = m2.get_powers();
+    return std::lexicographical_compare(
+        powers1.begin(), powers1.end(), powers2.begin(), powers2.end(),
+        [](const std::pair<const Variable, int>& p1,
+           const std::pair<const Variable, int>& p2) {
+          const Variable& v1{p1.first};
+          const int i1{p1.second};
+          const Variable& v2{p2.first};
+          const int i2{p2.second};
+          if (v1.less(v2)) {
+            // m2 does not have the variable v1 explicitly, so we treat it as if
+            // it has (v1)⁰. That is, we need "return i1 < 0", but i1 should be
+            // positive, so this case always returns false.
+            return false;
+          }
+          if (v2.less(v1)) {
+            // m1 does not have the variable v2 explicitly, so we treat it as
+            // if it has (v2)⁰. That is, we need "return 0 < i2", but i2 should
+            // be positive, so it always returns true.
+            return true;
+          }
+          return i1 < i2;
+        });
+  }
+};
+}  // namespace internal
+
 /// Represents symbolic polynomials. A symbolic polynomial keeps a mapping from
 /// a monomial of indeterminates to its coefficient in a symbolic expression.
 ///
@@ -29,7 +65,7 @@ namespace symbolic {
 /// we need this information to perform arithmetic operations over Polynomials.
 class Polynomial {
  public:
-  using MapType = std::unordered_map<Monomial, Expression>;
+  using MapType = std::map<Monomial, Expression, internal::CompareMonomial>;
 
   /// Constructs a zero polynomial.
   Polynomial() = default;
@@ -65,13 +101,13 @@ class Polynomial {
   ///
   /// @throws std::runtime_error if @p e is not a polynomial in @p
   /// indeterminates.
-  Polynomial(const Expression& e, const Variables& indeterminates);
+  Polynomial(const Expression& e, Variables indeterminates);
 
   /// Returns the indeterminates of this polynomial.
-  Variables indeterminates() const;
+  const Variables& indeterminates() const;
 
   /// Returns the decision variables of this polynomial.
-  Variables decision_variables() const;
+  const Variables& decision_variables() const;
 
   /// Returns the highest degree of this polynomial in a variable @p v.
   int Degree(const Variable& v) const;
@@ -180,7 +216,10 @@ class Polynomial {
   // Throws std::runtime_error if there is a variable appeared in both of
   // decision_variables() and indeterminates().
   void CheckInvariant() const;
+
   MapType monomial_to_coefficient_map_;
+  Variables indeterminates_;
+  Variables decision_variables_;
 };
 
 /// Unary minus operation for polynomial.

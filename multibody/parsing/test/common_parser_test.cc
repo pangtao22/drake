@@ -17,7 +17,7 @@
 
 namespace drake {
 namespace multibody {
-namespace detail {
+namespace internal {
 namespace {
 
 using geometry::GeometryId;
@@ -39,11 +39,11 @@ class MultibodyPlantLinkTests :
   void LoadMultibodyPlantAndSceneGraph() {
     auto load_model = GetParam();
     load_model(base_name_, &plant_, &scene_graph_);
-    plant_.Finalize(&scene_graph_);
+    plant_.Finalize();
   }
 
  protected:
-  MultibodyPlant<double> plant_;
+  MultibodyPlant<double> plant_{0.0};
   geometry::SceneGraph<double> scene_graph_;
   const std::string base_name_{"drake/multibody/parsing/test/"
         "links_with_visuals_and_collisions"};
@@ -146,15 +146,15 @@ TEST_P(MultibodyPlantLinkTests, LinksWithCollisions) {
 }
 
 
-INSTANTIATE_TEST_CASE_P(SdfMultibodyPlantLinkTests,
+INSTANTIATE_TEST_SUITE_P(SdfMultibodyPlantLinkTests,
                         MultibodyPlantLinkTests,
                         ::testing::Values(test::LoadFromSdf));
 
-INSTANTIATE_TEST_CASE_P(UrdfMultibodyPlantLinkTests,
+INSTANTIATE_TEST_SUITE_P(UrdfMultibodyPlantLinkTests,
                         MultibodyPlantLinkTests,
                         ::testing::Values(test::LoadFromUrdf));
 
 }  // namespace
-}  // namespace detail
+}  // namespace internal
 }  // namespace multibody
 }  // namespace drake

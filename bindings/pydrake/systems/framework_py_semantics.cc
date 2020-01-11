@@ -7,8 +7,6 @@
 #include "drake/bindings/pydrake/common/cpp_template_pybind.h"
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
 #include "drake/bindings/pydrake/common/deprecation_pybind.h"
-#include "drake/bindings/pydrake/common/drake_optional_pybind.h"
-#include "drake/bindings/pydrake/common/drake_variant_pybind.h"
 #include "drake/bindings/pydrake/common/eigen_pybind.h"
 #include "drake/bindings/pydrake/common/type_safe_index_pybind.h"
 #include "drake/bindings/pydrake/common/wrap_pybind.h"
@@ -40,8 +38,7 @@ py::object DoEval(const SomeObject* self, const systems::Context<T>& context) {
     }
     case systems::kAbstractValued: {
       const auto& abstract = self->template Eval<AbstractValue>(context);
-      // TODO(#9398): Figure out why `py_reference` is necessary.
-      py::object value_ref = py::cast(&abstract, py_reference);
+      py::object value_ref = py::cast(&abstract);
       return value_ref.attr("get_value")();
     }
   }
@@ -86,7 +83,6 @@ void DefineFrameworkPySemantics(py::module m) {
   py::class_<FixedInputPortValue>(
       m, "FixedInputPortValue", doc.FixedInputPortValue.doc)
       .def("GetMutableData", &FixedInputPortValue::GetMutableData,
-          // TODO(#9398): Why is `py_reference` necessary?
           py_reference_internal, doc.FixedInputPortValue.GetMutableData.doc);
 
   using AbstractValuePtrList = vector<unique_ptr<AbstractValue>>;
@@ -152,17 +148,6 @@ void DefineFrameworkPySemantics(py::module m) {
         // Bindings for Context methods inherited from ContextBase.
         .def("num_input_ports", &Context<T>::num_input_ports,
             doc.ContextBase.num_input_ports.doc)
-        .def("get_num_input_ports",
-            [](const Context<T>* self) {
-              WarnDeprecated(
-                  "Use num_input_ports() instead. Will be removed on or after "
-                  "2019-07-01.");
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-              self->get_num_input_ports();
-#pragma GCC diagnostic pop
-            },
-            doc.ContextBase.get_num_input_ports.doc_deprecated)
         .def("num_output_ports", &Context<T>::num_output_ports,
             doc.ContextBase.num_output_ports.doc)
         // TODO(russt): Add remaining methods from ContextBase here.
@@ -229,28 +214,6 @@ void DefineFrameworkPySemantics(py::module m) {
         .def("get_abstract_parameter", &Context<T>::get_abstract_parameter,
             py::arg("index"), py_reference_internal,
             doc.Context.get_numeric_parameter.doc)
-        .def("get_num_discrete_state_groups",
-            [](const Context<T>* self) {
-              WarnDeprecated(
-                  "Use num_discrete_state_groups() instead. Will be removed "
-                  "on or after 2019-07-01.");
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-              self->get_num_discrete_state_groups();
-#pragma GCC diagnostic pop
-            },
-            doc.Context.get_num_discrete_state_groups.doc_deprecated)
-        .def("get_num_abstract_states",
-            [](const Context<T>* self) {
-              WarnDeprecated(
-                  "Use num_abstract_states() instead. Will be removed on or "
-                  "after 2019-07-01.");
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-              self->get_num_abstract_states();
-#pragma GCC diagnostic pop
-            },
-            doc.Context.get_num_abstract_states.doc_deprecated)
         // Bindings for the Context methods in the Doxygen group titled
         // "Methods for changing locally-stored values", placed in the same
         // order as the header file.
@@ -300,28 +263,6 @@ void DefineFrameworkPySemantics(py::module m) {
             doc.Context.FixInputPort.doc_2args_index_data)
         .def("SetAccuracy", &Context<T>::SetAccuracy, py::arg("accuracy"),
             doc.Context.SetAccuracy.doc)
-        .def("set_time",
-            [](Context<T>* self, const T& time) {
-              WarnDeprecated(
-                  "Use SetTime() instead. Will be removed on or after "
-                  "2019-07-01.");
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-              self->set_time(time);
-#pragma GCC diagnostic pop
-            },
-            doc.Context.set_time.doc_deprecated)
-        .def("set_accuracy",
-            [](Context<T>* self, const optional<double>& accuracy) {
-              WarnDeprecated(
-                  "Use SetAccuracy() instead. Will be removed on or after "
-                  "2019-07-01.");
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-              self->set_accuracy(accuracy);
-#pragma GCC diagnostic pop
-            },
-            doc.Context.set_accuracy.doc_deprecated)
         // Bindings for the Context methods in the Doxygen group titled
         // "Dangerous methods for changing locally-stored values", placed in the
         // same order as the header file.
@@ -438,10 +379,11 @@ void DefineFrameworkPySemantics(py::module m) {
         m, "DiagramBuilder", GetPyParam<T>(), doc.DiagramBuilder.doc)
         .def(py::init<>(), doc.DiagramBuilder.ctor.doc)
         .def("AddSystem",
-            [](DiagramBuilder<T>* self, unique_ptr<System<T>> arg1) {
-              return self->AddSystem(std::move(arg1));
+            [](DiagramBuilder<T>* self, unique_ptr<System<T>> system) {
+              return self->AddSystem(std::move(system));
             },
-            // Keep alive, ownership: `System` keeps `self` alive.
+            py::arg("system"),
+            // Keep alive, ownership: `system` keeps `self` alive.
             py::keep_alive<2, 1>(), doc.DiagramBuilder.AddSystem.doc)
         .def("Connect",
             py::overload_cast<const OutputPort<T>&, const InputPort<T>&>(
@@ -454,10 +396,10 @@ void DefineFrameworkPySemantics(py::module m) {
             py::arg("output"), py::arg("name") = kUseDefaultName,
             py_reference_internal, doc.DiagramBuilder.ExportOutput.doc)
         .def("Build", &DiagramBuilder<T>::Build,
-            // Keep alive, transitive: `return` keeps `self` alive.
+            // Keep alive, ownership (tr.): `return` keeps `self` alive.
             py::keep_alive<1, 0>(), doc.DiagramBuilder.Build.doc)
-        .def("BuildInto", &DiagramBuilder<T>::BuildInto,
-            // Keep alive, transitive: `Diagram` keeps `self` alive.
+        .def("BuildInto", &DiagramBuilder<T>::BuildInto, py::arg("target"),
+            // Keep alive, ownership (tr.): `target` keeps `self` alive.
             py::keep_alive<2, 1>(), doc.DiagramBuilder.BuildInto.doc);
 
     DefineTemplateClassWithDefault<OutputPort<T>>(
@@ -475,8 +417,7 @@ void DefineFrameworkPySemantics(py::module m) {
         .def("EvalAbstract",
             [](const OutputPort<T>* self, const Context<T>& c) {
               const auto& abstract = self->template Eval<AbstractValue>(c);
-              // TODO(#9398): Figure out why `py_reference` is necessary.
-              return py::cast(&abstract, py_reference);
+              return py::cast(&abstract);
             },
             py::arg("context"),
             "(Advanced.) Returns the value of this output port, typed "
@@ -487,8 +428,7 @@ void DefineFrameworkPySemantics(py::module m) {
         .def("EvalBasicVector",
             [](const OutputPort<T>* self, const Context<T>& c) {
               const auto& basic = self->template Eval<BasicVector<T>>(c);
-              // TODO(#9398): Figure out why `py_reference` is necessary.
-              return py::cast(&basic, py_reference);
+              return py::cast(&basic);
             },
             py::arg("context"),
             "(Advanced.) Returns the value of this output port, typed "
@@ -502,17 +442,6 @@ void DefineFrameworkPySemantics(py::module m) {
     system_output
         .def("num_ports", &SystemOutput<T>::num_ports,
             doc.SystemOutput.num_ports.doc)
-        .def("get_num_ports",
-            [](const SystemOutput<T>* self) {
-              WarnDeprecated(
-                  "Use num_ports() instead. Will be removed on or after "
-                  "2019-07-01.");
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-              self->get_num_ports();
-#pragma GCC diagnostic pop
-            },
-            doc.SystemOutput.get_num_ports.doc_deprecated)
         .def("get_data", &SystemOutput<T>::get_data, py_reference_internal,
             doc.SystemOutput.get_data.doc)
         .def("get_vector_data", &SystemOutput<T>::get_vector_data,
@@ -535,12 +464,7 @@ void DefineFrameworkPySemantics(py::module m) {
               DRAKE_UNREACHABLE();
             },
             doc.InputPort.Eval.doc)
-        .def("EvalAbstract",
-            [](const InputPort<T>* self, const Context<T>& c) {
-              const auto& abstract = self->template Eval<AbstractValue>(c);
-              // TODO(#9398): Figure out why `py_reference` is necessary.
-              return py::cast(&abstract, py_reference);
-            },
+        .def("EvalAbstract", &InputPort<T>::template Eval<AbstractValue>,
             py::arg("context"),
             "(Advanced.) Returns the value of this input port, typed "
             "as an AbstractValue. Most users should call Eval() instead. "
@@ -550,8 +474,7 @@ void DefineFrameworkPySemantics(py::module m) {
         .def("EvalBasicVector",
             [](const InputPort<T>* self, const Context<T>& c) {
               const auto& basic = self->template Eval<BasicVector<T>>(c);
-              // TODO(#9398): Figure out why `py_reference` is necessary.
-              return py::cast(&basic, py_reference);
+              return py::cast(&basic);
             },
             py::arg("context"),
             "(Advanced.) Returns the value of this input port, typed "

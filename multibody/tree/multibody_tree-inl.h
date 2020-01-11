@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -13,7 +14,6 @@
 #include "drake/common/default_scalars.h"
 #include "drake/common/drake_copyable.h"
 #include "drake/common/drake_deprecated.h"
-#include "drake/common/drake_optional.h"
 #include "drake/common/pointer_cast.h"
 #include "drake/common/random.h"
 #include "drake/multibody/tree/acceleration_kinematics_cache.h"
@@ -64,7 +64,7 @@ const BodyType<T>& MultibodyTree<T>::AddBody(
   DRAKE_DEMAND(body->model_instance().is_valid());
 
   // TODO(amcastro-tri): consider not depending on setting this pointer at
-  // all. Consider also removing MultibodyTreeElement altogether.
+  // all. Consider also removing MultibodyElement altogether.
   body->set_parent_tree(this, body_index);
   // MultibodyTree can access selected private methods in Body through its
   // BodyAttorney.
@@ -144,7 +144,7 @@ const FrameType<T>& MultibodyTree<T>::AddFrame(
   DRAKE_DEMAND(frame->model_instance().is_valid());
 
   // TODO(amcastro-tri): consider not depending on setting this pointer at
-  // all. Consider also removing MultibodyTreeElement altogether.
+  // all. Consider also removing MultibodyElement altogether.
   frame->set_parent_tree(this, frame_index);
   FrameType<T>* raw_frame_ptr = frame.get();
   frames_.push_back(raw_frame_ptr);
@@ -202,7 +202,7 @@ const MobilizerType<T>& MultibodyTree<T>::AddMobilizer(
   }
 
   // TODO(amcastro-tri): consider not depending on setting this pointer at
-  // all. Consider also removing MultibodyTreeElement altogether.
+  // all. Consider also removing MultibodyElement altogether.
   mobilizer->set_parent_tree(this, mobilizer_index);
 
   // Mark free bodies as needed.
@@ -242,6 +242,18 @@ const ForceElementType<T>& MultibodyTree<T>::AddForceElement(
   if (force_element == nullptr) {
     throw std::logic_error("Input force element is a nullptr.");
   }
+
+  auto gravity_element = dynamic_cast<UniformGravityFieldElement<T>*>(
+      force_element.get());
+  if (gravity_element) {
+    if (gravity_field_) {
+      throw std::runtime_error(
+          "This model already contains a gravity field element. "
+          "Only one gravity field element is allowed per model.");
+    }
+    gravity_field_ = gravity_element;
+  }
+
   ForceElementIndex force_element_index = topology_.add_force_element();
   // This test MUST be performed BEFORE owned_force_elements_.push_back()
   // below. Do not move it around!
@@ -256,53 +268,13 @@ const ForceElementType<T>& MultibodyTree<T>::AddForceElement(
 
 template <typename T>
 template<template<typename Scalar> class ForceElementType, typename... Args>
-#ifdef DRAKE_DOXYGEN_CXX
 const ForceElementType<T>&
-#else
-typename std::enable_if<!std::is_same<
-    ForceElementType<T>,
-    UniformGravityFieldElement<T>>::value, const ForceElementType<T>&>::type
-#endif
 MultibodyTree<T>::AddForceElement(Args&&... args) {
   static_assert(std::is_base_of<ForceElement<T>, ForceElementType<T>>::value,
                 "ForceElementType<T> must be a sub-class of "
                 "ForceElement<T>.");
   return AddForceElement(
       std::make_unique<ForceElementType<T>>(std::forward<Args>(args)...));
-}
-
-template <typename T>
-template<template<typename Scalar> class ForceElementType, typename... Args>
-typename std::enable_if<std::is_same<
-    ForceElementType<T>,
-    UniformGravityFieldElement<T>>::value, const ForceElementType<T>&>::type
-MultibodyTree<T>::AddForceElement(Args&&... args) {
-  // TODO(sam.creasey) Once this method is removed at the end of the
-  // deprecation period, the initialization of gravity_field_ should probably
-  // move to the MultibodyTree constructor (which currently calls this
-  // implementation).  My current thought on what the post-deprecation code
-  // should look like is that all of the SFINAE goes away and we do a run-time
-  // type check in the overload of AddForceElement that takes a unique_ptr
-  // which throws if (1) the actual ForceElementType is
-  // UniformGravityFieldElement and (2) gravity_field_ is not yet set.
-  // Alternately we could find a way to produce an error at compile time
-  // instead of throwing.
-  auto new_field =
-      std::make_unique<ForceElementType<T>>(std::forward<Args>(args)...);
-  if (gravity_field_) {
-    if (new_field->gravity_vector() == gravity_field_->gravity_vector()) {
-      return *gravity_field_;
-    }
-
-    throw std::runtime_error(
-        "This model already contains a gravity field element. "
-        "Only one gravity field element is allowed per model.");
-  }
-  // We save the force element so that we can grant users access to it for
-  // gravity field specific queries.
-  gravity_field_ = const_cast<ForceElementType<T>*>(
-      &AddForceElement(std::move(new_field)));
-  return *gravity_field_;
 }
 
 template <typename T>
@@ -340,8 +312,10 @@ template <typename T>
 template<template<typename> class JointType, typename... Args>
 const JointType<T>& MultibodyTree<T>::AddJoint(
     const std::string& name,
-    const Body<T>& parent, const optional<math::RigidTransform<double>>& X_PF,
-    const Body<T>& child, const optional<math::RigidTransform<double>>& X_BM,
+    const Body<T>& parent,
+    const std::optional<math::RigidTransform<double>>& X_PF,
+    const Body<T>& child,
+    const std::optional<math::RigidTransform<double>>& X_BM,
     Args&&... args) {
   static_assert(std::is_base_of<Joint<T>, JointType<T>>::value,
                 "JointType<T> must be a sub-class of Joint<T>.");
@@ -370,7 +344,7 @@ const JointType<T>& MultibodyTree<T>::AddJoint(
 
 template <typename T>
 const JointActuator<T>& MultibodyTree<T>::AddJointActuator(
-    const std::string& name, const Joint<T>& joint) {
+    const std::string& name, const Joint<T>& joint, double effort_limit) {
   if (HasJointActuatorNamed(name, joint.model_instance())) {
     throw std::logic_error(
         "Model instance '" +
@@ -387,7 +361,8 @@ const JointActuator<T>& MultibodyTree<T>::AddJointActuator(
 
   const JointActuatorIndex actuator_index =
       topology_.add_joint_actuator(joint.num_velocities());
-  owned_actuators_.push_back(std::make_unique<JointActuator<T>>(name, joint));
+  owned_actuators_.push_back(
+      std::make_unique<JointActuator<T>>(name, joint, effort_limit));
   JointActuator<T>* actuator = owned_actuators_.back().get();
   actuator->set_parent_tree(this, actuator_index);
   actuator_name_to_index_.insert(std::make_pair(name, actuator_index));

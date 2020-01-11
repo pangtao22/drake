@@ -195,7 +195,7 @@ class MultipleShooting : public solvers::MathematicalProgram {
 
   /// Adds support for passing in a (scalar) matrix Expression, which is a
   /// common output of most symbolic linear algebra operations.
-  /// Note: Derived classes will need to type
+  /// @note Derived classes will need to type
   ///    using MultipleShooting::AddFinalCost;
   /// to "unhide" this method.
   void AddFinalCost(
@@ -207,16 +207,22 @@ class MultipleShooting : public solvers::MathematicalProgram {
   typedef std::function<
       void(const Eigen::Ref<const Eigen::VectorXd>& sample_times,
            const Eigen::Ref<const Eigen::MatrixXd>& values)> TrajectoryCallback;
+  typedef std::function<void(
+      const Eigen::Ref<const Eigen::VectorXd>& sample_times,
+      const Eigen::Ref<const Eigen::MatrixXd>& states,
+      const Eigen::Ref<const Eigen::MatrixXd>& inputs,
+      const std::vector<Eigen::Ref<const Eigen::MatrixXd>>& values)>
+      CompleteTrajectoryCallback;
 
   /**
-   * Adds a callback method to visualize intermediate results of the
-   * trajectory optimization.  The callback should be of the form
+   * Adds a callback method to visualize intermediate results of input variables
+   * used in the trajectory optimization.  The callback should be of the form
    *   MyVisualization(sample_times, values),
    * where breaks is a N-by-1 VectorXd of sample times, and values is a
    * num_inputs-by-N MatrixXd representing the current (intermediate) value of
    * the input trajectory at the break points in each column.
    *
-   * Note: Just like other costs/constraints, not all solvers support callbacks.
+   * @note Just like other costs/constraints, not all solvers support callbacks.
    * Adding a callback here will force MathematicalProgram::Solve to select a
    * solver that support callbacks.  For instance, adding a visualization
    * callback to a quadratic programming problem may result in using a nonlinear
@@ -226,14 +232,14 @@ class MultipleShooting : public solvers::MathematicalProgram {
   AddInputTrajectoryCallback(const TrajectoryCallback& callback);
 
   /**
-   * Adds a callback method to visualize intermediate results of the
-   * trajectory optimization.  The callback should be of the form
+   * Adds a callback method to visualize intermediate results of state variables
+   * used in the trajectory optimization.  The callback should be of the form
    *   MyVisualization(sample_times, values),
    * where sample_times is a N-by-1 VectorXd of sample times, and values is a
    * num_states-by-N MatrixXd representing the current (intermediate) value of
    * the state trajectory at the break points in each column.
    *
-   * Note: Just like other costs/constraints, not all solvers support callbacks.
+   * @note Just like other costs/constraints, not all solvers support callbacks.
    * Adding a callback here will force MathematicalProgram::Solve to select a
    * solver that support callbacks.  For instance, adding a visualization
    * callback to a quadratic programming problem may result in using a nonlinear
@@ -241,6 +247,27 @@ class MultipleShooting : public solvers::MathematicalProgram {
    */
   solvers::Binding<solvers::VisualizationCallback>
   AddStateTrajectoryCallback(const TrajectoryCallback& callback);
+
+  /**
+   * Adds a callback method to visualize intermediate results of all variables
+   * used in the trajectory optimization.  The callback should be of the form
+   *   MyVisualization(sample_times, states, inputs, values),
+   * where sample_times is an N-by-1 VectorXd of sample times, states is a
+   * num_states-by-N MatrixXd of the current (intermediate) state trajectory at
+   * the break points, inputs is a num_inputs-by-N MatrixXd of the current
+   * (intermediate) input trajectory at the break points and values is a
+   * vector of num_rows-by-N MatrixXds of the current (intermediate) extra
+   * sequential variables specified by @p names at the break points.
+   *
+   * @note Just like other costs/constraints, not all solvers support callbacks.
+   * Adding a callback here will force MathematicalProgram::Solve to select a
+   * solver that support callbacks.  For instance, adding a visualization
+   * callback to a quadratic programming problem may result in using a nonlinear
+   * programming solver as the default solver.
+   */
+  solvers::Binding<solvers::VisualizationCallback>
+  AddCompleteTrajectoryCallback(const CompleteTrajectoryCallback& callback,
+                                const std::vector<std::string>& names);
 
   /// Set the initial guess for the trajectory decision variables.
   ///
@@ -287,6 +314,15 @@ class MultipleShooting : public solvers::MathematicalProgram {
   Eigen::MatrixXd GetStateSamples(
       const solvers::MathematicalProgramResult& result) const;
 
+  /// Returns a matrix containing the sequential variable values (arranged in
+  /// columns) at each knot point at the solution.
+  ///
+  /// @param name The name of sequential variable to get the results for.  Must
+  /// correspond to an already added sequential variable.
+  Eigen::MatrixXd GetSequentialVariableSamples(
+      const solvers::MathematicalProgramResult& result,
+      const std::string& name) const;
+
   /// Get the input trajectory at the solution as a PiecewisePolynomial.  The
   /// order of the trajectory will be determined by the integrator used in
   /// the dynamic constraints.  Requires that the system has at least one input
@@ -306,7 +342,8 @@ class MultipleShooting : public solvers::MathematicalProgram {
   }
 
  protected:
-  /// Constructs a MultipleShooting instance with fixed sample times.
+  /// Constructs a MultipleShooting instance with fixed sample times. It creates
+  /// new placeholder variables for input and state.
   ///
   /// @param num_inputs Number of inputs at each sample point.
   /// @param num_states Number of states at each sample point.
@@ -315,8 +352,21 @@ class MultipleShooting : public solvers::MathematicalProgram {
   MultipleShooting(int num_inputs, int num_states, int num_time_samples,
                    double fixed_timestep);
 
+  /// Constructs a MultipleShooting instance with fixed sample times. It uses
+  /// the provided `input` and `state` as placeholders instead of creating new
+  /// placeholder variables for them.
+  ///
+  /// @param input Placeholder variables for input.
+  /// @param state Placeholder variables for state.
+  /// @param num_time_samples Number of time samples.
+  /// @param fixed_timestep The spacing between sample times.
+  MultipleShooting(const solvers::VectorXDecisionVariable& input,
+                   const solvers::VectorXDecisionVariable& state,
+                   int num_time_samples, double fixed_timestep);
+
   /// Constructs a MultipleShooting instance with sample times as decision
-  /// variables.
+  /// variables.  It creates new placeholder variables for input, state, and
+  /// time.
   ///
   /// @param num_inputs Number of inputs at each sample point.
   /// @param num_states Number of states at each sample point.
@@ -324,6 +374,21 @@ class MultipleShooting : public solvers::MathematicalProgram {
   /// @param minimum_timestep Minimum spacing between sample times.
   /// @param maximum_timestep Maximum spacing between sample times.
   MultipleShooting(int num_inputs, int num_states, int num_time_samples,
+                   double minimum_timestep, double maximum_timestep);
+
+  /// Constructs a MultipleShooting instance with sample times as decision
+  /// variables. It uses the provided `input`, `state`, and `time` as
+  /// placeholders instead of creating new placeholder variables for them.
+  ///
+  /// @param input Placeholder variables for input.
+  /// @param state Placeholder variables for state.
+  /// @param time Placeholder variable for time.
+  /// @param num_time_samples Number of time samples.
+  /// @param minimum_timestep Minimum spacing between sample times.
+  /// @param maximum_timestep Maximum spacing between sample times.
+  MultipleShooting(const solvers::VectorXDecisionVariable& input,
+                   const solvers::VectorXDecisionVariable& state,
+                   const solvers::DecisionVariable& time, int num_time_samples,
                    double minimum_timestep, double maximum_timestep);
 
   /// Replaces e.g. placeholder_x_var_ with x_vars_ at time interval
@@ -352,7 +417,18 @@ class MultipleShooting : public solvers::MathematicalProgram {
 
   const solvers::VectorXDecisionVariable& x_vars() const { return x_vars_; }
 
+  /// Returns the decision variables associated with the sequential variable
+  /// `name`.
+  const solvers::VectorXDecisionVariable GetSequentialVariable(
+      const std::string& name) const;
+
  private:
+  MultipleShooting(const solvers::VectorXDecisionVariable& input,
+                   const solvers::VectorXDecisionVariable& state,
+                   int num_time_samples,
+                   const std::optional<solvers::DecisionVariable>& time_var,
+                   double minimum_timestep, double maximum_timestep);
+
   MultipleShooting(int num_inputs, int num_states, int num_time_samples,
                    bool timesteps_are_decision_variables,
                    double minimum_timestep, double maximum_timestep);

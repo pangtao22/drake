@@ -4,7 +4,7 @@
 
 #include <gtest/gtest.h>
 
-#include "drake/common/proto/call_matlab.h"
+#include "drake/common/proto/call_python.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/math/barycentric.h"
 #include "drake/systems/controllers/linear_quadratic_regulator.h"
@@ -54,7 +54,7 @@ GTEST_TEST(FittedValueIterationTest, SingleIntegrator) {
   auto context = policy->CreateDefaultContext();
   auto output = policy->get_output_port().Allocate();
   for (const double x : state_grid[0]) {
-    context->FixInputPort(0, Vector1d{x});
+    policy->get_input_port().FixValue(context.get(), x);
     policy->get_output_port().Calc(*context, output.get());
     double y = output->get_value<BasicVector<double>>()[0];
     EXPECT_EQ(y, (x < 0) - (x > 0));  // implements -sgn(x).
@@ -96,7 +96,7 @@ GTEST_TEST(FittedValueIterationTest, PeriodicBoundary) {
   EXPECT_TRUE(CompareMatrices(cost_to_go_values, J_expected, 1e-4));
 }
 
-// Plot in Matlab.  (Costs little here and is very useful for any future
+// Plot in Python.  (Costs little here and is very useful for any future
 // debugging).
 void VisualizationCallback(int iteration,
                            const math::BarycentricMesh<double>& state_mesh,
@@ -117,14 +117,11 @@ void VisualizationCallback(int iteration,
     Qdotbins(i++) = qdot;
   }
 
-  using common::CallMatlab;
-  CallMatlab("surf", Qbins, Qdotbins, J.transpose());
-  auto str =
-      common::CallMatlabSingleOutput("sprintf", "iteration %d", iteration);
-  CallMatlab("xlabel", "q");
-  CallMatlab("ylabel", "qdot");
-  CallMatlab("title", str);
-  CallMatlab("pause");
+  using common::CallPython;
+  CallPython("surf", Qbins, Qdotbins, J.transpose());
+  CallPython("xlabel", "q");
+  CallPython("ylabel", "qdot");
+  CallPython("title", "iteration " + std::to_string(iteration));
 }
 
 // Linear quadratic regulator for the double integrator.

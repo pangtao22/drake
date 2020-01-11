@@ -16,7 +16,7 @@ TEST_P(LinearProgramTest, TestLP) {
   prob()->RunProblem(&solver);
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     IpoptTest, LinearProgramTest,
     ::testing::Combine(::testing::ValuesIn(linear_cost_form()),
                        ::testing::ValuesIn(linear_constraint_form()),
@@ -62,7 +62,7 @@ TEST_P(QuadraticProgramTest, TestQP) {
   prob()->RunProblem(&solver);
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     IpoptTest, QuadraticProgramTest,
     ::testing::Combine(::testing::ValuesIn(quadratic_cost_form()),
                        ::testing::ValuesIn(linear_constraint_form()),
@@ -82,7 +82,7 @@ class NoisyQuadraticCost {
   int numInputs() const { return 1; }
   int numOutputs() const { return 1; }
   template <typename T>
-  void eval(detail::VecIn<T> const& x, detail::VecOut<T>* y) const {
+  void eval(internal::VecIn<T> const& x, internal::VecOut<T>* y) const {
     // Parabola with minimum at (-1, 1) with some deterministic noise applied to
     // the input so derivatives will be correctish but not easily followable to
     // the minimum.

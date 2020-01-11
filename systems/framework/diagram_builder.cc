@@ -2,15 +2,14 @@
 
 #include <tuple>
 #include <unordered_map>
-
-#include "drake/common/drake_variant.h"
+#include <variant>
 
 namespace drake {
 namespace systems {
 namespace internal {
 namespace {
 
-using EitherPortIndex = variant<InputPortIndex, OutputPortIndex>;
+using EitherPortIndex = std::variant<InputPortIndex, OutputPortIndex>;
 
 // The PortIdentifier must be appropriate to use in a sorted collection.  Thus,
 // we place its two integer indices first, because they form a unique key on
@@ -29,8 +28,8 @@ std::string to_string(const PortIdentifier& port_id) {
   const SystemBase* const system = std::get<2>(port_id);
   const EitherPortIndex& index = std::get<1>(port_id);
   return is_input_port(port_id) ?
-      system->get_input_port_base(drake::get<0>(index)).GetFullDescription() :
-      system->get_output_port_base(drake::get<1>(index)).GetFullDescription();
+      system->get_input_port_base(std::get<0>(index)).GetFullDescription() :
+      system->get_output_port_base(std::get<1>(index)).GetFullDescription();
 }
 
 // Helper to do the algebraic loop test. It recursively performs the
@@ -124,8 +123,9 @@ void DiagramBuilderImpl::ThrowIfAlgebraicLoopsExist(
       "A System may have conservatively reported that one of its output ports "
       "depends on an input port, making one of the 'is direct-feedthrough to' "
       "lines above spurious.  If that is the case, remove the spurious "
-      "dependency as shown in the API documentation for "
-      "LeafSystem::DoHasDirectFeedthrough.";
+      "dependency per the Drake API documentation for declaring output ports. "
+      // NOLINTNEXTLINE(whitespace/line_length)
+      "https://drake.mit.edu/doxygen_cxx/classdrake_1_1systems_1_1_leaf_system.html#DeclareLeafOutputPort_feedthrough";
 
   // Evaluate the graph for cycles.
   std::set<PortIdentifier> visited;

@@ -1,10 +1,8 @@
-# Use Python 2 by default.
-build --python_path=/usr/bin/python2
-build --action_env=DRAKE_PYTHON_BIN_PATH=/usr/bin/python2
+build:_drd --extra_toolchains=//tools/py_toolchain:linux_dbg_toolchain
+build:_helgrind --extra_toolchains=//tools/py_toolchain:linux_dbg_toolchain
 
-# Explicit configuration for Python 3.
-build:python3 --python_path=/usr/bin/python3
-build:python3 --action_env=DRAKE_PYTHON_BIN_PATH=/usr/bin/python3
+# TODO(jamiesnape): Builds with configuration "memcheck" should also use
+# //tools/py_toolchain:linux_dbg_toolchain.
 
 # Configure ${PATH} for actions.
 # N.B. Ensure this is consistent with `execute.bzl`.

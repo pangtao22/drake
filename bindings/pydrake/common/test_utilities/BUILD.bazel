@@ -41,6 +41,18 @@ drake_py_library(
     deps = [
         ":module_py",
         "//bindings/pydrake:autodiffutils_py",
+        "//bindings/pydrake:polynomial_py",
+        "//bindings/pydrake:symbolic_py",
+    ],
+)
+
+drake_py_library(
+    name = "pickle_compare_py",
+    testonly = 1,
+    srcs = ["pickle_compare.py"],
+    deps = [
+        ":module_py",
+        ":numpy_compare_py",
         "//bindings/pydrake:symbolic_py",
     ],
 )
@@ -52,6 +64,8 @@ drake_py_library(
     deps = [
         ":deprecation_py",
         ":module_py",
+        ":numpy_compare_py",
+        ":pickle_compare_py",
     ],
 )
 

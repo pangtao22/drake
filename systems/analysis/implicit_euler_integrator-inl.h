@@ -66,6 +66,14 @@ void ImplicitEulerIntegrator<T>::DoInitialize() {
 
   // Reset the Jacobian matrix (so that recomputation is forced).
   this->get_mutable_jacobian().resize(0, 0);
+
+  // Initialize the embedded second order Runge-Kutta integrator. The maximum
+  // step size will be set to infinity because we will explicitly request the
+  // step sizes to be taken.
+  rk2_ = std::make_unique<RungeKutta2Integrator<T>>(
+      this->get_system(),
+      std::numeric_limits<double>::infinity() /* maximum step size */,
+      this->get_mutable_context());
 }
 
 template <class T>
@@ -104,8 +112,15 @@ ComputeAndFactorImplicitTrapezoidIterationMatrix(
 // @param h the integration step size (> 0) to attempt.
 // @param xt0 the continuous state at t0.
 // @param g the particular implicit function to compute the root of.
-// @param [in, out] the starting guess for x(t0+h); the value for x(t0+h) on
-//        return.
+// @param compute_and_factor_iteration_matrix the function for computing and
+//        factorizing the iteration matrix.
+// @param xtplus_guess the starting guess for x(t0+h) -- implicit Euler passes
+//        x(t0) since it has no better guess; implicit trapezoid passes
+//        implicit Euler's result for x(t0+h).
+// @param[out] the iteration matrix to be used for the particular integration
+//             scheme (implicit Euler, implicit trapezoid), which will be
+//             computed and factored, if necessary.
+// @param[out] the value for x(t0+h) on return.
 // @param trial the attempt for this approach (1-4). StepAbstract() uses more
 //        computationally expensive methods as the trial numbers increase.
 // @returns `true` if the method was successfully able to take an integration
@@ -115,11 +130,14 @@ ComputeAndFactorImplicitTrapezoidIterationMatrix(
 // TODO(edrumwri) Explicitly test this method's fallback logic (i.e., how it
 //                calls MaybeFreshenMatrices()) in a unit test).
 template <class T>
-bool ImplicitEulerIntegrator<T>::StepAbstract(const T& t0, const T& h,
-    const VectorX<T>& xt0, const std::function<VectorX<T>()>& g,
+bool ImplicitEulerIntegrator<T>::StepAbstract(
+    const T& t0, const T& h, const VectorX<T>& xt0,
+    const std::function<VectorX<T>()>& g,
     const std::function<void(const MatrixX<T>&, const T&,
-        typename ImplicitIntegrator<T>::IterationMatrix*)>&
+                             typename ImplicitIntegrator<T>::IterationMatrix*)>&
         compute_and_factor_iteration_matrix,
+    const VectorX<T>& xtplus_guess,
+    typename ImplicitIntegrator<T>::IterationMatrix* iteration_matrix,
     VectorX<T>* xtplus, int trial) {
   using std::max;
   using std::min;
@@ -130,47 +148,53 @@ bool ImplicitEulerIntegrator<T>::StepAbstract(const T& t0, const T& h,
   // Verify xtplus
   DRAKE_ASSERT(xtplus && xtplus->size() == xt0.size());
 
-  SPDLOG_DEBUG(drake::log(), "StepAbstract() entered for t={}, h={}, trial={}",
+  DRAKE_LOGGER_DEBUG("StepAbstract() entered for t={}, h={}, trial={}",
       t0, h, trial);
+
+  // Start from the guess.
+  *xtplus = xtplus_guess;
+  DRAKE_LOGGER_DEBUG("Starting state: {}", xtplus->transpose());
 
   // Advance the context time and state to compute derivatives at t0 + h.
   const T tf = t0 + h;
   Context<T>* context = this->get_mutable_context();
   context->SetTimeAndContinuousState(tf, *xtplus);
 
-  // Evaluate the residual error using:
-  // g(x(t0+h)) = x(t0+h) - x(t0) - h f(t0+h,x(t0+h)).
-  VectorX<T> goutput = g();
-
   // Initialize the "last" state update norm; this will be used to detect
   // convergence.
   T last_dx_norm = std::numeric_limits<double>::infinity();
 
   // Calculate Jacobian and iteration matrices (and factorizations), as needed,
-  // around (tf, xtplus).
-  if (!this->MaybeFreshenMatrices(tf, *xtplus, h, trial,
-      compute_and_factor_iteration_matrix, &iteration_matrix_)) {
+  // around (t0, xt0). We do not do this calculation if full Newton is in use;
+  // the calculation will be performed at the beginning of the loop instead.
+  // TODO(edrumwri) Consider computing the Jacobian matrix around tf and/or
+  //                xtplus. This would give a better Jacobian, but would
+  //                complicate the logic, since the Jacobian would no longer
+  //                (necessarily) be fresh upon fallback to a smaller step size.
+  if (!this->get_use_full_newton() &&
+      !this->MaybeFreshenMatrices(t0, xt0, h, trial,
+                                  compute_and_factor_iteration_matrix,
+                                  iteration_matrix)) {
     return false;
   }
 
-  // The maximum number of Newton-Raphson iterations to take before declaring
-  // failure. [Hairer, 1996] states, "It is our experience that the code becomes
-  // more efficient when we allow a relatively high number of iterations (e.g.,
-  // [7 or 10])", p. 121.  The focus of that quote is a higher order integrator
-  // with a quasi-Newton approach, so our mileage may vary.
-  // TODO(edrumwri): Consider making this a settable parameter. Not putting it
-  //                 toward staving off parameter overload.
-  const int max_iterations = 10;
-
   // Do the Newton-Raphson iterations.
-  for (int i = 0; i < max_iterations; ++i) {
+  for (int i = 0; i < this->max_newton_raphson_iterations(); ++i) {
+    this->FreshenMatricesIfFullNewton(tf, *xtplus, h,
+                                      compute_and_factor_iteration_matrix,
+                                      iteration_matrix);
+
+    // Evaluate the residual error using:
+    // g(x(t0+h)) = x(t0+h) - x(t0) - h f(t0+h,x(t0+h)).
+    VectorX<T> goutput = g();
+
     // Update the number of Newton-Raphson iterations.
     num_nr_iterations_++;
 
     // Compute the state update using the equation A*x = -g(), where A is the
     // iteration matrix.
     // TODO(edrumwri): Allow caller to provide their own solver.
-    VectorX<T> dx = iteration_matrix_.Solve(-goutput);
+    VectorX<T> dx = iteration_matrix->Solve(-goutput);
 
     // Get the infinity norm of the weighted update vector.
     dx_state_->get_mutable_vector().SetFromVector(dx);
@@ -181,8 +205,11 @@ bool ImplicitEulerIntegrator<T>::StepAbstract(const T& t0, const T& h,
     // at least one Newton-Raphson update has been applied to ensure that there
     // is at least some change to the state, no matter how small, on a
     // non-stationary system.
-    if (i > 0 && this->IsUpdateZero(*xtplus, dx))
+    if (i > 0 && this->IsUpdateZero(*xtplus, dx)) {
+      DRAKE_LOGGER_DEBUG("Converged with zero update. xt+: {}",
+          xtplus->transpose());
       return true;
+    }
 
     // Update the state vector.
     *xtplus += dx;
@@ -191,15 +218,15 @@ bool ImplicitEulerIntegrator<T>::StepAbstract(const T& t0, const T& h,
     // Compute the convergence rate and check convergence.
     // [Hairer, 1996] notes that this convergence strategy should only be
     // applied after *at least* two iterations (p. 121).
-    if (i >= 1) {
+    if (i > 1) {
       const T theta = dx_norm / last_dx_norm;
       const T eta = theta / (1 - theta);
-      SPDLOG_DEBUG(drake::log(), "Newton-Raphson loop {} theta: {}, eta: {}",
-                   i, theta, eta);
+      DRAKE_LOGGER_DEBUG("Newton-Raphson loop {} theta: {}, eta: {}",
+          i, theta, eta);
 
       // Look for divergence.
       if (theta > 1) {
-        SPDLOG_DEBUG(drake::log(), "Newton-Raphson divergence detected for "
+        DRAKE_LOGGER_DEBUG("Newton-Raphson divergence detected for "
             "h={}", h);
         break;
       }
@@ -211,30 +238,30 @@ bool ImplicitEulerIntegrator<T>::StepAbstract(const T& t0, const T& h,
       const double kappa = 0.05;
       const double k_dot_tol = kappa * this->get_accuracy_in_use();
       if (eta * dx_norm < k_dot_tol) {
-        SPDLOG_DEBUG(drake::log(), "Newton-Raphson converged; η = {}, h = {}",
-                     eta, h);
+        DRAKE_LOGGER_DEBUG(
+            "Newton-Raphson converged; η = {}, h = {}, xt+ = {}",
+            eta, h, xtplus->transpose());
         return true;
       }
     }
 
     // Update the norm of the state update.
     last_dx_norm = dx_norm;
-
-    // Update the state in the context and compute g(xⁱ⁺¹).
-    goutput = g();
   }
 
-  SPDLOG_DEBUG(drake::log(), "StepAbstract() convergence failed");
+  DRAKE_LOGGER_DEBUG("StepAbstract() convergence failed");
 
   // If Jacobian and iteration matrix factorizations are not reused, there
-  // is nothing else we can try.
+  // is nothing else we can try.  Note that get_reuse() returns false if
+  // "full Newton-Raphson" mode is activated (see
+  // ImplicitIntegrator::get_use_full_newton()).
   if (!this->get_reuse())
     return false;
 
-  // Try StepAbstract again, freshening Jacobians and iteration matrix
-  // factorizations as helpful.
-  return StepAbstract(
-      t0, h, xt0, g, compute_and_factor_iteration_matrix, xtplus, trial+1);
+  // Try StepAbstract again. That method will freshen Jacobians and iteration
+  // matrix factorizations as necessary.
+  return StepAbstract(t0, h, xt0, g, compute_and_factor_iteration_matrix,
+                      xtplus_guess, iteration_matrix, xtplus, trial + 1);
 }
 
 // Steps the system forward by a single step of at most h using the implicit
@@ -242,9 +269,7 @@ bool ImplicitEulerIntegrator<T>::StepAbstract(const T& t0, const T& h,
 // @param t0 the time at the left end of the integration interval.
 // @param h the maximum time increment to step forward.
 // @param xt0 the continuous state at t0.
-// @param [in,out] xtplus a guess for the continuous state at the right end of
-//                 the integration interval (i.e., `x(t0+h)`), on entry, and
-//                 the computed value for `x(t0+h)` on successful return.
+// @param[out] the computed value for `x(t0+h)` on successful return.
 // @returns `true` if the step of size `h` was successful, `false` otherwise.
 // @note The time and continuous state in the context are indeterminate upon
 //       exit.
@@ -253,7 +278,7 @@ bool ImplicitEulerIntegrator<T>::StepImplicitEuler(const T& t0, const T& h,
     const VectorX<T>& xt0, VectorX<T>* xtplus) {
   using std::abs;
 
-  SPDLOG_DEBUG(drake::log(), "StepImplicitEuler(h={}) t={}", h, t0);
+  DRAKE_LOGGER_DEBUG("StepImplicitEuler(h={}) t={}", h, t0);
 
   // Set g for the implicit Euler method.
   Context<T>* context = this->get_mutable_context();
@@ -265,11 +290,12 @@ bool ImplicitEulerIntegrator<T>::StepImplicitEuler(const T& t0, const T& h,
 
   // Use the current state as the candidate value for the next state.
   // [Hairer 1996] validates this choice (p. 120).
-  *xtplus = xt0;
+  const VectorX<T>& xtplus_guess = xt0;
 
   // Attempt the step.
-  return StepAbstract(
-      t0, h, xt0, g, ComputeAndFactorImplicitEulerIterationMatrix, &*xtplus);
+  return StepAbstract(t0, h, xt0, g,
+                      ComputeAndFactorImplicitEulerIterationMatrix,
+                      xtplus_guess, &ie_iteration_matrix_, &*xtplus);
 }
 
 // Steps forward by a single step of `h` using the implicit trapezoid
@@ -277,19 +303,19 @@ bool ImplicitEulerIntegrator<T>::StepImplicitEuler(const T& t0, const T& h,
 // @param t0 the time at the left end of the integration interval.
 // @param h the maximum time increment to step forward.
 // @param dx0 the time derivatives computed at time and state (t0, xt0).
-// @param [in,out] xtplus the continuous state at the right end of the
-//                 integration (i.e., x(t0+h)) computed by implicit Euler
-//                 on entry; x(t0+h) computed by the implicit trapezoid method
-//                 on successful return.
+// @param xtplus_ie x(t0+h) computed by the implicit Euler method.
+// @param[out] xtplus x(t0+h) computed by the implicit trapezoid method on
+//             successful return.
 // @returns `true` if the step was successful and `false` otherwise.
 // @note The time and continuous state in the context are indeterminate upon
 //       exit.
 template <class T>
-bool ImplicitEulerIntegrator<T>::StepImplicitTrapezoid(const T& t0, const T& h,
-    const VectorX<T>& xt0, const VectorX<T>& dx0, VectorX<T>* xtplus) {
+bool ImplicitEulerIntegrator<T>::StepImplicitTrapezoid(
+    const T& t0, const T& h, const VectorX<T>& xt0, const VectorX<T>& dx0,
+    const VectorX<T>& xtplus_ie, VectorX<T>* xtplus) {
   using std::abs;
 
-  SPDLOG_DEBUG(drake::log(), "StepImplicitTrapezoid(h={}) t={}", h, t0);
+  DRAKE_LOGGER_DEBUG("StepImplicitTrapezoid(h={}) t={}", h, t0);
 
   // Set g for the implicit trapezoid method.
   // Define g(x(t+h)) ≡ x(t0+h) - x(t0) - h/2 (f(t0,x(t0)) + f(t0+h,x(t0+h)) and
@@ -315,8 +341,9 @@ bool ImplicitEulerIntegrator<T>::StepImplicitTrapezoid(const T& t0, const T& h,
   int stored_num_nr_iterations = this->get_num_newton_raphson_iterations();
 
   // Attempt to step.
-  bool success = StepAbstract(
-      t0, h, xt0, g, ComputeAndFactorImplicitTrapezoidIterationMatrix, xtplus);
+  bool success = StepAbstract(t0, h, xt0, g,
+                              ComputeAndFactorImplicitTrapezoidIterationMatrix,
+                              xtplus_ie, &itr_iteration_matrix_, xtplus);
 
   // Move statistics to implicit trapezoid-specific.
   num_err_est_jacobian_reforms_ +=
@@ -359,7 +386,7 @@ bool ImplicitEulerIntegrator<T>::AttemptStepPaired(const T& t0, const T& h,
 
   // Do the Euler step.
   if (!StepImplicitEuler(t0, h, xt0, xtplus_ie)) {
-    SPDLOG_DEBUG(drake::log(), "Implicit Euler approach did not converge for "
+    DRAKE_LOGGER_DEBUG("Implicit Euler approach did not converge for "
         "step size {}", h);
     return false;
   }
@@ -374,16 +401,12 @@ bool ImplicitEulerIntegrator<T>::AttemptStepPaired(const T& t0, const T& h,
   //          = xₜᵣ(t0+h) + O(h³)      [implicit trapezoid]
   // where x*(t0+h) is the true (generally unknown) answer that we seek.
   // This implies:
-  // xᵢₑ(t0+h) + O(h²) = xₜᵣ(t0+h) + O(h³)
-  // Given that the second order term subsumes the third order one:
-  // xᵢₑ(t0+h) - xₜᵣ(t0+h) = O(h²)
-  // Therefore the difference between the implicit trapezoid solution and the
-  // implicit Euler solution gives a second-order error estimate for the
-  // implicit Euler result xᵢₑ.
+  // xᵢₑ(t0+h) + O(h²) = xₜᵣ(t0+h) + O(h³).
+  // Given that the second order term subsumes the third order one, we have:
+  // xᵢₑ(t0+h) - xₜᵣ(t0+h) = O(h²).
 
   // Attempt to compute the implicit trapezoid solution.
-  *xtplus_itr = *xtplus_ie;
-  if (StepImplicitTrapezoid(t0, h, xt0, dx0, xtplus_itr)) {
+  if (StepImplicitTrapezoid(t0, h, xt0, dx0, *xtplus_ie, xtplus_itr)) {
     // Reset the state to that computed by implicit Euler.
     // TODO(edrumwri): Explore using the implicit trapezoid method solution
     //                 instead as *the* solution, rather than the implicit
@@ -392,7 +415,7 @@ bool ImplicitEulerIntegrator<T>::AttemptStepPaired(const T& t0, const T& h,
     context->SetTimeAndContinuousState(t0 + h, *xtplus_ie);
     return true;
   } else {
-    SPDLOG_DEBUG(drake::log(), "Implicit trapezoid approach FAILED with a step"
+    DRAKE_LOGGER_DEBUG("Implicit trapezoid approach FAILED with a step"
         "size that succeeded on implicit Euler.");
     return false;
   }
@@ -408,20 +431,16 @@ bool ImplicitEulerIntegrator<T>::DoImplicitIntegratorStep(const T& h) {
   // Save the current time and state.
   Context<T>* context = this->get_mutable_context();
   const T t0 = context->get_time();
-  SPDLOG_DEBUG(drake::log(), "IE DoStep(h={}) t={}", h, t0);
+  DRAKE_LOGGER_DEBUG("IE DoStep(h={}) t={}", h, t0);
 
-  // TODO(sherm1) Heap allocation here; consider mutable temporaries instead.
-  const VectorX<T> xt0 = context->get_continuous_state().CopyToVector();
-  VectorX<T> xtplus_ie(xt0.size()), xtplus_itr(xt0.size());
+  xt0_ = context->get_continuous_state().CopyToVector();
+  xtplus_ie_.resize(xt0_.size());
+  xtplus_tr_.resize(xt0_.size());
 
   // If the requested h is less than the minimum step size, we'll advance time
-  // using two explicit Euler steps of size h/2. For error estimation, we also
-  // take a single step of size h. We can estimate the error in the larger
-  // step that way, but note that we propagate the two half-steps on the
-  // assumption the result will be better despite not having an error estimate
-  // for them (that's called "local extrapolation").
+  // using an explicit Euler step.
   if (h < this->get_working_minimum_step_size()) {
-    SPDLOG_DEBUG(drake::log(), "-- requested step too small, taking explicit "
+    DRAKE_LOGGER_DEBUG("-- requested step too small, taking explicit "
         "step instead");
 
     // TODO(edrumwri): Investigate replacing this with an explicit trapezoid
@@ -430,57 +449,43 @@ bool ImplicitEulerIntegrator<T>::DoImplicitIntegratorStep(const T& h) {
     //                 test of, e.g., a square wave function, should quantify
     //                 the improvement (if any).
 
-    // The error estimation process for explicit Euler uses two half-steps
-    // of explicit Euler (for a total of two derivative evaluations). The error
-    // estimation process is derived as follows:
-    // (1) x*(t0+h) = xₑ(t0+h) + h²/2 df/h + ...                [full step]
-    // (2) x*(t0+h) = ̅xₑ(t0+h) + h²/8 (df/h + df₊/h) + ...      [two 1/2-steps]
-    //
-    // where x*(t0+h) is the true (generally unknown) answer that we seek,
-    // f() is the ordinary differential equation evaluated at x(t0), and
-    // f₊() is the derivative evaluated at x(t0 + h/2). Subtracting (1) from
-    // (2), the above equations are rewritten as:
-    // 0 = x̅ₑ(t0+h) - xₑ(t0+h) + h²/8 (-3df/h + df₊/h) + ...
-    // The sum of all but the first two terms on the right hand side
-    // of the above equation is less in magnitude than ch², for some
-    // sufficiently large c. Or, written using Big-Oh notation:
-    // x̅ₑ(t0+h) - xₑ(t0+h) = O(h²)
-    // Thus, subtracting the two solutions yields a second order error estimate
-    // (we compute norms on the error estimate, so the apparent sign error
-    // in the algebra when arriving at the final equation is inconsequential).
+    // The error estimation process for explicit Euler uses an explicit second
+    // order Runge-Kutta method so that the order of the asymptotic term
+    // matches that used for estimating the error of the implicit Euler
+    // integrator.
 
     // Compute the Euler step.
-    // TODO(sherm1) Heap allocation here; consider mutable temporary instead.
-    VectorX<T> xdot = this->EvalTimeDerivatives(*context).CopyToVector();
-    xtplus_ie = xt0 + h * xdot;
+    xdot_ = this->EvalTimeDerivatives(*context).CopyToVector();
+    xtplus_ie_ = xt0_ + h * xdot_;
 
-    // Do one half step.
-    // TODO(sherm1) Heap allocation here; consider mutable temporary instead.
-    const VectorX<T> xtpoint5 = xt0 + h / 2.0 * xdot;
-    context->SetTimeAndContinuousState(t0 + h / 2.0, xtpoint5);
+    // Compute the RK2 step.
+    const int evals_before_rk2 = rk2_->get_num_derivative_evaluations();
+    if (!rk2_->IntegrateWithSingleFixedStepToTime(t0 + h)) {
+      throw std::runtime_error("Embedded RK2 integrator failed to take a single"
+          "fixed step to the requested time.");
+    }
 
-    // Do another half step, then set the "trapezoid" state to be the result of
-    // taking two explicit Euler half steps. The code below the if/then/else
-    // block simply subtracts the two results to obtain the error estimate.
-    xdot = this->EvalTimeDerivatives(*context).CopyToVector();  // xdot(t + h/2)
-    xtplus_itr = xtpoint5 + h / 2.0 * xdot;
-    context->SetTimeAndContinuousState(t0 + h, xtplus_itr);
+    const int evals_after_rk2 = rk2_->get_num_derivative_evaluations();
+    xtplus_tr_ = context->get_continuous_state().CopyToVector();
 
     // Update the error estimation ODE counts.
-    num_err_est_function_evaluations_ += 2;
+    num_err_est_function_evaluations_ += (evals_after_rk2 - evals_before_rk2);
+
+    // Revert the state to that computed by explicit Euler.
+    context->SetTimeAndContinuousState(t0 + h, xtplus_ie_);
   } else {
     // Try taking the requested step.
-    bool success = AttemptStepPaired(t0, h, xt0, &xtplus_ie, &xtplus_itr);
+    bool success = AttemptStepPaired(t0, h, xt0_, &xtplus_ie_, &xtplus_tr_);
 
     // If the step was not successful, reset the time and state.
     if (!success) {
-      context->SetTimeAndContinuousState(t0, xt0);
+      context->SetTimeAndContinuousState(t0, xt0_);
       return false;
     }
   }
 
   // Compute and update the error estimate.
-  err_est_vec_ = xtplus_ie - xtplus_itr;
+  err_est_vec_ = xtplus_ie_ - xtplus_tr_;
 
   // Update the caller-accessible error estimate.
   this->get_mutable_error_estimate()->get_mutable_vector().

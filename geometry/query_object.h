@@ -10,6 +10,7 @@
 #include "drake/geometry/query_results/signed_distance_pair.h"
 #include "drake/geometry/query_results/signed_distance_to_point.h"
 #include "drake/geometry/scene_graph_inspector.h"
+#include "drake/math/rigid_transform.h"
 #include "drake/systems/framework/context.h"
 
 namespace drake {
@@ -113,7 +114,7 @@ class QueryObject {
   /** Reports the position of the frame indicated by `id` relative to the world
    frame.
    @throws std::logic_error if the frame `id` is not valid.  */
-  math::RigidTransform<T> X_WF(FrameId id) const;
+  const math::RigidTransform<T>& X_WF(FrameId id) const;
 
   /** Reports the position of the frame indicated by `id` relative to its parent
    frame. If the frame was registered with the world frame as its parent frame,
@@ -121,16 +122,18 @@ class QueryObject {
    @note This is analogous to but distinct from SceneGraphInspector::X_PG().
    In this case, the pose will *always* be relative to another frame.
    @throws std::logic_error if the frame `id` is not valid.  */
-  math::RigidTransform<T> X_PF(FrameId id) const;
+  const math::RigidTransform<T>& X_PF(FrameId id) const;
 
   /** Reports the position of the geometry indicated by `id` relative to the
    world frame.
    @throws std::logic_error if the geometry `id` is not valid.  */
-  math::RigidTransform<T> X_WG(GeometryId id) const;
+  const math::RigidTransform<T>& X_WG(GeometryId id) const;
 
   //@}
 
-  /** @name                Collision Queries
+  /**
+   @anchor collision_queries
+   @name                Collision Queries
 
    These queries detect _collisions_ between geometry. Two geometries collide
    if they overlap each other and are not explicitly excluded through
@@ -147,12 +150,20 @@ class QueryObject {
    geometry is penetrating.     */
   //@{
 
-  /** Computes the penetrations across all pairs of geometries in the world.
+  /** Computes the penetrations across all pairs of geometries in the world
+   with the penetrations characterized by pairs of points (see
+   PenetrationAsPointPair), providing some measure of the penetration "depth" of
+   the two objects, but _not_ the overlapping volume.
+
    Only reports results for _penetrating_ geometries; if two geometries are
-   separated, there will be no result for that pair. Pairs of _anchored_
-   geometry are also not reported. The penetration between two geometries is
-   characterized as a point pair (see PenetrationAsPointPair). This method is
-   affected by collision filtering.
+   separated, there will be no result for that pair. Geometries whose surfaces
+   are just touching (osculating) are not considered in penetration. Surfaces
+   whose penetration is within an epsilon of osculation, are likewise not
+   considered penetrating. Pairs of _anchored_ geometry are also not reported.
+   This method is affected by collision filtering.
+
+   For two penetrating geometries g_A and g_B, it is guaranteed that they will
+   map to `id_A` and `id_B` in a fixed, repeatable manner.
 
    <h3>Scalar support</h3>
    This method only provides double-valued penetration results.
@@ -169,19 +180,64 @@ class QueryObject {
    -->
 
    @returns A vector populated with all detected penetrations characterized as
-            point pairs. */
+            point pairs.
+   @note    Silently ignore Mesh geometries. */
   std::vector<PenetrationAsPointPair<double>> ComputePointPairPenetration()
       const;
 
   /**
-   Reports pair-wise intersections and characterizes each non-empty
-   intersection as a ContactSurface. The computation is subject to collision
-   filtering.
+   Reports pairwise intersections and characterizes each non-empty
+   intersection as a ContactSurface for hydroelastic contact model.
+   The computation is subject to collision filtering.
 
-   @returns A vector populated with contact surfaces of all detected
-            intersecting pairs of geometries.
-   @note  This function is not implemented yet. */
+   For two intersecting geometries g_A and g_B, it is guaranteed that they will
+   map to `id_A` and `id_B` in a fixed, repeatable manner, where `id_A` and
+   `id_B` are GeometryId's of geometries g_A and g_B respectively.
+
+   In the current incarnation, this function represents a simple implementation.
+
+     - This table shows the supported shapes and compliance modes.
+
+       |   Shape   | Soft  | Rigid |
+       | :-------: | :---: | :---- |
+       | Sphere    |  yes  |  yes  |
+       | Cylinder  |  yes  |  yes  |
+       | Box       |  yes  |  yes  |
+       | Capsule   |  no   |  no   |
+       | Ellipsoid |  yes  |  yes  |
+       | HalfSpace |  no   |  no   |
+       | Mesh      |  no   |  yes  |
+       | Convex    |  no   |  no   |
+
+     - One geometry must be soft, and the other must be rigid. There is no
+       support for soft-soft collision or rigid-rigid collision.
+     - The elasticity modulus E (N/m^2) of each geometry is set in
+       ProximityProperties (see proximity_properties.cc). A rigid geometry must
+       have E = ∞.
+     - The tessellation of the corresponding meshes is controlled by the
+       resolution hint, as defined by AddSoftHydroelasticProperties() and
+       AddRigidHydroelasticProperties().
+     - Attempting to invoke this method with T = AutoDiffXd will throw an
+       exception if there are *any* geometry pairs that couldn't be culled.
+
+   @returns A vector populated with all detected intersections characterized as
+            contact surfaces.  */
   std::vector<ContactSurface<T>> ComputeContactSurfaces() const;
+
+  /** Applies a conservative culling mechanism to create a subset of all
+   possible geometry pairs based on non-zero intersections. A geometry pair
+   that is *absent* from the results is either a) culled by collision filters or
+   b) *known* to be separated. The caller is responsible for confirming that
+   the remaining, unculled geometry pairs are *actually* in collision.
+
+   @returns A vector populated with collision pair candidates.
+   @note    Silently ignore Mesh geometries. */
+  std::vector<SortedPair<GeometryId>> FindCollisionCandidates() const;
+
+  /** Reports true if there are _any_ collisions between unfiltered pairs in the
+   world.
+   @note Silently ignore Mesh geometries. */
+  bool HasCollisions() const;
 
   //@}
 
@@ -237,6 +293,11 @@ class QueryObject {
    This method is affected by collision filtering; geometry pairs that
    have been filtered will not produce signed distance query results.
 
+   For a geometry pair (A, B), the returned results will always be reported in
+   a fixed order (e.g., always (A, B) and never (B, A)). The _basis_ for the
+   ordering is arbitrary (and therefore undocumented), but guaranteed to be
+   fixed and repeatable.
+
    Notice that this is an O(N²) operation, where N
    is the number of geometries remaining in the world after applying collision
    filter. We report the distance between dynamic objects, and between dynamic
@@ -259,11 +320,22 @@ class QueryObject {
 
    @param max_distance  The maximum distance at which distance data is reported.
 
-   @returns The signed distance for all unfiltered geometry pairs whose distance
-            is less than or equal to `max_distance`.  */
+   @returns The signed distance (and supporting data) for all unfiltered
+            geometry pairs whose distance is less than or equal to
+            `max_distance`.  */
   std::vector<SignedDistancePair<T>> ComputeSignedDistancePairwiseClosestPoints(
       const double max_distance =
           std::numeric_limits<double>::infinity()) const;
+
+  /** A variant of ComputeSignedDistancePairwiseClosestPoints() which computes
+   the signed distance (and witnesses) between a specific pair of geometries
+   indicated by id. This function has the same restrictions on scalar report
+   as ComputeSignedDistancePairwiseClosestPoints().
+
+   @throws if either geometry id is invalid, or if the pair (id_A, id_B) has
+           been marked as filtered.  */
+  SignedDistancePair<T> ComputeSignedDistancePairClosestPoints(
+      GeometryId id_A, GeometryId id_B) const;
 
   // TODO(DamrongGuoy): Improve and refactor documentation of
   // ComputeSignedDistanceToPoint(). Move the common sections into Signed
@@ -347,6 +419,70 @@ class QueryObject {
                                = std::numeric_limits<double>::infinity()) const;
   //@}
 
+
+  //---------------------------------------------------------------------------
+  /**
+   @anchor render_queries
+   @name                Render Queries
+
+   The methods support queries along the lines of "What do I see?" They support
+   simulation of sensors. External entities define a sensor camera -- its
+   extrinsic and intrinsic properties and %QueryObject renders into the
+   provided image.
+
+   <!-- TODO(SeanCurtis-TRI): Currently, pose is requested as a transform of
+   double. This puts the burden on the caller to be compatible. Provide
+   specializations for AutoDiff and symbolic (the former extracts a
+   double-valued transform and the latter throws). -->
+   */
+  //@{
+
+  /** Renders an RGB image for the given `camera` posed with respect to the
+   indicated parent frame P.
+
+   @param camera                The intrinsic properties of the camera.
+   @param parent_frame          The id for the camera's parent frame.
+   @param X_PC                  The pose of the camera body in the world frame.
+   @param show_window           If true, the render window will be displayed.
+   @param[out] color_image_out  The rendered color image. */
+  void RenderColorImage(const render::CameraProperties& camera,
+                        FrameId parent_frame,
+                        const math::RigidTransformd& X_PC,
+                        bool show_window,
+                        systems::sensors::ImageRgba8U* color_image_out) const;
+
+  /** Renders a depth image for the given `camera` posed with respect to the
+   indicated parent frame P.
+
+   In contrast to the other rendering methods, rendering depth images doesn't
+   provide the option to display the window; generally, basic depth images are
+   not readily communicative to humans.
+
+   @param camera                The intrinsic properties of the camera.
+   @param parent_frame          The id for the camera's parent frame.
+   @param X_PC                  The pose of the camera body in the world frame.
+   @param[out] depth_image_out  The rendered depth image. */
+  void RenderDepthImage(const render::DepthCameraProperties& camera,
+                        FrameId parent_frame,
+                        const math::RigidTransformd& X_PC,
+                        systems::sensors::ImageDepth32F* depth_image_out) const;
+
+  /** Renders a label image for the given `camera` posed with respect to the
+   indicated parent frame P.
+
+   @param camera                The intrinsic properties of the camera.
+   @param parent_frame          The id for the camera's parent frame.
+   @param X_PC                  The pose of the camera body in the world frame.
+   @param show_window           If true, the render window will be displayed.
+   @param[out] label_image_out  The rendered label image. */
+  void RenderLabelImage(const render::CameraProperties& camera,
+                        FrameId parent_frame,
+                        const math::RigidTransformd& X_PC,
+                        bool show_window,
+                        systems::sensors::ImageLabel16I* label_image_out) const;
+
+  //@}
+
  private:
   // SceneGraph is the only class that may call set().
   friend class SceneGraph<T>;
@@ -372,6 +508,7 @@ class QueryObject {
   // Update all poses. This method does no work if this is a "baked" query
   // object (see class docs for discussion).
   void FullPoseUpdate() const {
+    // TODO(SeanCurtis-TRI): Modify this when the cache system is in place.
     if (scene_graph_) scene_graph_->FullPoseUpdate(*context_);
   }
 

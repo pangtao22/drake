@@ -128,9 +128,10 @@ class Frame : public FrameBase<T> {
   /// obtain the spatial velocity for a body frame.
   SpatialVelocity<T> CalcSpatialVelocityInWorld(
       const systems::Context<T>& context) const {
-    const math::RigidTransform<T>& X_WB = body().EvalPoseInWorld(context);
-    const Vector3<T> p_BF = CalcPoseInBodyFrame(context).translation();
-    const Vector3<T> p_BF_W = X_WB.linear() * p_BF;
+    const math::RotationMatrix<T>& R_WB =
+        body().EvalPoseInWorld(context).rotation();
+    const Vector3<T> p_BF_B = CalcPoseInBodyFrame(context).translation();
+    const Vector3<T> p_BF_W = R_WB * p_BF_B;
     const SpatialVelocity<T>& V_WB = body().EvalSpatialVelocityInWorld(context);
     const SpatialVelocity<T> V_WF = V_WB.Shift(p_BF_W);
     return V_WF;
@@ -143,10 +144,10 @@ class Frame : public FrameBase<T> {
   SpatialVelocity<T> CalcSpatialVelocity(
       const systems::Context<T>& context,
       const Frame<T>& frame_M, const Frame<T>& frame_E) const {
-    const Matrix3<T> R_WM = frame_M.CalcPoseInWorld(context).linear();
-    const Vector3<T> p_MF =
-        this->CalcPose(context, frame_M).translation();
-    const Vector3<T> p_MF_W = R_WM * p_MF;
+    const math::RotationMatrix<T> R_WM =
+        frame_M.CalcPoseInWorld(context).rotation();
+    const Vector3<T> p_MF_M = this->CalcPose(context, frame_M).translation();
+    const Vector3<T> p_MF_W = R_WM * p_MF_M;
     const SpatialVelocity<T> V_WM = frame_M.CalcSpatialVelocityInWorld(context);
     const SpatialVelocity<T> V_WF = this->CalcSpatialVelocityInWorld(context);
     // We obtain V_MF from the composition of spatial velocities:
@@ -177,7 +178,7 @@ class Frame : public FrameBase<T> {
   /// instance.
   explicit Frame(
       const std::string& name, const Body<T>& body,
-      optional<ModelInstanceIndex> model_instance = {})
+      std::optional<ModelInstanceIndex> model_instance = {})
       : FrameBase<T>(model_instance.value_or(body.model_instance())),
         name_(name), body_(body) {}
 
@@ -210,7 +211,7 @@ class Frame : public FrameBase<T> {
   /// @}
 
  private:
-  // Implementation for MultibodyTreeElement::DoSetTopology().
+  // Implementation for MultibodyElement::DoSetTopology().
   void DoSetTopology(const internal::MultibodyTreeTopology& tree_topology)
   final {
     topology_ = tree_topology.get_frame(this->index());

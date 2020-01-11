@@ -73,10 +73,11 @@ class RotationMatrix {
   /// exception is thrown if `quaternion` is zero or contains a NaN or infinity.
   /// @note This method has the effect of normalizing its `quaternion` argument,
   /// without the inefficiency of the square-root associated with normalization.
-  // TODO(mitiguy) Although this method is fairly efficient, consider adding an
-  // optional second argument if `quaternion` is known to be normalized apriori
-  // or for some reason the calling site does not want `quaternion` normalized.
   explicit RotationMatrix(const Eigen::Quaternion<T>& quaternion) {
+    // TODO(mitiguy) Although this method is fairly efficient, consider adding
+    // an optional second argument if `quaternion` is known to be normalized
+    // apriori or for some reason the calling site does not want `quaternion`
+    // normalized.
     // Cost for various way to create a rotation matrix from a quaternion.
     // Eigen quaternion.toRotationMatrix() = 12 multiplies, 12 adds.
     // Drake  QuaternionToRotationMatrix() = 12 multiplies, 12 adds.
@@ -86,6 +87,10 @@ class RotationMatrix {
     set(QuaternionToRotationMatrix(quaternion, two_over_norm_squared));
   }
 
+  // @internal In general, the %RotationMatrix constructed by passing a non-unit
+  // `lambda` to this method is different than the %RotationMatrix produced by
+  // converting `lambda` to an un-normalized quaternion and calling the
+  // %RotationMatrix constructor (above) with that un-normalized quaternion.
   /// Constructs a %RotationMatrix from an Eigen::AngleAxis.
   /// @param[in] theta_lambda an Eigen::AngleAxis whose associated axis (vector
   /// direction herein called `lambda`) is non-zero and finite, but which may or
@@ -93,20 +98,16 @@ class RotationMatrix {
   /// @throws std::logic_error in debug builds if the rotation matrix
   /// R that is built from `theta_lambda` fails IsValid(R).  For example, an
   /// exception is thrown if `lambda` is zero or contains a NaN or infinity.
-  // @internal In general, the %RotationMatrix constructed by passing a non-unit
-  // `lambda` to this method is different than the %RotationMatrix produced by
-  // converting `lambda` to an un-normalized quaternion and calling the
-  // %RotationMatrix constructor (above) with that un-normalized quaternion.
-  // TODO(mitiguy) Consider adding an optional second argument if `lambda` is
-  // known to be normalized apriori or calling site does not want normalization.
   explicit RotationMatrix(const Eigen::AngleAxis<T>& theta_lambda) {
+    // TODO(mitiguy) Consider adding an optional second argument if `lambda` is
+    // known to be normalized apriori or calling site does not want
+    // normalization.
     const Vector3<T>& lambda = theta_lambda.axis();
     const T norm = lambda.norm();
     const T& theta = theta_lambda.angle();
     set(Eigen::AngleAxis<T>(theta, lambda / norm).toRotationMatrix());
   }
 
-  // TODO(@mitiguy) Add Sherm/Goldstein's way to visualize rotation sequences.
   /// Constructs a %RotationMatrix from an %RollPitchYaw.  In other words,
   /// makes the %RotationMatrix for a Space-fixed (extrinsic) X-Y-Z rotation by
   /// "roll-pitch-yaw" angles `[r, p, y]`, which is equivalent to a Body-fixed
@@ -136,7 +137,12 @@ class RotationMatrix {
   /// @li 3rd rotation R_AB: Frames D, C, B (collectively -- as if welded)
   /// rotate relative to frame A by a roll angle `y` about `Bz = Az`.
   /// Note: B and A are no longer aligned.
+  /// @note This method constructs a RotationMatrix from a RollPitchYaw.
+  /// Vice-versa, there are high-accuracy RollPitchYaw constructor/methods that
+  /// form a RollPitchYaw from a rotation matrix.
   explicit RotationMatrix(const RollPitchYaw<T>& rpy) {
+    // TODO(@mitiguy) Add publically viewable documentation on how Sherm and
+    // Goldstein like to visualize/conceptualize rotation sequences.
     const T& r = rpy.roll_angle();
     const T& p = rpy.pitch_angle();
     const T& y = rpy.yaw_angle();
@@ -289,6 +295,17 @@ class RotationMatrix {
   /// currently allows cast from type double to AutoDiffXd, but not vice-versa.
   template <typename U>
   RotationMatrix<U> cast() const {
+    // TODO(Mitiguy) Make the RotationMatrix::cast() method more robust.  It is
+    // currently limited by Eigen's cast() for the matrix underlying this class.
+    // Consider the following logic to improve casts (and address issue #11785).
+    // 1. If relevant, use Eigen's underlying cast method.
+    // 2. Strip derivative data when casting from `<AutoDiffXd>` to `<double>`.
+    // 3. Call ExtractDoubleOrThrow() when casting from `<symbolic::Expression>`
+    //    to `<double>`.
+    // 4. The current RotationMatrix::cast() method incurs overhead due to its
+    //    underlying call to a RotationMatrix constructor. Perhaps create
+    //    specialized code to return a reference if casting to the same type,
+    //    e.g., casting from `<double>` to `<double>' should be inexpensive.
     const Matrix3<U> m = R_AB_.template cast<U>();
     return RotationMatrix<U>(m, true);
   }
@@ -391,11 +408,37 @@ class RotationMatrix {
     return RotationMatrix<T>(matrix() * other.matrix(), true);
   }
 
-  /// Calculates `this` rotation matrix R multiplied by an arbitrary Vector3.
-  /// @param[in] v 3x1 vector that post-multiplies `this`.
-  /// @returns 3x1 vector that results from `R * v`.
-  Vector3<T> operator*(const Vector3<T>& v) const {
-    return Vector3<T>(matrix() * v);
+  /// Calculates `this` rotation matrix `R_AB` multiplied by an arbitrary
+  /// Vector3 expressed in the B frame.
+  /// @param[in] v_B 3x1 vector that post-multiplies `this`.
+  /// @returns 3x1 vector `v_A = R_AB * v_B`.
+  Vector3<T> operator*(const Vector3<T>& v_B) const {
+    return Vector3<T>(matrix() * v_B);
+  }
+
+  /// Multiplies `this` %RotationMatrix `R_AB` by the n vectors `v1`, ... `vn`,
+  /// where each vector has 3 elements and is expressed in frame B.
+  /// @param[in] v_B `3 x n` matrix whose n columns are regarded as arbitrary
+  /// vectors `v1`, ... `vn` expressed in frame B.
+  /// @retval v_A `3 x n` matrix whose n columns are vectors `v1`, ... `vn`
+  /// expressed in frame A.
+  /// @code{.cc}
+  /// const RollPitchYaw<double> rpy(0.1, 0.2, 0.3);
+  /// const RotationMatrix<double> R_AB(rpy);
+  /// Eigen::Matrix<double, 3, 2> v_B;
+  /// v_B.col(0) = Vector3d(4, 5, 6);
+  /// v_B.col(1) = Vector3d(9, 8, 7);
+  /// const Eigen::Matrix<double, 3, 2> v_A = R_AB * v_B;
+  /// @endcode
+  template <typename Derived>
+  Eigen::Matrix<typename Derived::Scalar, 3, Derived::ColsAtCompileTime>
+  operator*(const Eigen::MatrixBase<Derived>& v_B) const {
+    if (v_B.rows() != 3) {
+      throw std::logic_error(
+          "Error: Inner dimension for matrix multiplication is not 3.");
+    }
+    // Express vectors in terms of frame A as v_A = R_AB * v_B.
+    return matrix() * v_B;
   }
 
   /// Returns how close the matrix R is to to being a 3x3 orthonormal matrix by
@@ -528,12 +571,14 @@ class RotationMatrix {
   /// valid (orthonormal) rotation matrix.
   /// @note To orthonormalize a 3x3 matrix, use ProjectToRotationMatrix().
   static double get_internal_tolerance_for_orthonormality() {
-    return kInternalToleranceForOrthonormality_;
+    return kInternalToleranceForOrthonormality;
   }
 
   /// Returns a quaternion q that represents `this` %RotationMatrix.  Since the
   /// quaternion `q` and `-q` represent the same %RotationMatrix, this method
   /// chooses to return a canonical quaternion, i.e., with q(0) >= 0.
+  /// @note There is a constructor in the RollPitchYaw class that converts
+  /// a rotation matrix to roll-pitch-yaw angles.
   Eigen::Quaternion<T> ToQuaternion() const { return ToQuaternion(R_AB_); }
 
   /// Returns a unit quaternion q associated with the 3x3 matrix M.  Since the
@@ -598,7 +643,7 @@ class RotationMatrix {
 
   // Declares the allowable tolerance (small multiplier of double-precision
   // epsilon) used to check whether or not a rotation matrix is orthonormal.
-  static constexpr double kInternalToleranceForOrthonormality_{
+  static constexpr double kInternalToleranceForOrthonormality{
       128 * std::numeric_limits<double>::epsilon() };
 
   // Constructs a RotationMatrix without initializing the underlying 3x3 matrix.
@@ -1025,8 +1070,8 @@ RotationMatrix<T>::ThrowIfNotValid(const Matrix3<S>& R) {
     const T measure_of_orthonormality = GetMeasureOfOrthonormality(R);
     const double measure = ExtractDoubleOrThrow(measure_of_orthonormality);
     std::string message = fmt::format(
-        "Error: Rotation matrix is not orthonormal."
-        "  Measure of orthonormality error: {:G}  (near-zero is good)."
+        "Error: Rotation matrix is not orthonormal.\n"
+        "  Measure of orthonormality error: {:G}  (near-zero is good).\n"
         "  To calculate the proper orthonormal rotation matrix closest to"
         " the alleged rotation matrix, use the SVD (expensive) method"
         " RotationMatrix::ProjectToRotationMatrix(), or for a less expensive"

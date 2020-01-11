@@ -1,13 +1,14 @@
 #pragma once
 
+#include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include <Eigen/Core>
 #include <Eigen/Sparse>
 
 #include "drake/common/drake_copyable.h"
-#include "drake/common/drake_variant.h"
 #include "drake/common/type_safe_index.h"
 #include "drake/solvers/mathematical_program.h"
 
@@ -119,8 +120,8 @@ class SdpaFreeFormat {
 
   using FreeVariableIndex = TypeSafeIndex<class FreeVariableTag>;
 
-  const std::vector<variant<DecisionVariableInSdpaX, FreeVariableIndex, double,
-                            std::nullptr_t>>&
+  const std::vector<std::variant<DecisionVariableInSdpaX, FreeVariableIndex,
+                                 double, std::nullptr_t>>&
   prog_var_in_sdpa() const {
     return prog_var_in_sdpa_;
   }
@@ -253,6 +254,10 @@ class SdpaFreeFormat {
 
   void AddLinearMatrixInequalityConstraints(const MathematicalProgram& prog);
 
+  void AddLorentzConeConstraints(const MathematicalProgram& prog);
+
+  void AddRotatedLorentzConeConstraints(const MathematicalProgram& prog);
+
   // Called at the end of the constructor.
   void Finalize();
 
@@ -276,7 +281,7 @@ class SdpaFreeFormat {
    * We use std::nullptr_t to indicate that this variable hasn't been registered
    * into SDPA free format yet.
    */
-  std::vector<variant<DecisionVariableInSdpaX, FreeVariableIndex, double,
+  std::vector<std::variant<DecisionVariableInSdpaX, FreeVariableIndex, double,
                       std::nullptr_t>>
       prog_var_in_sdpa_;
 
@@ -290,5 +295,32 @@ class SdpaFreeFormat {
   Eigen::SparseMatrix<double> d_;
 };
 }  // namespace internal
+
+/**
+ * SDPA is a format to record an SDP problem
+ *
+ *     max tr(C*X)
+ *     s.t tr(Aᵢ*X) = gᵢ
+ *         X ≽ 0
+ * or the dual of the problem
+ *
+ *     min gᵀy
+ *     s.t ∑ᵢ yᵢAᵢ - C ≽ 0
+ * where X is a symmetric block diagonal matrix.
+ * The format is described in http://plato.asu.edu/ftp/sdpa_format.txt. Many
+ * solvers, such as CSDP, DSDP, SDPA, sedumi and SDPT3, accept an SDPA format
+ * file as the input.
+ * This function reads a MathematicalProgram that can be formulated as above,
+ * and write an SDPA file.
+ * @param prog a program that contains an optimization program.
+ * @param file_name The name of the file, note that the extension will be added
+ * automatically.
+ * @retval is_success. Returns true if we can generate the SDPA file. The
+ * failure could be
+ * 1. @p prog cannot be captured by the formulation above.
+ * 2. @p prog cannot create a file with the given name, etc.
+ */
+bool GenerateSDPA(const MathematicalProgram& prog,
+                  const std::string& file_name);
 }  // namespace solvers
 }  // namespace drake

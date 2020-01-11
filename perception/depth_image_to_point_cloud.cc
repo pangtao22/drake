@@ -1,12 +1,11 @@
 #include "drake/perception/depth_image_to_point_cloud.h"
 
 #include <limits>
+#include <optional>
 
-#include "drake/common/drake_optional.h"
 #include "drake/common/drake_throw.h"
 #include "drake/common/never_destroyed.h"
 
-using Eigen::Isometry3f;
 using Eigen::Matrix3Xf;
 using Eigen::Vector3f;
 using drake::AbstractValue;
@@ -48,7 +47,7 @@ const AbstractValue& GetModelValue(PixelType pixel_type) {
 // cloud output? (This would require adding support for colored point clouds,
 // because current implementation assume that an RGB image will still line up).
 template <PixelType pixel_type>
-void DoConvert(const optional<pc_flags::BaseFieldT>& exact_base_fields,
+void DoConvert(const std::optional<pc_flags::BaseFieldT>& exact_base_fields,
                const CameraInfo& camera_info,
                const RigidTransformd* const camera_pose,
                const Image<pixel_type>& depth_image,
@@ -65,7 +64,7 @@ void DoConvert(const optional<pc_flags::BaseFieldT>& exact_base_fields,
     output->resize(depth_image.size(), skip_initialize);
   }
   Eigen::Ref<Matrix3Xf> output_xyz = output->mutable_xyzs();
-  optional<Eigen::Ref<Matrix3X<uint8_t>>> output_rgb;
+  std::optional<Eigen::Ref<Matrix3X<uint8_t>>> output_rgb;
   if (color_image) {
     output_rgb = output->mutable_rgbs();
   }
@@ -76,9 +75,8 @@ void DoConvert(const optional<pc_flags::BaseFieldT>& exact_base_fields,
   const float cy = camera_info.center_y();
   const float fx_inv = 1.f / camera_info.focal_x();
   const float fy_inv = 1.f / camera_info.focal_y();
-  const Isometry3f X_PC = camera_pose
-                              ? camera_pose->GetAsIsometry3().cast<float>()
-                              : Isometry3f::Identity();
+  const math::RigidTransform<float> X_PC = (camera_pose != nullptr) ?
+      camera_pose->cast<float>() : math::RigidTransform<float>::Identity();
 
   for (int v = 0; v < height; ++v) {
     for (int u = 0; u < width; ++u) {
@@ -137,22 +135,22 @@ DepthImageToPointCloud::DepthImageToPointCloud(
 
 void DepthImageToPointCloud::Convert(
     const systems::sensors::CameraInfo& camera_info,
-    const optional<math::RigidTransformd>& camera_pose,
+    const std::optional<math::RigidTransformd>& camera_pose,
     const systems::sensors::ImageDepth32F& depth_image,
-    const optional<systems::sensors::ImageRgba8U>& color_image,
-    const optional<float>& scale, PointCloud* output) {
-  DoConvert(nullopt, camera_info, camera_pose ? &*camera_pose : nullptr,
+    const std::optional<systems::sensors::ImageRgba8U>& color_image,
+    const std::optional<float>& scale, PointCloud* output) {
+  DoConvert(std::nullopt, camera_info, camera_pose ? &*camera_pose : nullptr,
             depth_image, color_image ? &*color_image : nullptr,
             scale.value_or(1.0f), output);
 }
 
 void DepthImageToPointCloud::Convert(
     const systems::sensors::CameraInfo& camera_info,
-    const optional<math::RigidTransformd>& camera_pose,
+    const std::optional<math::RigidTransformd>& camera_pose,
     const systems::sensors::ImageDepth16U& depth_image,
-    const optional<systems::sensors::ImageRgba8U>& color_image,
-    const optional<float>& scale, PointCloud* output) {
-  DoConvert(nullopt, camera_info, camera_pose ? &*camera_pose : nullptr,
+    const std::optional<systems::sensors::ImageRgba8U>& color_image,
+    const std::optional<float>& scale, PointCloud* output) {
+  DoConvert(std::nullopt, camera_info, camera_pose ? &*camera_pose : nullptr,
             depth_image, color_image ? &*color_image : nullptr,
             scale.value_or(1.0f), output);
 }

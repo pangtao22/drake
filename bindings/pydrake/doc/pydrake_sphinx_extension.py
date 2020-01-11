@@ -6,13 +6,10 @@ For guidance, see:
  - http://www.sphinx-doc.org/en/master/extdev/appapi.html#sphinx.application.Sphinx.add_autodocumenter  # noqa
 """
 
-# TODO(eric.cousineau): Fix for Sphinx >= 2.0.0 per comment in
-# `mac/.../requirements.txt`, most likely due to `IrregularExpression` hack.
 # TODO(eric.cousineau): How to document only protected methods?
 # e.g. `LeafSystem` only consists of private things to overload, but it's
 # important to be user-visible.
 
-from __future__ import print_function
 
 from collections import namedtuple
 import re
@@ -157,7 +154,12 @@ class TemplateDocumenter(autodoc.ModuleLevelDocumenter):
         """Overrides base to show template objects given the correct module."""
         if self.options.imported_members:
             return True
-        return self.object._module_name == self.modname
+        scope = self.object._scope
+        if isinstance(scope, type):
+            module_name = scope.__module__
+        else:
+            module_name = scope.__name__
+        return module_name == self.modname
 
     def add_directive_header(self, sig):
         """Overrides base to add a line to indicate instantiations."""
@@ -242,6 +244,9 @@ def autodoc_skip_member(app, what, name, obj, skip, options):
     # did not work. Revisit this at some point.
     if "__del__" in name:
         return True
+    # In order to work around #11954.
+    if "__init__" in name:
+        return False
     return None
 
 

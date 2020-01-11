@@ -419,7 +419,7 @@ void TestQPonUnitBallExample(const SolverInterface& solver) {
           (x_desired(0) + x_desired(1) + 1.0) / 2.0;
     }
 
-    optional<Eigen::VectorXd> initial_guess;
+    std::optional<Eigen::VectorXd> initial_guess;
     if (solver.solver_id() == SnoptSolver::id()) {
       initial_guess.emplace(Eigen::VectorXd::Zero(2));
     }
@@ -427,7 +427,14 @@ void TestQPonUnitBallExample(const SolverInterface& solver) {
         RunSolver(prog, solver, initial_guess);
     const auto& x_value = result.GetSolution(x);
 
-    EXPECT_TRUE(CompareMatrices(x_value, x_expected, 1e-4,
+    const SolverType solver_type =
+        SolverTypeConverter::IdToType(result.get_solver_id()).value();
+    double tol = 1E-4;
+    if (solver_type == SolverType::kMosek) {
+      // Regression from MOSEK 8.1 to MOSEK 9.0.
+      tol = 2E-4;
+    }
+    EXPECT_TRUE(CompareMatrices(x_value, x_expected, tol,
                                 MatrixCompareType::absolute));
   }
 

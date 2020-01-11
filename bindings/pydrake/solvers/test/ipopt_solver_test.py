@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function
-
 import unittest
 import warnings
 
@@ -29,6 +27,9 @@ class TestIpoptSolver(unittest.TestCase):
         result = solver.Solve(prog, None, None)
         self.assertTrue(result.is_success())
         self.assertTrue(np.allclose(result.GetSolution(x), x_expected))
+        self.assertEqual(result.get_solver_details().status, 0)
+        self.assertEqual(result.get_solver_details().ConvertStatusToString(),
+                         "Success")
 
     def unavailable(self):
         """Per the BUILD file, this test is only run when IPOPT is disabled."""

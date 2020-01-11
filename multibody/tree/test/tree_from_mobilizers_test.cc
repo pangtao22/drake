@@ -1,3 +1,4 @@
+#include "drake/common/test_utilities/expect_no_throw.h"
 // clang-format: off
 #include "drake/multibody/tree/multibody_tree-inl.h"
 // clang-format: on
@@ -367,7 +368,7 @@ TEST_F(PendulumTests, CreateModelBasics) {
 
   // We need to Finalize() our model before testing the elbow mobilizer was
   // created correctly. Joint implementations are created at Finalize().
-  ASSERT_NO_THROW(model_->Finalize());
+  DRAKE_ASSERT_NO_THROW(model_->Finalize());
   elbow_mobilizer_ = JointTester::get_mobilizer(*elbow_joint_);
 
   EXPECT_EQ(model_->num_mobilizers(), 2);
@@ -423,7 +424,7 @@ TEST_F(PendulumTests, Finalize) {
   CreatePendulumModel();
   // Finalize() stage.
   EXPECT_FALSE(model_->topology_is_valid());  // Not valid before Finalize().
-  EXPECT_NO_THROW(model_->Finalize());
+  DRAKE_EXPECT_NO_THROW(model_->Finalize());
   EXPECT_TRUE(model_->topology_is_valid());  // Valid after Finalize().
 
   // Asserts that no more multibody elements can be added after finalize.
@@ -476,13 +477,13 @@ TEST_F(PendulumTests, CreateContext) {
   EXPECT_EQ(model_->num_bodies(), 3);
 
   // Finalize() stage.
-  EXPECT_NO_THROW(model_->Finalize());
+  DRAKE_EXPECT_NO_THROW(model_->Finalize());
   EXPECT_TRUE(model_->topology_is_valid());  // Valid after Finalize().
 
   // Create Context.
   MultibodyTreeSystem<double> system(std::move(model_));
   std::unique_ptr<Context<double>> context;
-  EXPECT_NO_THROW(context = system.CreateDefaultContext());
+  DRAKE_EXPECT_NO_THROW(context = system.CreateDefaultContext());
 
   // Tests MultibodyTree state accessors.
   const auto& tree = GetInternalTree(system);
@@ -1340,23 +1341,25 @@ TEST_F(PendulumKinematicTests, PointsPositionsAndRelativeTransform) {
   EXPECT_TRUE(CompareMatrices(
       p_WPi_set, p_WPi_set_expected, kTolerance, MatrixCompareType::relative));
 
-  const RigidTransformd X_UL(tree().CalcRelativeTransform(
-      *context_, upper_link_->body_frame(), lower_link_->body_frame()));
-  const Vector3d p_UL = X_UL.translation();
-  const RotationMatrixd R_UL = X_UL.rotation();
-
   const Vector3d p_UL_expected(0.0, -0.5, 0.0);
   const Matrix3d R_UL_expected(Eigen::AngleAxisd(M_PI_4, Vector3d::UnitZ()));
 
-  EXPECT_TRUE(CompareMatrices(
-      p_UL, p_UL_expected, kTolerance, MatrixCompareType::relative));
-  EXPECT_TRUE(CompareMatrices(
-      R_UL.matrix(), R_UL_expected, kTolerance, MatrixCompareType::relative));
+  // Verify the RotationMatrix and position returned by CalcRelativeTransform().
+  const RigidTransformd X_UL(tree().CalcRelativeTransform(
+      *context_, upper_link_->body_frame(), lower_link_->body_frame()));
+  EXPECT_TRUE(CompareMatrices(X_UL.rotation().matrix(), R_UL_expected,
+                              kTolerance, MatrixCompareType::relative));
+  EXPECT_TRUE(CompareMatrices(X_UL.translation(), p_UL_expected,
+                              kTolerance, MatrixCompareType::relative));
+
+  // Verify the RotationMatrix returned by CalcRelativeRotationMatrix().
+  const RotationMatrixd R_UL = tree().CalcRelativeRotationMatrix(
+      *context_, upper_link_->body_frame(), lower_link_->body_frame());
+  EXPECT_TRUE(CompareMatrices(R_UL.matrix(), R_UL_expected,
+                              kTolerance, MatrixCompareType::relative));
 }
 
 TEST_F(PendulumKinematicTests, PointsHaveTheWrongSize) {
-  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
-
   shoulder_mobilizer_->set_angle(context_.get(), M_PI / 4.0);
   elbow_mobilizer_->set_angle(context_.get(), M_PI / 4.0);
 

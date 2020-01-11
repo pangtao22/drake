@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <memory>
 #include <typeinfo>
 #include <unordered_map>
@@ -30,7 +31,7 @@ namespace solvers {
  */
 double GetVariableValue(
     const symbolic::Variable& var,
-    const optional<std::unordered_map<symbolic::Variable::Id, int>>&
+    const std::optional<std::unordered_map<symbolic::Variable::Id, int>>&
         variable_index,
     const Eigen::Ref<const Eigen::VectorXd>& variable_values);
 
@@ -45,7 +46,7 @@ typename std::enable_if_t<
                   Derived::ColsAtCompileTime>>
 GetVariableValue(
     const Eigen::MatrixBase<Derived>& var,
-    const optional<std::unordered_map<symbolic::Variable::Id, int>>&
+    const std::optional<std::unordered_map<symbolic::Variable::Id, int>>&
         variable_index,
     const Eigen::Ref<const Eigen::VectorXd>& variable_values) {
   Eigen::Matrix<double, Derived::RowsAtCompileTime, Derived::ColsAtCompileTime>
@@ -85,11 +86,14 @@ class MathematicalProgramResult final {
   /**
    * Sets decision_variable_index mapping, that maps each decision variable to
    * its index in the aggregated vector containing all decision variables in
-   * MathematicalProgram.
+   * MathematicalProgram. Initialize x_val to NAN.
    */
   void set_decision_variable_index(
       std::unordered_map<symbolic::Variable::Id, int> decision_variable_index) {
     decision_variable_index_ = std::move(decision_variable_index);
+    x_val_ =
+        Eigen::VectorXd::Constant(decision_variable_index_->size(),
+                                  std::numeric_limits<double>::quiet_NaN());
   }
 
   /** Sets SolutionResult. */
@@ -305,7 +309,7 @@ class MathematicalProgramResult final {
   //@}
 
  private:
-  optional<std::unordered_map<symbolic::Variable::Id, int>>
+  std::optional<std::unordered_map<symbolic::Variable::Id, int>>
       decision_variable_index_{};
   SolutionResult solution_result_{};
   Eigen::VectorXd x_val_;

@@ -73,33 +73,24 @@ The following table shows the configurations and platforms that Drake
 officially supports. Supported configurations are tested in continuous
 integration. All other configurations are provided on a best-effort basis.
 
-Drake requires a compiler running in C++14 mode or greater. MATLAB is only
-supported for CMake builds using the "Unix Makefiles" generator.
+Drake requires a compiler running in C++17 mode.
 
-+----------------------------------+-------+-------+---------------------+------------+-------------------+--------+
-| Operating System                 | Bazel | CMake | C/C++ Compiler      | Java       | MATLAB (Optional) | Python |
-+==================================+=======+=======+=====================+============+===================+========+
-+----------------------------------+-------+-------+---------------------+------------+-------------------+--------+
-| Ubuntu 16.04 LTS (Xenial Xerus)  | 0.25  | 3.5   | | Clang 6.0         | OpenJDK 8  | R2017a            | 2.7    |
-|                                  |       |       | | GCC 5.4           |            |                   |        |
-+----------------------------------+       +-------+---------------------+------------+-------------------+--------+
-| Ubuntu 18.04 LTS (Bionic Beaver) |       | 3.10  | | Clang 6.0         | OpenJDK 11 | R2018b            | | 2.7  |
-|                                  |       |       | | GCC 7.3           |            |                   | | 3.6  |
-+----------------------------------+       +-------+---------------------+------------+                   +--------+
-| macOS High Sierra (10.13)        |       | 3.14  | | Apple LLVM 10.0.0 | Oracle 12  |                   | | 2.7  |
-|                                  |       |       | | (Xcode 10.1)      |            |                   | | 3.7  |
-+----------------------------------+       |       +---------------------+            |                   |        |
-| macOS Mojave (10.14)             |       |       | | Apple LLVM 10.0.1 |            |                   |        |
-|                                  |       |       | | (Xcode 10.2)      |            |                   |        |
-+----------------------------------+-------+-------+---------------------+------------+-------------------+--------+
++----------------------------------+-------+-------+---------------------+-------------------+--------+
+| Operating System                 | Bazel | CMake | C/C++ Compiler      | Java              | Python |
++==================================+=======+=======+=====================+===================+========+
++----------------------------------+-------+-------+---------------------+-------------------+--------+
+| Ubuntu 18.04 LTS (Bionic Beaver) | 2.0   | 3.10  | | Clang 6.0         | OpenJDK 11        | 3.6    |
+|                                  |       |       | | GCC 7.4 (default) |                   |        |
++----------------------------------+       +-------+---------------------+-------------------+--------+
+| macOS Mojave (10.14)             |       | 3.16  | | Apple LLVM 11.0.0 | | AdoptOpenJDK 13 | 3.7    |
+|                                  |       |       | | (Xcode 11.3)      | | (HotSpot JVM)   |        |
++----------------------------------+       |       |                     |                   |        |
+| macOS Catalina (10.15)           |       |       |                     |                   |        |
+|                                  |       |       |                     |                   |        |
++----------------------------------+-------+-------+---------------------+-------------------+--------+
 
-CPython is the only Python implementation supported. On all platforms, Python 2.7
-is the default version. On Ubuntu, amd64 (i.e., x86_64) is the only supported
-architecture.
-
-The following configurations are presently untested in continuous integration:
-
--   macOS, Ubuntu Bionic: MATLAB
+CPython is the only Python implementation supported. On Ubuntu, amd64
+(i.e., x86_64) is the only supported architecture.
 
 .. _configuration-management-non-determinism:
 
@@ -128,8 +119,8 @@ to :ref:`ask for help <getting_help>`.
 Binary Packages
 ---------------
 
-The binary releases of Drake are built with GCC 5.4 on Ubuntu Xenial, GCC 7.3
-on Ubuntu Bionic, and Apple LLVM 10.0.1 on macOS Mojave.
+The binary releases of Drake are built with GCC 7.4 on Ubuntu Bionic, and Apple
+LLVM 11.0.0 on macOS Mojave.
 
 The links for these packages are listed in :ref:`binary-installation`.
 
@@ -334,4 +325,4 @@ Version Control
     :maxdepth: 1
 
     no_push_to_origin
-
+    model_version_control

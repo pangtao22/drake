@@ -3,6 +3,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <vtkActor.h>
@@ -103,7 +104,7 @@ class RenderEngineVtk final : public RenderEngine,
       const RenderEngineVtkParams& parameters = RenderEngineVtkParams());
 
   /** @see RenderEngine::UpdateViewpoint().  */
-  void UpdateViewpoint(const math::RigidTransformd& X_WR) const final;
+  void UpdateViewpoint(const math::RigidTransformd& X_WR) final;
 
   /** @see RenderEngine::RenderColorImage().  */
   void RenderColorImage(
@@ -122,10 +123,13 @@ class RenderEngineVtk final : public RenderEngine,
 
   /** @name    Shape reification  */
   //@{
+  using RenderEngine::ImplementGeometry;
   void ImplementGeometry(const Sphere& sphere, void* user_data) final;
   void ImplementGeometry(const Cylinder& cylinder, void* user_data) final;
   void ImplementGeometry(const HalfSpace& half_space, void* user_data) final;
   void ImplementGeometry(const Box& box, void* user_data) final;
+  void ImplementGeometry(const Capsule& capsule, void* user_data) final;
+  void ImplementGeometry(const Ellipsoid& ellipsoid, void* user_data) final;
   void ImplementGeometry(const Mesh& mesh, void* user_data) final;
   void ImplementGeometry(const Convex& convex, void* user_data) final;
   //@}
@@ -140,22 +144,20 @@ class RenderEngineVtk final : public RenderEngine,
 
   using RenderEngine::default_render_label;
 
-  // TODO(SeanCurtis-TRI): Provide a means to set the default clear color.
-
   //@}
 
  private:
   // @see RenderEngine::DoRegisterVisual().
-  optional<RenderIndex> DoRegisterVisual(
-      const Shape& shape, const PerceptionProperties& properties,
+  bool DoRegisterVisual(
+      GeometryId id, const Shape& shape, const PerceptionProperties& properties,
       const math::RigidTransformd& X_WG) final;
 
   // @see RenderEngine::DoUpdateVisualPose().
-  void DoUpdateVisualPose(RenderIndex index,
+  void DoUpdateVisualPose(GeometryId id,
                           const math::RigidTransformd& X_WG) final;
 
   // @see RenderEngine::DoRemoveGeometry().
-  optional<RenderIndex> DoRemoveGeometry(RenderIndex index) final;
+  bool DoRemoveGeometry(GeometryId id) final;
 
   // @see RenderEngine::DoClone().
   std::unique_ptr<RenderEngine> DoClone() const final;
@@ -217,12 +219,16 @@ class RenderEngineVtk final : public RenderEngine,
   // prevent undesirable behaviors if used in multi-threaded application.
   static vtkNew<internal::ShaderCallback> uniform_setting_callback_;
 
-  // The collection of per-geometry actors (one actor per pipeline (color,
-  // depth, and label) indexed by the geometry's RenderIndex.
-  std::vector<std::array<vtkSmartPointer<vtkActor>, 3>> actors_;
-
   // Obnoxious bright orange.
   Eigen::Vector4d default_diffuse_{0.9, 0.45, 0.1, 1.0};
+
+  // The color to clear the color buffer to.
+  systems::sensors::ColorD default_clear_color_;
+
+  // The collection of per-geometry actors (one actor per pipeline (color,
+  // depth, and label) keyed by the geometry's GeometryId.
+  std::unordered_map<GeometryId, std::array<vtkSmartPointer<vtkActor>, 3>>
+      actors_;
 };
 
 }  // namespace render

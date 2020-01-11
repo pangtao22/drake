@@ -5,7 +5,6 @@
 #include "pybind11/stl.h"
 
 #include "drake/bindings/pydrake/common/deprecation_pybind.h"
-#include "drake/bindings/pydrake/common/drake_optional_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
 #include "drake/lcm/drake_lcm.h"
@@ -32,7 +31,7 @@ PYBIND11_MODULE(lcm, m) {
         // wreak havoc on the Python GIL with a callback.
         .def("Publish",
             [](Class* self, const std::string& channel, py::bytes buffer,
-                optional<double> time_sec) {
+                std::optional<double> time_sec) {
               // TODO(eric.cousineau): See if there is a way to extra the raw
               // bytes from `buffer` without copying.
               std::string str = buffer;
@@ -49,28 +48,8 @@ PYBIND11_MODULE(lcm, m) {
     constexpr auto& cls_doc = doc.DrakeLcm;
     py::class_<Class, DrakeLcmInterface>(m, "DrakeLcm", cls_doc.doc)
         .def(py::init<>(), cls_doc.ctor.doc_0args)
-        .def(
-            py::init<std::string>(), py::arg("lcm_url"), cls_doc.ctor.doc_1args)
-        .def("StartReceiveThread",
-            [](DrakeLcm* self) {
-              WarnDeprecated(
-                  "Call DrakeLcm.HandleSubscriptions periodically instead.");
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-              self->StartReceiveThread();
-#pragma GCC diagnostic pop
-            },
-            cls_doc.StartReceiveThread.doc_deprecated)
-        .def("StopReceiveThread",
-            [](DrakeLcm* self) {
-              WarnDeprecated(
-                  "Call DrakeLcm.HandleSubscriptions periodically instead.");
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-              self->StopReceiveThread();
-#pragma GCC diagnostic pop
-            },
-            cls_doc.StopReceiveThread.doc_deprecated);
+        .def(py::init<std::string>(), py::arg("lcm_url"),
+            cls_doc.ctor.doc_1args);
     // TODO(eric.cousineau): Add remaining methods.
   }
 

@@ -91,6 +91,14 @@
  *    <td></td>
  *    <td></td>
  * </tr>
+ * <tr><td> <a href="https://github.com/coin-or/Csdp">
+ *     CSDP</a></td>
+ *     <td align="center">&diams;</td>
+ *     <td></td>
+ *     <td></td>
+ *     <td align="center">&diams;</td>
+ *     <td align="center">&diams;</td>
+ * </tr>
  * </table>
  *
  * <b>Mixed-Integer Convex Optimization</b>
@@ -132,7 +140,7 @@
  *     SMT</a></td>
  * </tr>
  * <tr><td>&dagger; &Dagger;
- *   <a href="http://www.sbsi-sol-optimize.com/asp/sol_product_snopt.htm">
+ *   <a href="https://ccom.ucsd.edu/~optimizers/solvers/snopt/">
  *    SNOPT</a></td></tr>
  *    <td align="center">&diams;</td>
  *    <td></td>
@@ -161,6 +169,7 @@
  * &dagger; indicates that this is a commercial solver which requires a license
  * (note that some have free licenses for academics).
  *
- * &Dagger; Note that Drake's pre-compiled binary releases provide SNOPT.
+ * &Dagger; Note that <a href="https://drake.mit.edu/from_binary.html">Drake's
+ * pre-compiled binary releases</a> provide SNOPT.
  * @}
  */

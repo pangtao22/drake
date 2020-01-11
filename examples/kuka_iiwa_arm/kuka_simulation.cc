@@ -12,7 +12,6 @@
 #include "drake/common/drake_assert.h"
 #include "drake/common/find_resource.h"
 #include "drake/common/text_logging.h"
-#include "drake/common/text_logging_gflags.h"
 #include "drake/examples/kuka_iiwa_arm/iiwa_common.h"
 #include "drake/examples/kuka_iiwa_arm/iiwa_lcm.h"
 #include "drake/examples/kuka_iiwa_arm/kuka_torque_controller.h"
@@ -95,17 +94,17 @@ int DoMain() {
   if (FLAGS_torque_control) {
     VectorX<double> stiffness, damping_ratio;
     SetTorqueControlledIiwaGains(&stiffness, &damping_ratio);
-    stiffness = stiffness.replicate(num_iiwa, 1);
-    damping_ratio = damping_ratio.replicate(num_iiwa, 1);
+    stiffness = stiffness.replicate(num_iiwa, 1).eval();
+    damping_ratio = damping_ratio.replicate(num_iiwa, 1).eval();
     controller = builder.AddController<KukaTorqueController<double>>(
         RigidBodyTreeConstants::kFirstNonWorldModelInstanceId, tree.Clone(),
         stiffness, damping_ratio);
   } else {
     VectorX<double> iiwa_kp, iiwa_kd, iiwa_ki;
     SetPositionControlledIiwaGains(&iiwa_kp, &iiwa_ki, &iiwa_kd);
-    iiwa_kp = iiwa_kp.replicate(num_iiwa, 1);
-    iiwa_kd = iiwa_kd.replicate(num_iiwa, 1);
-    iiwa_ki = iiwa_ki.replicate(num_iiwa, 1);
+    iiwa_kp = iiwa_kp.replicate(num_iiwa, 1).eval();
+    iiwa_kd = iiwa_kd.replicate(num_iiwa, 1).eval();
+    iiwa_ki = iiwa_ki.replicate(num_iiwa, 1).eval();
     controller = builder.AddController<InverseDynamicsController<double>>(
         RigidBodyTreeConstants::kFirstNonWorldModelInstanceId, tree.Clone(),
         iiwa_kp, iiwa_ki, iiwa_kd,
@@ -227,6 +226,5 @@ int DoMain() {
 
 int main(int argc, char* argv[]) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
-  drake::logging::HandleSpdlogGflags();
   return drake::examples::kuka_iiwa_arm::DoMain();
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -8,12 +9,12 @@
 
 #include "drake/common/copyable_unique_ptr.h"
 #include "drake/common/drake_copyable.h"
-#include "drake/common/drake_optional.h"
 #include "drake/geometry/geometry_ids.h"
 #include "drake/geometry/geometry_index.h"
 #include "drake/geometry/geometry_roles.h"
 #include "drake/geometry/internal_frame.h"
 #include "drake/geometry/shape_specification.h"
+#include "drake/math/rigid_transform.h"
 
 namespace drake {
 namespace geometry {
@@ -42,12 +43,10 @@ class InternalGeometry {
    @param frame_id      The id of the frame this belongs to.
    @param geometry_id   The identifier for _this_ geometry.
    @param name          The name of the geometry.
-   @param X_FG          The pose of the geometry G in the parent frame F.
-   @param index         The internal index of this internal geometry (w.r.t.
-                        its anchored/dynamic status).  */
+   @param X_FG          The pose of the geometry G in the parent frame F.  */
   InternalGeometry(SourceId source_id, std::unique_ptr<Shape> shape,
                    FrameId frame_id, GeometryId geometry_id, std::string name,
-                   const Isometry3<double>& X_FG, GeometryIndex index);
+                   math::RigidTransform<double> X_FG);
 
   /** Compares two %InternalGeometry instances for "equality". Two internal
    geometries are considered equal if they have the same geometry identifier.
@@ -74,13 +73,6 @@ class InternalGeometry {
   /** Returns the name of this geometry.  */
   const std::string& name() const { return name_; }
 
-  /** Returns the index of this geometry in the full scene graph.  */
-  GeometryIndex index() const { return index_; }
-
-  /** Sets the internal geometry's index -- facilitates removing geometries from
-   the scene graph.  */
-  void set_index(GeometryIndex index) { index_ = index; }
-
   /** Returns the source id that registered the geometry.  */
   SourceId source_id() const { return source_id_; }
 
@@ -104,26 +96,26 @@ class InternalGeometry {
   /** Returns the pose of this geometry in the declared *parent* frame -- note
    if this geometry was registered as a child of another geometry it will *not*
    be the same as X_FG().  */
-  const Isometry3<double>& X_PG() const { return X_PG_; }
+  const math::RigidTransform<double>& X_PG() const { return X_PG_; }
 
   /** Returns the pose of this geometry in the frame to which it is ultimately
    rigidly attached. This is in contrast to X_PG().  */
-  const Isometry3<double>& X_FG() const { return X_FG_; }
+  const math::RigidTransform<double>& X_FG() const { return X_FG_; }
 
   // TODO(SeanCurtis-TRI): Determine if tracking this parent geometry is
   // necessary for now or if that only exists to facilitate removal later on.
   /** Returns the declared parent geometry (if one exists).  */
-  optional<GeometryId> parent_id() const { return parent_geometry_id_; }
+  std::optional<GeometryId> parent_id() const { return parent_geometry_id_; }
 
   /** Sets this geometry to have *another* geometry as parent. In this case,
    the pose set in the constructor is assumed to be X_PG and the X_FG value must
    be updated.
    @param id    The id of the parent geometry.
    @param X_FG  The new value for X_FG (assuming the constructed value is to be
-                interpreted as X_PG.  */
-  void set_geometry_parent(GeometryId id, const Isometry3<double>& X_FG) {
+                interpreted as X_PG).  */
+  void set_geometry_parent(GeometryId id, math::RigidTransform<double> X_FG) {
     parent_geometry_id_ = id;
-    X_FG_ = X_FG;
+    X_FG_ = std::move(X_FG);
   }
 
   /** Returns true if this geometry has a geometry parent and the parent has the
@@ -179,12 +171,8 @@ class InternalGeometry {
    engine's understanding as well.  */
   //@{
 
-  /** Assigns a proximity role to this geometry. Fails if it has already been
-   assigned.  */
+  /** Assigns a proximity role to this geometry.  */
   void SetRole(ProximityProperties properties) {
-    if (proximity_props_) {
-      throw std::logic_error("Geometry already has proximity role assigned");
-    }
     proximity_props_ = std::move(properties);
   }
 
@@ -210,13 +198,15 @@ class InternalGeometry {
   bool has_role(Role role) const;
 
   /** Reports if the geometry has a proximity role.  */
-  bool has_proximity_role() const { return proximity_props_ != nullopt; }
+  bool has_proximity_role() const { return proximity_props_ != std::nullopt; }
 
   /** Reports if the geometry has a illustration role.  */
-  bool has_illustration_role() const { return illustration_props_ != nullopt; }
+  bool has_illustration_role() const {
+    return illustration_props_ != std::nullopt;
+  }
 
   /** Reports if the geometry has a perception role. */
-  bool has_perception_role() const { return perception_props_ != nullopt; }
+  bool has_perception_role() const { return perception_props_ != std::nullopt; }
 
   /** Returns a pointer to the geometry's proximity properties (if they are
    defined. Nullptr otherwise.  */
@@ -239,58 +229,22 @@ class InternalGeometry {
     return nullptr;
   }
 
-  // TODO(SeanCurtis-TRI): Currently, InternalGeometry contains indices into
-  // the various engines in which it appears. This leads to convoluted and
-  // painful code responsible for maintaining the indices in sync with the
-  // engines. We need to kill these indices and make each geometry's globally-
-  // unique identifier the definitive identifier that passes between SceneGraph
-  // and the various engines.
-
-  /** If this geometry has a perception role, this provides access to the
-   per-renderer render index. Note, the geometry may not be included in every
-   renderer.  */
-  optional<RenderIndex> render_index(const std::string& renderer_name) const;
-
-  /** Sets this geometry's render `index` associated with the render engine
-   indicated by `renderer_name`.
-   @pre This geometry doesn't already have an index for the render engine.
-   @pre The `renderer_name` is a name for a valid renderer.  */
-  void set_render_index(std::string renderer_name, RenderIndex index);
-
-  /** Clears this geometry's render index associated with the named
-   renderer. If the geometry doesn't have an index for the named renderer,
-   nothing happens.
-   @note This leaves the properties intact; it makes no effort to divine which
-   properties caused this geometry to be accepted by that renderer or its
-   uniqueness (both would be required for removing those properties).  */
-  void ClearRenderIndex(const std::string& renderer_name) {
-    render_indices_.erase(renderer_name);
-  }
-
-  /** If this geometry has a proximity role, this that geometry's index in the
-   proximity engine. It will be undefined it it does not have the proximity
-   role.  */
-  ProximityIndex proximity_index() const { return proximity_index_; }
-  void set_proximity_index(ProximityIndex index) { proximity_index_ = index; }
-
   /** Removes the proximity role assigned to this geometry -- if there was
    no proximity role previously, this has no effect.  */
   void RemoveProximityRole() {
-    proximity_props_ = nullopt;
-    proximity_index_ = ProximityIndex();
+    proximity_props_ = std::nullopt;
   }
 
   /** Removes the illustration role assigned to this geometry -- if there was
    no illustration role previously, this has no effect.  */
   void RemoveIllustrationRole() {
-    illustration_props_ = nullopt;
+    illustration_props_ = std::nullopt;
   }
 
   /** Removes the perception role assigned to this geometry -- if there was
    no perception role previously, this has no effect.  */
   void RemovePerceptionRole() {
-    perception_props_ = nullopt;
-    render_indices_.clear();
+    perception_props_ = std::nullopt;
   }
 
   //@}
@@ -306,10 +260,6 @@ class InternalGeometry {
   // same frame.
   std::string name_;
 
-  // The index of this geometry in the "full" set of geometries (regardless of
-  // role).
-  GeometryIndex index_;
-
   // The source id that registered the geometry.
   SourceId source_id_;
 
@@ -318,14 +268,14 @@ class InternalGeometry {
 
   // The pose of this geometry in the registered parent frame. The parent may be
   // a frame or another registered geometry.
-  Isometry3<double> X_PG_;
+  math::RigidTransform<double> X_PG_;
 
   // The pose of this geometry in the ultimate frame to which this geometry is
   // rigidly affixed. If there is no parent geometry, X_PG_ == X_FG_.
-  Isometry3<double> X_FG_;
+  math::RigidTransform<double> X_FG_;
 
   // The identifier for this frame's parent frame.
-  optional<GeometryId> parent_geometry_id_{};
+  std::optional<GeometryId> parent_geometry_id_{};
 
   // The identifiers for the geometry hung on this frame.
   std::unordered_set<GeometryId> child_geometry_ids_;
@@ -334,19 +284,9 @@ class InternalGeometry {
   // defined at the frame level, and all child geometries inherit.
 
   // The optional property sets tied to the roles that the geometry plays.
-  optional<ProximityProperties> proximity_props_{};
-  optional<IllustrationProperties> illustration_props_{};
-  optional<PerceptionProperties> perception_props_{};
-
-  // The render index of this geometry in *each* renderer it is registered in
-  // (keyed by the unique renderer name).
-  std::unordered_map<std::string, RenderIndex> render_indices_;
-
-  // The index of the geometry in the engine. Note: is currently unused but will
-  // gain importance when the API for *removing* geometry is added. It is the
-  // mechanism by which we map a geometry to its instantiation in the proximity
-  // engine.
-  ProximityIndex proximity_index_{};
+  std::optional<ProximityProperties> proximity_props_{};
+  std::optional<IllustrationProperties> illustration_props_{};
+  std::optional<PerceptionProperties> perception_props_{};
 };
 
 }  // namespace internal

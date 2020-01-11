@@ -1,9 +1,4 @@
 #include "drake/common/hash.h"
 
-namespace drake {
-namespace internal {
-
-constexpr size_t FNV1aHasher::kFnvPrime;
-
-}  // namespace internal
-}  // namespace drake
+// For now, this is an empty .cc file that only serves to confirm
+// hash.h is a stand-alone header.

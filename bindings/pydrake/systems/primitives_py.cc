@@ -1,10 +1,9 @@
 #include "pybind11/eigen.h"
 #include "pybind11/pybind11.h"
+#include "pybind11/stl.h"
 
 #include "drake/bindings/pydrake/common/cpp_template_pybind.h"
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
-#include "drake/bindings/pydrake/common/drake_optional_pybind.h"
-#include "drake/bindings/pydrake/common/drake_variant_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
 #include "drake/systems/primitives/adder.h"
@@ -13,6 +12,7 @@
 #include "drake/systems/primitives/constant_value_source.h"
 #include "drake/systems/primitives/constant_vector_source.h"
 #include "drake/systems/primitives/demultiplexer.h"
+#include "drake/systems/primitives/discrete_time_delay.h"
 #include "drake/systems/primitives/first_order_low_pass_filter.h"
 #include "drake/systems/primitives/gain.h"
 #include "drake/systems/primitives/integrator.h"
@@ -82,23 +82,64 @@ PYBIND11_MODULE(primitives, m) {
         .def("y0",
             overload_cast_explicit<const VectorXd&>(&AffineSystem<T>::y0),
             doc.AffineSystem.y0.doc)
+        // Wrap a few methods from the TimeVaryingAffineSystem parent class.
+        // TODO(russt): Move to TimeVaryingAffineSystem if/when that class is
+        // wrapped.
+        .def("get_input_port", &TimeVaryingAffineSystem<T>::get_input_port,
+            py_reference_internal,
+            doc.TimeVaryingAffineSystem.get_input_port.doc)
+        .def("get_output_port", &TimeVaryingAffineSystem<T>::get_output_port,
+            py_reference_internal,
+            doc.TimeVaryingAffineSystem.get_output_port.doc)
         .def("time_period", &AffineSystem<T>::time_period,
-            doc.TimeVaryingAffineSystem.time_period.doc);
+            doc.TimeVaryingAffineSystem.time_period.doc)
+        // Need to specifically redeclare the System to have both overloads
+        // available.
+        .def("get_input_port", &System<T>::get_input_port,
+            py_reference_internal, py::arg("port_index"),
+            pydrake_doc.drake.systems.System.get_input_port.doc)
+        .def("get_output_port", &System<T>::get_output_port,
+            py_reference_internal, py::arg("port_index"),
+            pydrake_doc.drake.systems.System.get_output_port.doc);
 
     DefineTemplateClassWithDefault<ConstantValueSource<T>, LeafSystem<T>>(
         m, "ConstantValueSource", GetPyParam<T>(), doc.ConstantValueSource.doc)
         .def(py::init<const AbstractValue&>(), py::arg("value"),
             doc.ConstantValueSource.ctor.doc);
 
-    DefineTemplateClassWithDefault<ConstantVectorSource<T>, LeafSystem<T>>(
-        m, "ConstantVectorSource", GetPyParam<T>(), doc.ConstantValueSource.doc)
+    DefineTemplateClassWithDefault<ConstantVectorSource<T>, LeafSystem<T>>(m,
+        "ConstantVectorSource", GetPyParam<T>(), doc.ConstantVectorSource.doc)
         .def(py::init<VectorX<T>>(), py::arg("source_value"),
-            doc.ConstantValueSource.ctor.doc);
+            doc.ConstantVectorSource.ctor.doc)
+        .def("get_source_value", &ConstantVectorSource<T>::get_source_value,
+            py::arg("context"), py_reference_internal,
+            doc.ConstantVectorSource.get_source_value.doc)
+        .def("get_mutable_source_value",
+            &ConstantVectorSource<T>::get_mutable_source_value,
+            py::arg("context"), py_reference_internal,
+            doc.ConstantVectorSource.get_mutable_source_value.doc);
 
     DefineTemplateClassWithDefault<Demultiplexer<T>, LeafSystem<T>>(
         m, "Demultiplexer", GetPyParam<T>(), doc.Demultiplexer.doc)
         .def(py::init<int, int>(), py::arg("size"),
-            py::arg("output_ports_sizes") = 1, doc.Demultiplexer.ctor.doc);
+            py::arg("output_ports_size") = 1, doc.Demultiplexer.ctor.doc_2args)
+        .def(py::init<const std::vector<int>&>(), py::arg("output_ports_sizes"),
+            doc.Demultiplexer.ctor.doc_1args)
+        .def("get_output_ports_sizes",
+            &Demultiplexer<T>::get_output_ports_sizes,
+            doc.Demultiplexer.get_output_ports_sizes.doc);
+
+    DefineTemplateClassWithDefault<DiscreteTimeDelay<T>, LeafSystem<T>>(
+        m, "DiscreteTimeDelay", GetPyParam<T>(), doc.DiscreteTimeDelay.doc)
+        .def(py::init<double, int, int>(), py::arg("update_sec"),
+            py::arg("delay_timesteps"), py::arg("vector_size"),
+            doc.DiscreteTimeDelay.ctor
+                .doc_3args_update_sec_delay_timesteps_vector_size)
+        .def(py::init<double, int, const AbstractValue&>(),
+            py::arg("update_sec"), py::arg("delay_timesteps"),
+            py::arg("abstract_model_value"),
+            doc.DiscreteTimeDelay.ctor
+                .doc_3args_update_sec_delay_timesteps_abstract_model_value);
 
     DefineTemplateClassWithDefault<                  // BR
         FirstOrderLowPassFilter<T>, LeafSystem<T>>(  //
@@ -186,19 +227,37 @@ PYBIND11_MODULE(primitives, m) {
             &SignalLogger<T>::set_forced_publish_only,
             doc.SignalLogger.set_forced_publish_only.doc)
         .def("sample_times", &SignalLogger<T>::sample_times,
-            doc.SignalLogger.sample_times.doc)
-        .def("data", &SignalLogger<T>::data, doc.SignalLogger.data.doc)
+            py_reference_internal, doc.SignalLogger.sample_times.doc)
+        .def("data", &SignalLogger<T>::data, py_reference_internal,
+            doc.SignalLogger.data.doc)
         .def("reset", &SignalLogger<T>::reset, doc.SignalLogger.reset.doc);
 
     DefineTemplateClassWithDefault<SymbolicVectorSystem<T>, LeafSystem<T>>(m,
         "SymbolicVectorSystem", GetPyParam<T>(), doc.SymbolicVectorSystem.doc)
-        .def(py::init<optional<Variable>, VectorX<Variable>, VectorX<Variable>,
-                 VectorX<Expression>, VectorX<Expression>, double>(),
-            py::arg("time") = nullopt, py::arg("state") = Vector0<Variable>{},
+        .def(py::init<std::optional<Variable>, VectorX<Variable>,
+                 VectorX<Variable>, VectorX<Expression>, VectorX<Expression>,
+                 double>(),
+            py::arg("time") = std::nullopt,
+            py::arg("state") = Vector0<Variable>{},
             py::arg("input") = Vector0<Variable>{},
             py::arg("dynamics") = Vector0<Expression>{},
             py::arg("output") = Vector0<Expression>{},
-            py::arg("time_period") = 0.0, doc.SymbolicVectorSystem.ctor.doc);
+            py::arg("time_period") = 0.0,
+            doc.SymbolicVectorSystem.ctor.doc_6args)
+        .def(py::init<std::optional<Variable>, VectorX<Variable>,
+                 VectorX<Variable>, VectorX<Variable>, VectorX<Expression>,
+                 VectorX<Expression>, double>(),
+            py::arg("time") = std::nullopt,
+            py::arg("state") = Vector0<Variable>{},
+            py::arg("input") = Vector0<Variable>{},
+            py::arg("parameter") = Vector0<Variable>{},
+            py::arg("dynamics") = Vector0<Expression>{},
+            py::arg("output") = Vector0<Expression>{},
+            py::arg("time_period") = 0.0,
+            doc.SymbolicVectorSystem.ctor.doc_7args)
+        .def("dynamics_for_variable",
+            &SymbolicVectorSystem<T>::dynamics_for_variable, py::arg("var"),
+            doc.SymbolicVectorSystem.dynamics_for_variable.doc);
 
     DefineTemplateClassWithDefault<WrapToSystem<T>, LeafSystem<T>>(
         m, "WrapToSystem", GetPyParam<T>(), doc.WrapToSystem.doc)
@@ -228,22 +287,11 @@ PYBIND11_MODULE(primitives, m) {
           &BarycentricMeshSystem<double>::get_output_values,
           doc.BarycentricMeshSystem.get_output_values.doc);
 
-  // Docs for typedef not being parsed.
-  py::class_<UniformRandomSource, LeafSystem<double>>(m, "UniformRandomSource")
-      .def(py::init<int, double>(), py::arg("num_outputs"),
-          py::arg("sampling_interval_sec"));
-
-  // Docs for typedef not being parsed.
-  py::class_<GaussianRandomSource, LeafSystem<double>>(
-      m, "GaussianRandomSource")
-      .def(py::init<int, double>(), py::arg("num_outputs"),
-          py::arg("sampling_interval_sec"));
-
-  // Docs for typedef not being parsed.
-  py::class_<ExponentialRandomSource, LeafSystem<double>>(
-      m, "ExponentialRandomSource")
-      .def(py::init<int, double>(), py::arg("num_outputs"),
-          py::arg("sampling_interval_sec"));
+  py::class_<RandomSource, LeafSystem<double>>(
+      m, "RandomSource", doc.RandomSource.doc)
+      .def(py::init<RandomDistribution, int, double>(), py::arg("distribution"),
+          py::arg("num_outputs"), py::arg("sampling_interval_sec"),
+          doc.RandomSource.ctor.doc);
 
   py::class_<TrajectorySource<double>, LeafSystem<double>>(
       m, "TrajectorySource", doc.TrajectorySource.doc)
@@ -274,18 +322,18 @@ PYBIND11_MODULE(primitives, m) {
       doc.ControllabilityMatrix.doc);
 
   m.def("IsControllable", &IsControllable, py::arg("sys"),
-      py::arg("threshold") = nullopt, doc.IsControllable.doc);
+      py::arg("threshold") = std::nullopt, doc.IsControllable.doc);
 
   m.def(
       "ObservabilityMatrix", &ObservabilityMatrix, doc.ObservabilityMatrix.doc);
 
   m.def("IsObservable", &IsObservable, py::arg("sys"),
-      py::arg("threshold") = nullopt, doc.IsObservable.doc);
+      py::arg("threshold") = std::nullopt, doc.IsObservable.doc);
 
   m.def("LogOutput", &LogOutput<double>, py::arg("src"), py::arg("builder"),
       // Keep alive, ownership: `return` keeps `builder` alive.
       py::keep_alive<0, 2>(),
-      // TODO(eric.cousineau): Figure out why this is necessary (#9398).
+      // See #11531 for why `py_reference` is needed.
       py_reference, doc.LogOutput.doc);
 
   // TODO(eric.cousineau): Add more systems as needed.

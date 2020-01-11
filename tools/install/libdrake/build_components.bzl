@@ -32,21 +32,11 @@ LIBDRAKE_COMPONENTS = [
     "//attic/multibody/shapes",
     "//attic/perception",
     "//attic/systems/controllers",
-    "//attic/systems/controllers/plan_eval",
-    "//attic/systems/controllers/qp_inverse_dynamics",
     "//attic/systems/rendering",
     "//attic/systems/robotInterfaces",
     "//attic/systems/sensors",
     "//attic/systems/trajectory_optimization",
     "//attic/util",
-    "//automotive",
-    "//automotive/maliput/api",
-    "//automotive/maliput/base",
-    "//automotive/maliput/dragway",
-    "//automotive/maliput/geometry_base",
-    "//automotive/maliput/multilane",
-    "//automotive/maliput/rndf",
-    "//automotive/maliput/utility",
     "//common",
     "//common/proto",
     "//common/trajectories",
@@ -57,6 +47,8 @@ LIBDRAKE_COMPONENTS = [
     "//examples/acrobot:acrobot_params",  # unpackaged
     "//examples/acrobot:acrobot_plant",  # unpackaged
     "//examples/acrobot:acrobot_state",  # unpackaged
+    "//examples/acrobot:spong_controller",  # unpackaged
+    "//examples/acrobot:spong_controller_params",  # unpackaged
     "//examples/compass_gait:compass_gait",  # unpackaged
     "//examples/compass_gait:compass_gait_vector_types",  # unpackaged
     "//examples/manipulation_station:manipulation_station",  # unpackaged
@@ -64,19 +56,17 @@ LIBDRAKE_COMPONENTS = [
     "//examples/pendulum:pendulum_geometry",  # unpackaged
     "//examples/pendulum:pendulum_plant",  # unpackaged
     "//examples/pendulum:pendulum_vector_types",  # unpackaged
+    "//examples/planar_gripper:gripper_brick",  # unpackaged
     "//examples/quadrotor:quadrotor_geometry",  # unpackaged
     "//examples/quadrotor:quadrotor_plant",  # unpackaged
     "//examples/rimless_wheel:rimless_wheel",  # unpackaged
     "//examples/rimless_wheel:rimless_wheel_vector_types",  # unpackaged
     "//examples/van_der_pol:van_der_pol",  # unpackaged
     "//geometry",
-    "//geometry/dev",
-    "//geometry/dev/render",
-    "//geometry/dev/render/shaders",
     "//geometry/proximity",
     "//geometry/query_results",
     "//geometry/render",
-    "//geometry/test_utilities",
+    "//geometry/render/shaders",
     "//lcm",
     "//manipulation/kuka_iiwa",
     "//manipulation/perception",
@@ -96,6 +86,7 @@ LIBDRAKE_COMPONENTS = [
     "//multibody/benchmarks/mass_damper_spring",
     "//multibody/benchmarks/pendulum",
     "//multibody/constraint",
+    "//multibody/hydroelastics",
     "//multibody/inverse_kinematics",
     "//multibody/math",
     "//multibody/optimization",
@@ -107,6 +98,8 @@ LIBDRAKE_COMPONENTS = [
     "//multibody/triangle_quadrature",
     "//perception",
     "//solvers",
+    "//solvers/fbstab",
+    "//solvers/fbstab/components",
     "//systems/analysis",
     "//systems/controllers",
     "//systems/estimators",
@@ -117,8 +110,5 @@ LIBDRAKE_COMPONENTS = [
     "//systems/primitives",
     "//systems/rendering",
     "//systems/sensors",
-    "//systems/sensors/dev",
     "//systems/trajectory_optimization",
-    # //examples/kuka_iiwa_arm:iiwa_common (indirectly)
-    # //examples/kuka_iiwa_arm:iiwa_lcm (indirectly)
 ]

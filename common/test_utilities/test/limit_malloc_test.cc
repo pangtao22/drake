@@ -50,7 +50,10 @@ class LimitMallocTest : public ::testing::TestWithParam<int> {
   }
 };
 
-// Use the same fixture for death tests, but with a different name.
+// Use the same fixture for death tests, but with a different name.  Note that
+// Drake's styleguide forbids death tests, but our only choice here is to use
+// death tests because our implementation must use abort() because exceptions
+// cannot propagate through malloc() because it is a C ABI.
 using LimitMallocDeathTest = LimitMallocTest;
 
 TEST_P(LimitMallocTest, UnlimitedTest) {
@@ -102,9 +105,9 @@ TEST_P(LimitMallocDeathTest, LimitTest) {
     }, expected_message);
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     All, LimitMallocTest, ::testing::Range(0, 3));
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     All, LimitMallocDeathTest, ::testing::Range(0, 3));
 
 // When the user whitelists no-op reallocs, a call to realloc() that does not

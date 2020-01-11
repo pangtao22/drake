@@ -13,8 +13,8 @@
 #include <Eigen/Core>
 
 #include "drake/common/drake_bool.h"
-#include "drake/common/drake_nodiscard.h"
 #include "drake/common/dummy_value.h"
+#include "drake/common/name_value.h"
 #include "drake/common/never_destroyed.h"
 #include "drake/common/symbolic.h"
 #include "drake/systems/framework/basic_vector.h"
@@ -91,7 +91,7 @@ class Sample final : public drake::systems::BasicVector<T> {
     this->set_unset(symbolic::Variable("unset"));
   }
 
-  DRAKE_NODISCARD Sample<T>* DoClone() const final { return new Sample; }
+  [[nodiscard]] Sample<T>* DoClone() const final { return new Sample; }
 
   /// @name Getters and Setters
   //@{
@@ -109,7 +109,7 @@ class Sample final : public drake::systems::BasicVector<T> {
   }
   /// Fluent setter that matches x().
   /// Returns a copy of `this` with x set to a new value.
-  DRAKE_NODISCARD Sample<T> with_x(const T& x) const {
+  [[nodiscard]] Sample<T> with_x(const T& x) const {
     Sample<T> result(*this);
     result.set_x(x);
     return result;
@@ -128,7 +128,7 @@ class Sample final : public drake::systems::BasicVector<T> {
   }
   /// Fluent setter that matches two_word().
   /// Returns a copy of `this` with two_word set to a new value.
-  DRAKE_NODISCARD Sample<T> with_two_word(const T& two_word) const {
+  [[nodiscard]] Sample<T> with_two_word(const T& two_word) const {
     Sample<T> result(*this);
     result.set_two_word(two_word);
     return result;
@@ -146,7 +146,7 @@ class Sample final : public drake::systems::BasicVector<T> {
   }
   /// Fluent setter that matches absone().
   /// Returns a copy of `this` with absone set to a new value.
-  DRAKE_NODISCARD Sample<T> with_absone(const T& absone) const {
+  [[nodiscard]] Sample<T> with_absone(const T& absone) const {
     Sample<T> result(*this);
     result.set_absone(absone);
     return result;
@@ -163,12 +163,27 @@ class Sample final : public drake::systems::BasicVector<T> {
   }
   /// Fluent setter that matches unset().
   /// Returns a copy of `this` with unset set to a new value.
-  DRAKE_NODISCARD Sample<T> with_unset(const T& unset) const {
+  [[nodiscard]] Sample<T> with_unset(const T& unset) const {
     Sample<T> result(*this);
     result.set_unset(unset);
     return result;
   }
   //@}
+
+  /// Visit each field of this named vector, passing them (in order) to the
+  /// given Archive.  The archive can read and/or write to the vector values.
+  /// One common use of Serialize is the //common/yaml tools.
+  template <typename Archive>
+  void Serialize(Archive* a) {
+    T& x_ref = this->GetAtIndex(K::kX);
+    a->Visit(drake::MakeNameValue("x", &x_ref));
+    T& two_word_ref = this->GetAtIndex(K::kTwoWord);
+    a->Visit(drake::MakeNameValue("two_word", &two_word_ref));
+    T& absone_ref = this->GetAtIndex(K::kAbsone);
+    a->Visit(drake::MakeNameValue("absone", &absone_ref));
+    T& unset_ref = this->GetAtIndex(K::kUnset);
+    a->Visit(drake::MakeNameValue("unset", &unset_ref));
+  }
 
   /// See SampleIndices::GetCoordinateNames().
   static const std::vector<std::string>& GetCoordinateNames() {

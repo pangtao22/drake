@@ -1,15 +1,16 @@
 #include "drake/lcm/drake_lcm.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cstdlib>
-#include <thread>
 #include <utility>
 #include <vector>
+
+#include <glib.h>
 
 #include "drake/common/drake_assert.h"
 #include "drake/common/drake_copyable.h"
 #include "drake/common/drake_throw.h"
+#include "drake/common/scope_exit.h"
 
 namespace drake {
 namespace lcm {
@@ -49,11 +50,6 @@ class DrakeLcm::Impl {
   std::string lcm_url_;
   ::lcm::LCM lcm_;
   std::vector<std::weak_ptr<DrakeSubscription>> subscriptions_;
-
-  // TODO(jwnimmer-tri) To be removed once deprecated methods are gone.
-  std::unique_ptr<std::thread> receive_thread_;
-  // TODO(jwnimmer-tri) To be removed once deprecated methods are gone.
-  std::atomic_bool receive_thread_stopping_{false};
 };
 
 DrakeLcm::DrakeLcm() : DrakeLcm(std::string{}) {}
@@ -67,32 +63,6 @@ DrakeLcm::DrakeLcm(std::string lcm_url)
   impl_->lcm_.getFileno();
 }
 
-// TODO(jwnimmer-tri) To be deprecated.
-void DrakeLcm::StartReceiveThread() {
-  DRAKE_DEMAND(impl_->receive_thread_ == nullptr);
-  impl_->receive_thread_ = std::make_unique<std::thread>(
-      [this](){
-        while (!this->impl_->receive_thread_stopping_) {
-          this->HandleSubscriptions(300);
-        }
-      });
-}
-
-// TODO(jwnimmer-tri) To be deprecated.
-void DrakeLcm::StopReceiveThread() {
-  if (impl_->receive_thread_ != nullptr) {
-    impl_->receive_thread_stopping_ = true;
-    impl_->receive_thread_->join();
-    impl_->receive_thread_stopping_ = false;
-    impl_->receive_thread_.reset();
-  }
-}
-
-// TODO(jwnimmer-tri) To be deprecated.
-bool DrakeLcm::IsReceiveThreadRunning() const {
-  return impl_->receive_thread_ != nullptr;
-}
-
 std::string DrakeLcm::get_lcm_url() const {
   return impl_->lcm_url_;
 }
@@ -102,7 +72,7 @@ std::string DrakeLcm::get_lcm_url() const {
 }
 
 void DrakeLcm::Publish(const std::string& channel, const void* data,
-                       int data_size, optional<double>) {
+                       int data_size, std::optional<double>) {
   DRAKE_THROW_UNLESS(!channel.empty());
   impl_->lcm_.publish(channel, data, data_size);
 }
@@ -123,6 +93,11 @@ class DrakeSubscription final : public DrakeSubscriptionInterface {
       HandlerFunction handler) {
     DRAKE_DEMAND(native_instance != nullptr);
 
+    // The argument to subscribeFunction is regex (not a string literal), so
+    // we'll need to escape the channel name before calling subscribeFunction.
+    char* const channel_regex = g_regex_escape_string(channel.c_str(), -1);
+    ScopeExit guard([channel_regex](){ g_free(channel_regex); });
+
     // Create the result.
     auto result = std::make_shared<DrakeSubscription>();
     result->native_instance_ = native_instance;
@@ -130,7 +105,7 @@ class DrakeSubscription final : public DrakeSubscriptionInterface {
     result->weak_self_reference_ = result;
     result->strong_self_reference_ = result;
     result->native_subscription_ = native_instance->subscribeFunction(
-      channel, &DrakeSubscription::NativeCallback, result.get());
+        channel_regex, &DrakeSubscription::NativeCallback, result.get());
     result->native_subscription_->setQueueCapacity(1);
 
     // Sanity checks.  (The use_count will be 2 because both 'result' and
@@ -261,12 +236,6 @@ int DrakeLcm::HandleSubscriptions(int timeout_millis) {
 }
 
 DrakeLcm::~DrakeLcm() {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  // Stop invoking the subscriptions, prior to destroying them.
-  StopReceiveThread();
-#pragma GCC diagnostic pop
-
   // Invalidate our DrakeSubscription objects.
   for (const auto& weak_subscription : impl_->subscriptions_) {
     auto subscription = weak_subscription.lock();

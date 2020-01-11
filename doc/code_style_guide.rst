@@ -37,8 +37,6 @@ Its source lives in
 Python Style
 ============
 
-Drake Python code uses Python 2.7.
-
 Drake strictly follows `PEP 8 -- Style Guide for Python Code
 <https://www.python.org/dev/peps/pep-0008/>`_ except for the specific
 clarifications, exceptions, and additional rules noted below. Since PEP 8
@@ -84,44 +82,16 @@ Additional Rules
   ``stderr``, but are otherwise ignored, and thus may escape notice.
 * Executable Python files should be limited to *only* scripts which are not run
   via Bazel-generated Python proxy scripts [#bazel_py_script]_. If a script
-  qualifies, use one of the following "shebang" lines::
+  qualifies, use the following "shebang" line::
 
-    #!/usr/bin/env python2
     #!/usr/bin/env python3
 
-  Rationale: ``/usr/bin/env`` enables a ``PATH`` search for the Python 2.7
-  executable. On macOS systems configured for Drake, this gives a better result
-  than ``/usr/bin/python`` (system Python 2.7). This is also recommended by
+  Rationale: ``/usr/bin/env`` enables a ``PATH`` search for the Python 3
+  executable. This is also recommended by
   `PEP 394 <https://www.python.org/dev/peps/pep-0394/>`_`.
 
 .. [#bazel_py_script] Generally, this means scripts that run via ``bazel run``,
    ``bazel test``, or ``./bazel-bin/...``.
-
-.. _code-style-guide-matlab:
-
-MATLAB Style
-============
-
-* All of the above rules still hold as relevant (e.g. variable names).
-* A short list of variable name exceptions for common acronyms:
-   * `rpy` or `somethingRPY` (for roll-pitch-yaw)
-* All classes and methods should be commented with Doxygen compatible
-  formatting (using the tags `@param` to describe each input, `@option` to
-  describe the elements of an option structure, `@retval` to describe each
-  output, and `@default` to describe default values for an input.  Class
-  methods need not document the trivial first input argument (which is the
-  class object) with a `@param` tag.
-* Calls to MATLAB class member functions in speed critical loops for classes
-  which overload subsref use `memberFunc(obj,...)` instead of
-  `obj.memberFunc(...)`.  This is because obj.member calls the `subsref`
-  method, which is only notably slower for classes which have overloaded
-  `subsref`.  All other calls should use `obj.memberFunc(...)`.
-* All methods that are outside runtime execution loops begin by checking their
-  inputs (e.g. with `typecheck`,`sizecheck`,`rangecheck`,etc).  Methods that
-  get called repeatedly inside a simulation or optimization loop should not
-  perform these checks.
-* All methods (including mex) should treat `nargout==0` as if we received
-  `nargout==1`
 
 .. _code-style-guide-java:
 

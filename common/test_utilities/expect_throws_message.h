@@ -19,7 +19,8 @@ Usage example: @code
 @endcode
 The regular expression must match the entire error message. If there is
 boilerplate you don't care to match at the beginning and end, surround with
-`.*` to ignore.
+with `.*` to ignore in single-line messages or `[\s\S]*` for multiline
+messages.
 
 Following GTest's conventions, failure to perform as expected here is a
 non-fatal test error. An `ASSERT` variant is provided to make it fatal. There
@@ -60,10 +61,13 @@ do { \
 try { \
   expression; \
   if (must_throw) { \
+    std::string message = "\tExpected: " #expression " throws an exception " \
+                          "of type " #exception ".\n Actual: it throws " \
+                          "nothing"; \
     if (fatal_failure) { \
-      GTEST_FATAL_FAILURE_("\t" #expression " failed to throw " #exception); \
+      GTEST_FATAL_FAILURE_(message.c_str()); \
     } else { \
-      GTEST_NONFATAL_FAILURE_("\t" #expression " failed to throw " #exception);\
+      GTEST_NONFATAL_FAILURE_(message.c_str());\
     } \
   } \
 } catch (const exception& err) { \
@@ -73,6 +77,14 @@ try { \
     ASSERT_PRED2(matcher, err.what(), regexp); \
   } else { \
     EXPECT_PRED2(matcher, err.what(), regexp); \
+  } \
+} catch (...) { \
+  std::string message = "\tExpected: " #expression " throws an exception of " \
+      "type " #exception  ".\n Actual: it throws a different type."; \
+  if (fatal_failure) { \
+    GTEST_FATAL_FAILURE_(message.c_str()); \
+  } else { \
+    GTEST_NONFATAL_FAILURE_(message.c_str()); \
   } \
 } \
 } while (0)

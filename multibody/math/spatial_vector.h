@@ -5,7 +5,6 @@
 
 #include "drake/common/drake_assert.h"
 #include "drake/common/drake_copyable.h"
-#include "drake/common/drake_deprecated.h"
 #include "drake/common/eigen_types.h"
 #include "drake/math/rotation_matrix.h"
 
@@ -202,10 +201,52 @@ class SpatialVector {
   /// Returns a constant reference to the underlying storage.
   const CoeffsEigenType& get_coeffs() const { return V_;}
 
+  /// Unary minus operator.
+  SpatialQuantity operator-() const {
+    return SpatialQuantity(-get_coeffs());
+  }
+
+  /// Addition assignment operator.
+  SpatialQuantity& operator+=(const SpatialQuantity& V) {
+    this->get_coeffs() += V.get_coeffs();
+    return get_mutable_derived();
+  }
+
+  /// Subtraction assignment operator.
+  SpatialQuantity& operator-=(const SpatialQuantity& V) {
+    this->get_coeffs() -= V.get_coeffs();
+    return get_mutable_derived();
+  }
+
+  /// Multiplication assignment operator.
+  SpatialQuantity& operator*=(const T& s) {
+    this->get_coeffs() *= s;
+    return get_mutable_derived();
+  }
+
+  /// (Advanced) Addition operator. Implements the addition of V1 and V2 as
+  /// elements in ℝ⁶.
+  /// @warning This operation might not be physical for certain spatial
+  /// quantities. For instace, combining the spatial accelerations of two frames
+  /// does not correspond to this operation.
+  friend SpatialQuantity operator+(const SpatialQuantity& V1,
+                                   const SpatialQuantity& V2) {
+    return SpatialQuantity(V1) += V2;
+  }
+
+  /// (Advanced) Subtraction operator. Implements the subtraction of V1 and V2
+  /// as elements in ℝ⁶.
+  /// @warning This operation might not be physical for certain spatial
+  /// quantities.
+  friend SpatialQuantity operator-(const SpatialQuantity& V1,
+                                   const SpatialQuantity& V2) {
+    return SpatialQuantity(V1) -= V2;
+  }
+
   /// Multiplication of a spatial vector V from the left by a scalar `s`.
   /// @relates SpatialVector.
   friend SpatialQuantity operator*(const T& s, const SpatialQuantity& V) {
-    return SpatialQuantity(s * V.get_coeffs());
+    return SpatialQuantity(V) *= s;
   }
 
   /// Multiplication of a spatial vector V from the right by a scalar `s`.
@@ -223,29 +264,9 @@ class SpatialVector {
   ///   V_F.translational() = R_FE * V_E.translational()
   /// </pre>
   /// @returns V_F The same spatial vector re-expressed in frame F.
-  DRAKE_DEPRECATED("2019-08-01", "Use RotationMatrix * SpatialQuantity.")
-  friend SpatialQuantity operator*(
-      const Matrix3<T>& R_FE, const SpatialQuantity& V_E) {
-    return SpatialQuantity(R_FE * V_E.rotational(), R_FE * V_E.translational());
-  }
-
-  /// This operation re-expresses the spatial vector `V_E` originally expressed
-  /// in frame E, into `V_F`, the same spatial vector expresed in another frame
-  /// F. The transformation requires the rotation matrix `R_FE` representing the
-  /// orientation of the original frame E with respect to frame F.
-  /// The operation performed is: <pre>
-  ///   V_F.rotational()    = R_FE * V_E.rotational(),
-  ///   V_F.translational() = R_FE * V_E.translational()
-  /// </pre>
-  /// @returns V_F The same spatial vector re-expressed in frame F.
   friend SpatialQuantity operator*(
       const math::RotationMatrix<T>& R_FE, const SpatialQuantity& V_E) {
     return SpatialQuantity(R_FE * V_E.rotational(), R_FE * V_E.translational());
-  }
-
-  /// Unary minus operator.
-  SpatialQuantity operator-() const {
-    return SpatialQuantity(-get_coeffs());
   }
 
   /// Factory to create a _zero_ %SpatialVector, i.e. rotational and

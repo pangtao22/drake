@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 
-from __future__ import print_function
-
 import pydrake.systems.framework as mut
 
 import copy
@@ -17,7 +15,7 @@ from pydrake.symbolic import Expression
 from pydrake.systems.analysis import (
     IntegratorBase, IntegratorBase_,
     RungeKutta2Integrator, RungeKutta3Integrator,
-    Simulator, Simulator_,
+    SimulatorStatus, Simulator, Simulator_,
     )
 from pydrake.systems.framework import (
     AbstractValue,
@@ -55,8 +53,8 @@ from pydrake.systems.primitives import (
     LinearSystem,
     PassThrough,
     SignalLogger,
+    ZeroOrderHold,
     )
-from pydrake.common.test_utilities.deprecation import catch_drake_warnings
 
 # TODO(eric.cousineau): The scope of this test file and and `custom_test.py`
 # is poor. Move these tests into `framework_test` and `analysis_test`, and
@@ -113,6 +111,7 @@ class TestGeneral(unittest.TestCase):
             context.get_continuous_state_vector(), VectorBase)
         self.assertIsInstance(
             context.get_mutable_continuous_state_vector(), VectorBase)
+        system.SetDefaultContext(context)
 
         context = system.CreateDefaultContext()
         self.assertIsInstance(
@@ -269,7 +268,7 @@ class TestGeneral(unittest.TestCase):
     def test_scalar_type_conversion(self):
         float_system = Adder(1, 1)
         float_context = float_system.CreateDefaultContext()
-        float_context.FixInputPort(0, [1.])
+        float_system.get_input_port(0).FixValue(float_context, 1.)
         for T in [float, AutoDiffXd, Expression]:
             system = Adder_[T](1, 1)
             # N.B. Current scalar conversion does not permit conversion to and
@@ -334,12 +333,8 @@ class TestGeneral(unittest.TestCase):
 
             # Create simulator specifying context.
             context = system.CreateDefaultContext()
-            with catch_drake_warnings(expected_count=1):
-                context.set_time(0.)
             context.SetTime(0.)
 
-            with catch_drake_warnings(expected_count=1):
-                context.set_accuracy(1e-4)
             context.SetAccuracy(1e-4)
             self.assertEqual(context.get_accuracy(), 1e-4)
 
@@ -348,6 +343,7 @@ class TestGeneral(unittest.TestCase):
             self.assertTrue(simulator.get_context() is context)
             check_output(context)
             simulator.AdvanceTo(1)
+            simulator.AdvancePendingEvents()
 
     def test_copy(self):
         # Copy a context using `deepcopy` or `clone`.
@@ -369,6 +365,7 @@ class TestGeneral(unittest.TestCase):
         builder = DiagramBuilder()
         adder0 = builder.AddSystem(Adder(2, size))
         adder0.set_name("adder0")
+
         adder1 = builder.AddSystem(Adder(2, size))
         adder1.set_name("adder1")
 
@@ -386,6 +383,8 @@ class TestGeneral(unittest.TestCase):
         builder.ExportOutput(integrator.get_output_port(0), "result")
 
         diagram = builder.Build()
+        self.assertEqual(adder0.get_name(), "adder0")
+        self.assertEqual(diagram.GetSubsystemByName("adder0"), adder0)
         # TODO(eric.cousineau): Figure out unicode handling if needed.
         # See //systems/framework/test/diagram_test.cc:349 (sha: bc84e73)
         # for an example name.
@@ -398,11 +397,12 @@ class TestGeneral(unittest.TestCase):
         # TODO(eric.cousineau): Not seeing any assertions being printed if no
         # inputs are connected. Need to check this behavior.
         input0 = np.array([0.1, 0.2, 0.3])
-        context.FixInputPort(0, input0)
+        diagram.get_input_port(0).FixValue(context, input0)
         input1 = np.array([0.02, 0.03, 0.04])
-        context.FixInputPort(1, input1)
+        diagram.get_input_port(1).FixValue(context, input1)
+        # Test the BasicVector overload.
         input2 = BasicVector([0.003, 0.004, 0.005])
-        context.FixInputPort(2, input2)  # Test the BasicVector overload.
+        diagram.get_input_port(2).FixValue(context, input2)
 
         # Test __str__ methods.
         self.assertRegexpMatches(str(context), "integrator")
@@ -436,6 +436,24 @@ class TestGeneral(unittest.TestCase):
             xc_expected = (float(i) / (n - 1) * (xc_final - xc_initial) +
                            xc_initial)
             self.assertTrue(np.allclose(xc, xc_expected))
+
+    def test_simulator_context_manipulation(self):
+        system = ConstantVectorSource([1])
+        # Use default-constructed context.
+        simulator = Simulator(system)
+        self.assertTrue(simulator.has_context())
+        context_default = simulator.get_mutable_context()
+        # WARNING: Once we call `simulator.reset_context()`, it will delete the
+        # context it currently owns, which is `context_default` in this case.
+        # BE CAREFUL IN SITUATIONS LIKE THIS!
+        # TODO(eric.cousineau): Bind `release_context()`, or migrate context
+        # usage to use `shared_ptr`.
+        context = system.CreateDefaultContext()
+        simulator.reset_context(context)
+        self.assertIs(context, simulator.get_mutable_context())
+        # WARNING: This will also invalidate `context`. Be careful!
+        simulator.reset_context(None)
+        self.assertFalse(simulator.has_context())
 
     def test_simulator_integrator_manipulation(self):
         system = ConstantVectorSource([1])
@@ -528,7 +546,8 @@ class TestGeneral(unittest.TestCase):
         model_value = AbstractValue.Make("Hello World")
         system = PassThrough(copy.copy(model_value))
         context = system.CreateDefaultContext()
-        fixed = context.FixInputPort(0, copy.copy(model_value))
+        fixed = system.get_input_port(0).FixValue(context,
+                                                  copy.copy(model_value))
         self.assertIsInstance(fixed.GetMutableData(), AbstractValue)
         input_port = system.get_input_port(0)
 
@@ -545,7 +564,7 @@ class TestGeneral(unittest.TestCase):
         model_value = AbstractValue.Make(BasicVector(np_value))
         system = PassThrough(len(np_value))
         context = system.CreateDefaultContext()
-        context.FixInputPort(0, np_value)
+        system.get_input_port(0).FixValue(context, np_value)
         input_port = system.get_input_port(0)
 
         value = input_port.Eval(context)
@@ -664,3 +683,19 @@ class TestGeneral(unittest.TestCase):
             # A RuntimeError occurs when the Context detects that the
             # type-erased Value objects are incompatible.
             input_port.FixValue(context, AbstractValue.Make("string"))
+
+    def test_context_fix_input_port(self):
+        # WARNING: This is not the recommend workflow; instead, use
+        # `InputPort.FixValue` instead. This is here just for testing /
+        # coverage purposes.
+        dt = 0.1  # Arbitrary.
+        system_vec = ZeroOrderHold(period_sec=dt, vector_size=1)
+        context_vec = system_vec.CreateDefaultContext()
+        context_vec.FixInputPort(index=0, data=[0.])
+        context_vec.FixInputPort(index=0, vec=BasicVector([0.]))
+        # Test abstract.
+        model_value = AbstractValue.Make("Hello")
+        system_abstract = ZeroOrderHold(
+            period_sec=dt, abstract_model_value=model_value.Clone())
+        context_abstract = system_abstract.CreateDefaultContext()
+        context_abstract.FixInputPort(index=0, value=model_value.Clone())

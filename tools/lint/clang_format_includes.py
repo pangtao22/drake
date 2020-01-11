@@ -34,9 +34,13 @@ def main(workspace_name="drake"):
             os.path.join(workspace_dir, relpath)
             for relpath in relpaths
             if os.path.splitext(relpath)[1][1:] in extensions and
-            not relpath.startswith("third_party") and
-            not relpath.startswith("matlab")
+            not relpath.startswith("third_party")
         ]
+        print(f"This will reformat {len(filenames)} files "
+              f"within {workspace_dir}")
+        if input("Are you sure [y/N]? ") not in ["y", "Y"]:
+            print("... canceled")
+            sys.exit(1)
     else:
         filenames = args.filenames
 

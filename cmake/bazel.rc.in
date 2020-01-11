@@ -4,20 +4,17 @@
 
 # To use this file directly with Bazel call:
 #
-#     bazel --bazelrc=@CMAKE_CURRENT_BINARY_DIR@/bazel.rc <command> --config <cfg> <options>
+#     bazel --bazelrc=@CMAKE_CURRENT_BINARY_DIR@/bazel.rc <command> --config=<cfg> <options>
 #
 # where <cfg> is Debug, MinSizeRel, Release, or RelWithDebInfo.
 
 # N.B. Please keep these alphabetized.
 
-build --action_env=DRAKE_PYTHON_BIN_PATH=@PYTHON_EXECUTABLE@
 build --color=@BAZEL_COLOR@
-build --python_path=@PYTHON_EXECUTABLE@
 build --subcommands=@BAZEL_SUBCOMMANDS@
 build --symlink_prefix=/
 
 @MAYBE_BAZEL_CONFIG@
-@MAYBE_BAZEL_DEFINE@
 
 build:Debug --compilation_mode=dbg
 build:MinSizeRel --compilation_mode=opt @MAYBE_BAZEL_COPT_OS@

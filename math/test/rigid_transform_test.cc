@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
+#include "drake/common/test_utilities/expect_no_throw.h"
 
 namespace drake {
 namespace math {
@@ -193,6 +194,86 @@ GTEST_TEST(RigidTransform, ConstructorAngleAxisPositionVector) {
   const RotationMatrix<double> R(theta_lambda);
   EXPECT_TRUE(X.rotation().IsExactlyEqualTo(R));
   EXPECT_TRUE(X.translation() == position);
+}
+
+// Test constructing a RigidTransform from a 3x4 matrix.
+GTEST_TEST(RigidTransform, ConstructorFromMatrix34) {
+  const RotationMatrixd R = GetRotationMatrixB();
+  const Vector3<double> position(4, 5, 6);
+  Eigen::Matrix<double, 3, 4> pose;
+  pose << R.matrix(), position;
+  const RigidTransformd X(pose);
+  EXPECT_TRUE(CompareMatrices(X.GetAsMatrix34(), pose));
+
+  if (kDrakeAssertIsArmed) {
+    pose(2, 2) += 1E-5;  // Corrupt the last element of the rotation matrix.
+    EXPECT_THROW(RigidTransformd XX(pose), std::logic_error);
+  }
+}
+
+// Test constructing a RigidTransform from a 4x4 matrix.
+GTEST_TEST(RigidTransform, ConstructorFromMatrix4) {
+  const RotationMatrixd R = GetRotationMatrixB();
+  const Vector3<double> position(4, 5, 6);
+  Matrix4<double> pose;
+  pose << R.matrix(), position, 0, 0, 0, 1;
+  const RigidTransformd X(pose);
+  EXPECT_TRUE(CompareMatrices(X.GetAsMatrix4(), pose));
+
+  // Ensure the 4x4 constructor fails if the last row differs from [0, 0, 0, 1].
+  if (kDrakeAssertIsArmed) {
+    DRAKE_EXPECT_NO_THROW(RigidTransformd Xm(pose));
+    pose(3, 0) = kEpsilon;
+    EXPECT_THROW(RigidTransformd Xm(pose), std::logic_error);
+    pose(3, 0) = 0;  pose(3, 1) = kEpsilon;
+    EXPECT_THROW(RigidTransformd Xm(pose), std::logic_error);
+    pose(3, 1) = 0;  pose(3, 2) = kEpsilon;
+    EXPECT_THROW(RigidTransformd Xm(pose), std::logic_error);
+    pose(3, 2) = 0;  pose(3, 3) = 1 + 2 * kEpsilon;
+    EXPECT_THROW(RigidTransformd Xm(pose), std::logic_error);
+  }
+}
+
+// Test constructing a RigidTransform from an Eigen expression.
+// Valid expressions need to resolve to Vector3, 3x4, or 4x4 matrix.
+GTEST_TEST(RigidTransform, ConstructorFromEigenExpression) {
+  // Test constructor with a Vector3 Eigen expression.
+  const Vector3<double> position(4, 5, 6);
+  const RigidTransform<double> X1(3 * position);
+  EXPECT_TRUE(X1.rotation().IsExactlyIdentity());
+  EXPECT_TRUE(X1.translation() == 3 * position);
+
+  // Test constructor with a 3x4 matrix Eigen expression.
+  const RotationMatrix<double> R(RollPitchYaw<double>(1, 2, 3));
+  Eigen::Matrix<double, 3, 4> pose34;
+  pose34 << R.matrix(), position;
+  const RigidTransform<double> X2((1 + kEpsilon) * pose34);
+  EXPECT_TRUE(CompareMatrices(X2.GetAsMatrix34(), (1 + kEpsilon) * pose34));
+
+  // Test constructor with a 4x4 matrix Eigen expression.
+  Eigen::Matrix<double, 4, 4> pose4;
+  pose4 << R.matrix(), position, 0, 0, 0, 1;
+  const RigidTransform<double> X3(pose4 * pose4);
+  EXPECT_TRUE(CompareMatrices(X3.GetAsMatrix4(), pose4 * pose4));
+
+  // Ensure the 4x4 constructor fails if the last row differs from [0, 0, 0, 1].
+  if (kDrakeAssertIsArmed) {
+    DRAKE_EXPECT_NO_THROW(RigidTransformd Xm(pose4 * pose4));
+    pose4(3, 0) = kEpsilon;
+    EXPECT_THROW(RigidTransformd Xm(pose4 * pose4), std::logic_error);
+    pose4(3, 0) = 0;  pose4(3, 1) = kEpsilon;
+    EXPECT_THROW(RigidTransformd Xm(pose4 * pose4), std::logic_error);
+    pose4(3, 1) = 0;  pose4(3, 2) = kEpsilon;
+    EXPECT_THROW(RigidTransformd Xm(pose4 * pose4), std::logic_error);
+    pose4(3, 2) = 0;  pose4(3, 3) = 1 + 2 * kEpsilon;
+    EXPECT_THROW(RigidTransformd Xm(pose4 * pose4), std::logic_error);
+  }
+
+  // Ensure calling the constructor with a 3x3 matrix Eigen expression fails.
+  if (kDrakeAssertIsArmed) {
+    const Matrix3<double> m3 = R.matrix();  // 3x3 matrix.
+    EXPECT_THROW(RigidTransformd Xm(1.0 * m3), std::logic_error);
+  }
 }
 
 // Tests getting a 4x4 and 3x4 matrix from a RigidTransform.
@@ -496,6 +577,42 @@ GTEST_TEST(RigidTransform, ConstructRigidTransformFromTranslation3) {
   EXPECT_EQ(X_AB.translation(), p_AoBo_A);
   EXPECT_TRUE(X_AB.rotation().IsExactlyIdentity());
   EXPECT_TRUE(X_AB.IsExactlyEqualTo(X_AB_implicit));
+}
+
+// Test the RigidTransform set_rotation() methods.
+GTEST_TEST(RigidTransform, SetRotationMethods) {
+  const Vector3d p_AoBo_A(1.0, 2.0, 3.0);
+  RigidTransformd X_AB(p_AoBo_A);
+  EXPECT_TRUE(X_AB.rotation().IsExactlyIdentity());
+
+  // Test RigidTransform set_rotation() method with a RollPitchYaw.
+  const RollPitchYaw<double> rpy(0.1, 0.2, 0.3);
+  X_AB.set_rotation(rpy);
+  EXPECT_TRUE(X_AB.rotation().IsExactlyEqualTo(RotationMatrix<double>(rpy)));
+  EXPECT_EQ(X_AB.translation(), p_AoBo_A);
+  X_AB.set_rotation(RotationMatrix<double>::Identity());
+  EXPECT_TRUE(X_AB.rotation().IsExactlyIdentity());
+
+  // Test RigidTransform set_rotation() method with a Quaternion.
+  Eigen::Quaterniond quat(1, 2, 3, 4);
+  quat.normalize();
+  X_AB.set_rotation(quat);
+  EXPECT_TRUE(X_AB.rotation().IsExactlyEqualTo(RotationMatrix<double>(quat)));
+  EXPECT_EQ(X_AB.translation(), p_AoBo_A);
+  X_AB.set_rotation(RotationMatrix<double>::Identity());
+  EXPECT_TRUE(X_AB.rotation().IsExactlyIdentity());
+
+  // Test RigidTransform set_rotation() method with a Quaternion.
+  // Choose a unit vector using a Pythagorean quadruple, i.e., a set of integers
+  // a, b, c and d, such that a² + b² + c² = d².  One set is [1, 2, 2, 3].
+  const Eigen::Vector3d axis(1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0);
+  const Eigen::AngleAxis<double> angle_axis(0.234, axis);
+  X_AB.set_rotation(angle_axis);
+  EXPECT_TRUE(
+      X_AB.rotation().IsExactlyEqualTo(RotationMatrix<double>(angle_axis)));
+  EXPECT_EQ(X_AB.translation(), p_AoBo_A);
+  X_AB.set_rotation(RotationMatrix<double>::Identity());
+  EXPECT_TRUE(X_AB.rotation().IsExactlyIdentity());
 }
 
 // Test multiplying a RigidTransform by an Eigen::Translation3 and vice-versa.

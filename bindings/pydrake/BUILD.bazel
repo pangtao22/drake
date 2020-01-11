@@ -10,11 +10,11 @@ load(
     "@drake//tools/skylark:drake_py.bzl",
     "drake_py_binary",
     "drake_py_library",
-    "drake_py_test",
     "drake_py_unittest",
 )
 load(
     "@drake//tools/skylark:pybind.bzl",
+    "drake_pybind_cc_googletest",
     "drake_pybind_library",
     "generate_pybind_documentation_header",
     "get_drake_py_installs",
@@ -63,7 +63,6 @@ generate_pybind_documentation_header(
     root_name = "pydrake_doc",
     targets = [
         "//:drake_shared_library",
-        "//examples/acrobot:acrobot_plant",
         "//examples/compass_gait:compass_gait",
         "//examples/manipulation_station:manipulation_station",
         "//examples/manipulation_station:manipulation_station_hardware_interface",  # noqa
@@ -123,21 +122,13 @@ drake_pybind_library(
 )
 
 drake_pybind_library(
-    name = "automotive_py",
-    cc_deps = [
-        "//bindings/pydrake:documentation_pybind",
-        "//bindings/pydrake/common:value_pybind",
-        "//bindings/pydrake/common:wrap_pybind",
-    ],
-    cc_srcs = ["automotive_py.cc"],
-    package_info = PACKAGE_INFO,
-)
-
-drake_pybind_library(
     name = "geometry_py",
     cc_deps = [
         "//bindings/pydrake:documentation_pybind",
+        "//bindings/pydrake/common:cpp_template_pybind",
+        "//bindings/pydrake/common:default_scalars_pybind",
         "//bindings/pydrake/common:deprecation_pybind",
+        "//bindings/pydrake/common:type_pack",
         "//bindings/pydrake/common:value_pybind",
         "//lcmtypes:viewer",
     ],
@@ -155,7 +146,6 @@ drake_pybind_library(
     cc_deps = [
         "//bindings/pydrake:documentation_pybind",
         "//bindings/pydrake/common:deprecation_pybind",
-        "//bindings/pydrake/common:drake_optional_pybind",
     ],
     cc_srcs = ["lcm_py.cc"],
     package_info = PACKAGE_INFO,
@@ -203,6 +193,28 @@ drake_pybind_library(
 )
 
 drake_cc_library(
+    name = "polynomial_types_pybind",
+    hdrs = ["polynomial_types_pybind.h"],
+    declare_installed_headers = 0,
+    visibility = ["//visibility:public"],
+    deps = ["//:drake_shared_library"],
+)
+
+drake_pybind_library(
+    name = "polynomial_py",
+    cc_deps = [
+        ":polynomial_types_pybind",
+        "//bindings/pydrake:documentation_pybind",
+    ],
+    cc_srcs = ["polynomial_py.cc"],
+    package_info = PACKAGE_INFO,
+    py_deps = [
+        ":module_py",
+        "//bindings/pydrake/common:deprecation_py",
+    ],
+)
+
+drake_cc_library(
     name = "symbolic_types_pybind",
     hdrs = ["symbolic_types_pybind.h"],
     declare_installed_headers = 0,
@@ -228,27 +240,30 @@ drake_pybind_library(
 
 drake_pybind_library(
     name = "trajectories_py",
-    cc_deps = ["//bindings/pydrake:documentation_pybind"],
+    cc_deps = [
+        ":polynomial_types_pybind",
+        "//bindings/pydrake:documentation_pybind",
+    ],
     cc_srcs = ["trajectories_py.cc"],
     package_info = PACKAGE_INFO,
     py_deps = [
         ":module_py",
+        "//bindings/pydrake:polynomial_py",
     ],
 )
 
 PY_LIBRARIES_WITH_INSTALL = [
     ":autodiffutils_py",
-    ":automotive_py",
     ":geometry_py",
     ":lcm_py",
     ":math_py",
     ":perception_py",
+    ":polynomial_py",
     ":symbolic_py",
     ":trajectories_py",
     "//bindings/pydrake/attic",
     "//bindings/pydrake/common",
     "//bindings/pydrake/examples",
-    "//bindings/pydrake/maliput",
     "//bindings/pydrake/manipulation",
     "//bindings/pydrake/multibody",
     "//bindings/pydrake/solvers",
@@ -297,11 +312,23 @@ drake_cc_googletest(
     ],
 )
 
+# N.B. Due to dependency on `common` (#7912), this is not a fully isolated /
+# decoupled test.
+drake_pybind_cc_googletest(
+    name = "pydrake_pybind_test",
+    cc_deps = ["//bindings/pydrake:test_util_pybind"],
+    py_deps = [":module_py"],
+    py_srcs = ["test/_pydrake_pybind_test_extra.py"],
+)
+
 drake_py_unittest(
     name = "all_test",
     timeout = "moderate",
     data = ["//examples/pendulum:models"],
-    deps = [":all_py"],
+    deps = [
+        ":all_py",
+        "//bindings/pydrake/common/test_utilities:deprecation_py",
+    ],
 )
 
 drake_py_library(
@@ -339,6 +366,7 @@ drake_py_unittest(
         ":autodiffutils_test_util_py",
         ":math_py",
         "//bindings/pydrake/common/test_utilities:numpy_compare_py",
+        "//bindings/pydrake/common/test_utilities:pickle_compare_py",
     ],
 )
 
@@ -366,19 +394,39 @@ drake_py_unittest(
     ],
 )
 
+drake_py_library(
+    name = "mock_torch_py",
+    testonly = 1,
+    srcs = ["test/mock_torch/torch.py"],
+    imports = ["test/mock_torch"],
+)
+
+drake_py_unittest(
+    name = "rtld_global_warning_test",
+    deps = [
+        ":mock_torch_py",
+        ":module_py",
+    ],
+)
+
 drake_py_unittest(
     name = "forward_diff_test",
-    deps = [":autodiffutils_py"],
+    deps = [
+        ":autodiffutils_py",
+        "//bindings/pydrake/common/test_utilities",
+    ],
 )
 
 drake_py_unittest(
     name = "geometry_test",
     data = [
+        "//geometry:test_obj_files",
         "//systems/sensors:test_models",
     ],
     deps = [
         ":geometry_py",
         "//bindings/pydrake/common/test_utilities",
+        "//bindings/pydrake/systems:sensors_py",
     ],
 )
 
@@ -386,7 +434,6 @@ drake_py_unittest(
     name = "lcm_test",
     deps = [
         ":lcm_py",
-        "//bindings/pydrake/common/test_utilities",
         "@lcmtypes_robotlocomotion//:lcmtypes_robotlocomotion_py",
     ],
 )
@@ -395,7 +442,7 @@ drake_py_unittest(
     name = "math_test",
     deps = [
         ":math_py",
-        "//bindings/pydrake/common/test_utilities:numpy_compare_py",
+        "//bindings/pydrake/common/test_utilities",
     ],
 )
 
@@ -416,6 +463,14 @@ drake_py_unittest(
 )
 
 drake_py_unittest(
+    name = "polynomial_test",
+    deps = [
+        ":polynomial_py",
+        "//bindings/pydrake/common/test_utilities:numpy_compare_py",
+    ],
+)
+
+drake_py_unittest(
     name = "symbolic_test",
     deps = [
         ":algebra_test_util_py",
@@ -427,17 +482,9 @@ drake_py_unittest(
 
 drake_py_unittest(
     name = "trajectories_test",
-    deps = [":trajectories_py"],
-)
-
-drake_py_unittest(
-    name = "automotive_test",
     deps = [
-        ":automotive_py",
-        "//bindings/pydrake/maliput:api_py",
-        "//bindings/pydrake/maliput:dragway_py",
-        "//bindings/pydrake/multibody:multibody_tree_py",
-        "//bindings/pydrake/systems",
+        ":trajectories_py",
+        "//bindings/pydrake/common/test_utilities:numpy_compare_py",
     ],
 )
 
@@ -449,6 +496,11 @@ drake_py_binary(
     deps = [
         ":math_py",
     ],
+)
+
+drake_py_unittest(
+    name = "parse_models_test",
+    deps = [":pydrake"],
 )
 
 drake_py_unittest(

@@ -1,6 +1,7 @@
 #include "drake/geometry/proximity_engine.h"
 
 #include <cmath>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -10,6 +11,8 @@
 #include "drake/common/find_resource.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
+#include "drake/geometry/proximity/hydroelastic_callback.h"
+#include "drake/geometry/proximity_properties.h"
 #include "drake/geometry/shape_specification.h"
 #include "drake/math/autodiff_gradient.h"
 #include "drake/math/rigid_transform.h"
@@ -50,15 +53,15 @@ class ProximityEngineTester {
   }
 
   template <typename T>
-  static Vector3<T> GetTranslation(ProximityIndex index, bool is_dynamic,
+  static Vector3<T> GetTranslation(GeometryId id, bool is_dynamic,
                                    const ProximityEngine<T>& engine) {
-    return engine.GetX_WG(index, is_dynamic).translation();
+    return engine.GetX_WG(id, is_dynamic).translation();
   }
 
   template <typename T>
-  static GeometryIndex GetGeometryIndex(ProximityIndex index, bool is_dynamic,
-                                        const ProximityEngine<T>& engine) {
-    return engine.GetGeometryIndex(index, is_dynamic);
+  static HydroelasticType hydroelastic_type(
+      GeometryId id, const ProximityEngine<T>& engine) {
+    return engine.hydroelastic_geometries().hydroelastic_type(id);
   }
 };
 
@@ -72,12 +75,15 @@ using math::RollPitchYawd;
 using math::RotationMatrixd;
 
 using Eigen::AngleAxisd;
-using Eigen::Isometry3d;
 using Eigen::Translation3d;
-using Eigen::Vector3d;
 using Eigen::Vector2d;
+using Eigen::Vector3d;
 
+using std::make_shared;
+using std::make_unique;
 using std::move;
+using std::shared_ptr;
+using std::unordered_map;
 
 // Tests for manipulating the population of the proximity engine.
 
@@ -85,21 +91,187 @@ using std::move;
 GTEST_TEST(ProximityEngineTests, AddDynamicGeometry) {
   ProximityEngine<double> engine;
   Sphere sphere{0.5};
-  ProximityIndex index = engine.AddDynamicGeometry(sphere, GeometryIndex(0));
-  EXPECT_EQ(index, 0);
+  const GeometryId id = GeometryId::get_new_id();
+  engine.AddDynamicGeometry(sphere, id);
   EXPECT_EQ(engine.num_geometries(), 1);
   EXPECT_EQ(engine.num_anchored(), 0);
   EXPECT_EQ(engine.num_dynamic(), 1);
+}
+
+// "Processing" hydroelastic geometry is simply a case of invoking a method
+// on hydroelastic::Geometries. All error handling is done there. So, it is
+// sufficient to confirm that it is being properly invoked. We'll simply attempt
+// to instantiate every shape and assert its classification based on whether
+// it's supported or not (note: this test doesn't depend on the choice of
+// rigid/soft -- for each shape, we pick an arbitrary compliance, preferring
+// one that is supported over one that is not. Otherwise, the compliance choice
+// is immaterial.)
+GTEST_TEST(ProximityEngineTests, ProcessHydroelasticProperties) {
+  ProximityEngine<double> engine;
+  // All of the geometries will have a scale comparable to edge_length, so that
+  // the mesh creation is as cheap as possible. The exception is Mesh
+  // geometry since we have no re-meshing.
+  const double edge_length = 0.5;
+  const double E = 1e8;  // Elastic modulus.
+  ProximityProperties soft_properties;
+  soft_properties.AddProperty(kMaterialGroup, kElastic, E);
+  AddSoftHydroelasticProperties(edge_length, &soft_properties);
+  ProximityProperties rigid_properties;
+  // TODO(SeanCurtis-TRI): Keep an eye on this practice. Defining something as
+  // being rigid by giving it an "infinite elastic modulus" may be counter
+  // intuitive. If so, we'll need to rearticulate how we handle this
+  // classification. However, any dissonance should be mitigated by the upcoming
+  // API in proximity_properties.h for setting rigid/soft properties without
+  // getting into the details of how it's labeled.
+  rigid_properties.AddProperty(kMaterialGroup, kElastic,
+                              std::numeric_limits<double>::infinity());
+  AddRigidHydroelasticProperties(edge_length, &rigid_properties);
+
+  // Case: soft sphere.
+  {
+    Sphere sphere{edge_length};
+    const GeometryId sphere_id = GeometryId::get_new_id();
+    engine.AddDynamicGeometry(sphere, sphere_id, soft_properties);
+    EXPECT_EQ(ProximityEngineTester::hydroelastic_type(sphere_id, engine),
+              HydroelasticType::kSoft);
+  }
+
+  // Case: rigid cylinder.
+  {
+    Cylinder cylinder{edge_length, edge_length};
+    const GeometryId cylinder_id = GeometryId::get_new_id();
+    engine.AddDynamicGeometry(cylinder, cylinder_id, rigid_properties);
+    EXPECT_EQ(ProximityEngineTester::hydroelastic_type(cylinder_id, engine),
+              HydroelasticType::kRigid);
+  }
+
+  // Case: rigid ellipsoid.
+  {
+    Ellipsoid ellipsoid{edge_length, edge_length, edge_length};
+    const GeometryId ellipsoid_id = GeometryId::get_new_id();
+    engine.AddDynamicGeometry(ellipsoid, ellipsoid_id, rigid_properties);
+    EXPECT_EQ(ProximityEngineTester::hydroelastic_type(ellipsoid_id, engine),
+              HydroelasticType::kRigid);
+  }
+
+  // Case: rigid capsule (unsupported).
+  {
+    Capsule capsule{edge_length, edge_length};
+    const GeometryId capsule_id = GeometryId::get_new_id();
+    engine.AddDynamicGeometry(capsule, capsule_id, rigid_properties);
+    EXPECT_EQ(ProximityEngineTester::hydroelastic_type(capsule_id, engine),
+              HydroelasticType::kUndefined);
+  }
+
+  // Case: rigid half_space (unsupported).
+  {
+    HalfSpace half_space;
+    const GeometryId half_space_id = GeometryId::get_new_id();
+    engine.AddDynamicGeometry(half_space, half_space_id, rigid_properties);
+    EXPECT_EQ(ProximityEngineTester::hydroelastic_type(half_space_id, engine),
+              HydroelasticType::kUndefined);
+  }
+
+  // Case: rigid box.
+  {
+    Box box{edge_length, edge_length, edge_length};
+    const GeometryId box_id = GeometryId::get_new_id();
+    engine.AddDynamicGeometry(box, box_id, rigid_properties);
+    EXPECT_EQ(ProximityEngineTester::hydroelastic_type(box_id, engine),
+              HydroelasticType::kRigid);
+  }
+
+  // Case: meshes.
+  {
+    Mesh mesh{
+        drake::FindResourceOrThrow("drake/geometry/test/non_convex_mesh.obj"),
+        1.0 /* scale */};
+    const GeometryId mesh_id = GeometryId::get_new_id();
+    engine.AddDynamicGeometry(mesh, mesh_id, rigid_properties);
+    EXPECT_EQ(ProximityEngineTester::hydroelastic_type(mesh_id, engine),
+              HydroelasticType::kRigid);
+  }
+
+  // Case: rigid convex (unsupported)
+  {
+    Convex convex{
+        drake::FindResourceOrThrow("drake/geometry/test/quad_cube.obj"),
+        edge_length};
+    const GeometryId convex_id = GeometryId::get_new_id();
+    engine.AddDynamicGeometry(convex, convex_id, rigid_properties);
+    EXPECT_EQ(ProximityEngineTester::hydroelastic_type(convex_id, engine),
+              HydroelasticType::kUndefined);
+  }
+}
+
+// Confirms that Mesh is supported in ComputeContactSurfaces() but not other
+// queries. We set up an anchored soft sphere S and a dynamic rigid mesh M, so
+// that they contact. Then, we verify that ComputeContactSurfaces() gives one
+// contact surface between S and M, but other queries give no result from M.
+GTEST_TEST(ProximityEngineTests, MeshComputeContactSurfacesOnly) {
+  ProximityEngine<double> engine;
+
+  Sphere sphere_S{0.2};
+  RigidTransformd X_WS = RigidTransformd::Identity();
+  const GeometryId id_S = GeometryId::get_new_id();
+  const double edge_length = 0.5;
+  const double E = 1e8;  // Elastic modulus.
+  ProximityProperties soft_properties;
+  soft_properties.AddProperty(kMaterialGroup, kElastic, E);
+  AddSoftHydroelasticProperties(edge_length, &soft_properties);
+  engine.AddAnchoredGeometry(sphere_S, X_WS, id_S, soft_properties);
+
+  Mesh mesh_M{
+      drake::FindResourceOrThrow("drake/geometry/test/non_convex_mesh.obj"),
+      1.0 /* scale */};
+  const GeometryId id_M = GeometryId::get_new_id();
+  // Infinite elastic modulus for rigid geometry.
+  const double E_infinity = std::numeric_limits<double>::infinity();
+  ProximityProperties rigid_properties;
+  rigid_properties.AddProperty(kMaterialGroup, kElastic, E_infinity);
+  AddRigidHydroelasticProperties(edge_length, &rigid_properties);
+  engine.AddDynamicGeometry(mesh_M, id_M, rigid_properties);
+  RigidTransformd X_WM = RigidTransformd::Identity();
+
+  const unordered_map<GeometryId, RigidTransformd> dynamic_poses = {
+      {id_M, X_WM}};
+
+  engine.UpdateWorldPoses(dynamic_poses);
+
+  const unordered_map<GeometryId, RigidTransformd> all_poses = {{id_S, X_WS},
+                                                                {id_M, X_WM}};
+
+  const auto contact_surfaces = engine.ComputeContactSurfaces(all_poses);
+  EXPECT_EQ(1, contact_surfaces.size());
+
+  const double max_distance = std::numeric_limits<double>::infinity();
+  const auto signed_distance_pairs =
+      engine.ComputeSignedDistancePairwiseClosestPoints(all_poses,
+                                                        max_distance);
+  EXPECT_EQ(0, signed_distance_pairs.size());
+
+  const auto signed_distances_to_point =
+      engine.ComputeSignedDistanceToPoint(Vector3d::Zero(),  // p_WQ
+                                          all_poses, max_distance);
+  ASSERT_EQ(1, signed_distances_to_point.size());
+  EXPECT_EQ(id_S, signed_distances_to_point[0].id_G);
+
+  const auto point_pairs = engine.ComputePointPairPenetration();
+  EXPECT_EQ(0, point_pairs.size());
+
+  const auto collision_candidates = engine.FindCollisionCandidates();
+  EXPECT_EQ(0, collision_candidates.size());
+
+  EXPECT_FALSE(engine.HasCollisions());
 }
 
 // Tests simple addition of anchored geometry.
 GTEST_TEST(ProximityEngineTests, AddAnchoredGeometry) {
   ProximityEngine<double> engine;
   Sphere sphere{0.5};
-  Isometry3<double> pose = Isometry3<double>::Identity();
-  ProximityIndex index = engine.AddAnchoredGeometry(sphere, pose,
-                                                    GeometryIndex(0));
-  EXPECT_EQ(index, 0);
+  RigidTransformd pose = RigidTransformd::Identity();
+  const GeometryId id = GeometryId::get_new_id();
+  engine.AddAnchoredGeometry(sphere, pose, id);
   EXPECT_EQ(engine.num_geometries(), 1);
   EXPECT_EQ(engine.num_anchored(), 1);
   EXPECT_EQ(engine.num_dynamic(), 0);
@@ -109,12 +281,12 @@ GTEST_TEST(ProximityEngineTests, AddAnchoredGeometry) {
 GTEST_TEST(ProximityEngineTests, AddMixedGeometry) {
   ProximityEngine<double> engine;
   Sphere sphere{0.5};
-  Isometry3<double> pose = Isometry3<double>::Identity();
-  ProximityIndex a_index = engine.AddAnchoredGeometry(sphere, pose,
-                                                      GeometryIndex(0));
-  EXPECT_EQ(a_index, 0);
-  ProximityIndex g_index = engine.AddDynamicGeometry(sphere, GeometryIndex(0));
-  EXPECT_EQ(g_index, 0);
+  RigidTransformd pose = RigidTransformd::Identity();
+  const GeometryId id_1 = GeometryId::get_new_id();
+  engine.AddAnchoredGeometry(sphere, pose, id_1);
+
+  const GeometryId id_2 = GeometryId::get_new_id();
+  engine.AddDynamicGeometry(sphere, id_2);
   EXPECT_EQ(engine.num_geometries(), 2);
   EXPECT_EQ(engine.num_anchored(), 1);
   EXPECT_EQ(engine.num_dynamic(), 1);
@@ -128,79 +300,55 @@ GTEST_TEST(ProximityEngineTests, RemoveGeometry) {
   for (bool is_dynamic : {true, false}) {
     ProximityEngine<double> engine;
 
-    double x_pos[] = {0, 2, 4};
-
-    std::vector<GeometryIndex> geometry_indices;
-    std::vector<ProximityIndex> proximity_indices;
-    std::vector<Isometry3<double>> poses;
+    // Removing a geometry that doesn't exist, throws.
+    EXPECT_THROW(engine.RemoveGeometry(GeometryId::get_new_id(), true),
+                 std::logic_error);
 
     // Populate the world with three anchored spheres located on the x-axis at
     // x = 0, 2, & 4. With radius of 0.5, they should *not* be colliding.
     Sphere sphere{0.5};
-
+    std::vector<GeometryId> ids;
+    std::unordered_map<GeometryId, RigidTransformd> poses;
     for (int i = 0; i < 3; ++i) {
-      geometry_indices.push_back(GeometryIndex(i + 10));
-      poses.push_back(Isometry3<double>::Identity());
-      poses[i].translation() << x_pos[i], 0, 0;
+      const GeometryId id = GeometryId::get_new_id();
+      ids.push_back(id);
+      poses.insert({id, RigidTransformd{Translation3d{i * 2.0, 0, 0}}});
+      // Add rigid properties so we can confirm removal of hydroelastic
+      // representation. We use rigid here to make sure things get invoked and
+      // rely on the implementation of hydroelastic::Geometries to distinguish
+      // soft and rigid.
+      ProximityProperties props;
+      props.AddProperty(kMaterialGroup, kElastic,
+                        std::numeric_limits<double>::infinity());
+      AddRigidHydroelasticProperties(1.0, &props);
       if (is_dynamic) {
-        proximity_indices.push_back(
-            engine.AddDynamicGeometry(sphere, geometry_indices[i]));
+        engine.AddDynamicGeometry(sphere, id, props);
       } else {
-        proximity_indices.push_back(
-            engine.AddAnchoredGeometry(sphere, poses[i], geometry_indices[i]));
+        engine.AddAnchoredGeometry(sphere, poses[id], id, props);
       }
-      EXPECT_EQ(proximity_indices[i], i);
-      EXPECT_NE(static_cast<int>(proximity_indices[i]),
-                static_cast<int>(geometry_indices[i]));
+      EXPECT_EQ(ProximityEngineTester::hydroelastic_type(id, engine),
+                HydroelasticType::kRigid);
     }
-    EXPECT_EQ(engine.num_geometries(), 3);
-    EXPECT_EQ(engine.num_anchored(), is_dynamic ? 0 : 3);
-    EXPECT_EQ(engine.num_dynamic(), is_dynamic ? 3 : 0);
+    int expected_count = static_cast<int>(engine.num_geometries());
+    EXPECT_EQ(engine.num_geometries(), expected_count);
+    EXPECT_EQ(engine.num_anchored(), is_dynamic ? 0 : expected_count);
+    EXPECT_EQ(engine.num_dynamic(), is_dynamic ? expected_count : 0);
 
-    if (is_dynamic) {
-      // Poses for dynamic geometries need to be explicitly updated.
-      std::vector<GeometryIndex> indices(poses.size());
-      std::iota(indices.begin(), indices.end(), GeometryIndex(0));
-      engine.UpdateWorldPoses(poses, indices);
-    }
+    engine.UpdateWorldPoses(poses);
 
-    // Case: Remove middle object, confirm that final gets moved.
-    auto remove_index = ProximityIndex(1);
-    optional<GeometryIndex> moved =
-        engine.RemoveGeometry(remove_index, is_dynamic);
-    // Confirm that a move is reported, that the moved object has its engine
-    // index updated, and that there is "physical" evidence of the move (e.g.,
-    // the correct, unique position).
-    {
-      EXPECT_EQ(engine.num_geometries(), 2);
-      EXPECT_EQ(engine.num_anchored(), is_dynamic ? 0 : 2);
-      EXPECT_EQ(engine.num_dynamic(), is_dynamic ? 2 : 0);
-      EXPECT_TRUE(moved);
-      EXPECT_EQ(*moved, geometry_indices[2]);
-      EXPECT_TRUE(CompareMatrices(ProximityEngineTester::GetTranslation(
-                                      remove_index, is_dynamic, engine),
-                                  Vector3<double>{x_pos[2], 0, 0}, 0,
-                                  MatrixCompareType::absolute));
-      EXPECT_EQ(ProximityEngineTester::GetGeometryIndex(remove_index,
-                                                        is_dynamic, engine),
-                geometry_indices[2]);
-    }
-
-    // Case: Remove the last object, nothing should get moved.
-    moved = engine.RemoveGeometry(remove_index, is_dynamic);
-    // RemoveGeometry
-    {
-      EXPECT_EQ(engine.num_geometries(), 1);
-      EXPECT_EQ(engine.num_anchored(), is_dynamic ? 0 : 1);
-      EXPECT_EQ(engine.num_dynamic(), is_dynamic ? 1 : 0);
-      EXPECT_FALSE(moved);
-      EXPECT_TRUE(CompareMatrices(ProximityEngineTester::GetTranslation(
-                                      ProximityIndex(0), is_dynamic, engine),
-                                  Vector3<double>{x_pos[0], 0, 0}, 0,
-                                  MatrixCompareType::absolute));
-      EXPECT_EQ(ProximityEngineTester::GetGeometryIndex(ProximityIndex(0),
-                                                        is_dynamic, engine),
-                geometry_indices[0]);
+    // Remove objects out of order from how they were added. Confirms that the
+    // globals are consistent and that the geometry can only be removed once.
+    for (int index : {1, 2, 0}) {
+      --expected_count;
+      const GeometryId remove_id = ids[index];
+      engine.RemoveGeometry(remove_id, is_dynamic);
+      EXPECT_EQ(engine.num_geometries(), expected_count);
+      EXPECT_EQ(engine.num_anchored(), is_dynamic ? 0 : expected_count);
+      EXPECT_EQ(engine.num_dynamic(), is_dynamic ? expected_count : 0);
+      EXPECT_THROW(engine.RemoveGeometry(remove_id, is_dynamic),
+                   std::logic_error);
+      EXPECT_EQ(ProximityEngineTester::hydroelastic_type(remove_id, engine),
+                HydroelasticType::kUndefined);
     }
   }
 }
@@ -210,10 +358,11 @@ GTEST_TEST(ProximityEngineTests, RemoveGeometry) {
 // Tests exception when we read an .obj file with two objects into Convex
 GTEST_TEST(ProximityEngineTests, ExceptionTwoObjectsInObjFileForConvex) {
   ProximityEngine<double> engine;
-  Convex convex{drake::FindResourceOrThrow(
-      "drake/geometry/test/forbidden_two_cubes.obj"), 1.0};
-  DRAKE_EXPECT_THROWS_MESSAGE(engine.AddDynamicGeometry(convex,
-                                                        GeometryIndex(0)),
+  Convex convex{
+      drake::FindResourceOrThrow("drake/geometry/test/forbidden_two_cubes.obj"),
+      1.0};
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      engine.AddDynamicGeometry(convex, GeometryId::get_new_id()),
       std::runtime_error, ".*one and only one object.*");
 }
 
@@ -224,26 +373,32 @@ GTEST_TEST(ProximityEngineTests, ExceptionTwoObjectsInObjFileForConvex) {
 GTEST_TEST(ProximityEngineTests, CopySemantics) {
   ProximityEngine<double> ref_engine;
   Sphere sphere{0.5};
-  Isometry3<double> pose = Isometry3<double>::Identity();
+  RigidTransformd pose = RigidTransformd::Identity();
 
-  // NOTE: The GeometryIndex values are all lies; the values are arbitrary but
+  // NOTE: The GeometryId values are all lies; the values are arbitrary but
   // do not matter in the context of this test.
-  ref_engine.AddAnchoredGeometry(sphere, pose, GeometryIndex(0));
+  ref_engine.AddAnchoredGeometry(sphere, pose, GeometryId::get_new_id());
 
-  ref_engine.AddDynamicGeometry(sphere, GeometryIndex(1));
+  ref_engine.AddDynamicGeometry(sphere, GeometryId::get_new_id());
 
   Cylinder cylinder{0.1, 1.0};
-  ref_engine.AddDynamicGeometry(cylinder, GeometryIndex(2));
+  ref_engine.AddDynamicGeometry(cylinder, GeometryId::get_new_id());
 
   Box box{0.1, 0.2, 0.3};
-  ref_engine.AddDynamicGeometry(box, GeometryIndex(3));
+  ref_engine.AddDynamicGeometry(box, GeometryId::get_new_id());
 
-  HalfSpace halfspace{};
-  ref_engine.AddDynamicGeometry(halfspace, GeometryIndex(4));
+  Capsule capsule{0.1, 1.0};
+  ref_engine.AddDynamicGeometry(capsule, GeometryId::get_new_id());
 
-  Convex convex{drake::FindResourceOrThrow(
-      "drake/geometry/test/quad_cube.obj"), 1.0};
-  ref_engine.AddDynamicGeometry(convex, GeometryIndex(5));
+  Ellipsoid ellipsoid{0.1, 0.2, 0.3};
+  ref_engine.AddDynamicGeometry(ellipsoid, GeometryId::get_new_id());
+
+  HalfSpace half_space{};
+  ref_engine.AddDynamicGeometry(half_space, GeometryId::get_new_id());
+
+  Convex convex{drake::FindResourceOrThrow("drake/geometry/test/quad_cube.obj"),
+                1.0};
+  ref_engine.AddDynamicGeometry(convex, GeometryId::get_new_id());
 
   ProximityEngine<double> copy_construct(ref_engine);
   ProximityEngineTester::IsDeepCopy(copy_construct, ref_engine);
@@ -258,13 +413,9 @@ GTEST_TEST(ProximityEngineTests, CopySemantics) {
 GTEST_TEST(ProximityEngineTests, MoveSemantics) {
   ProximityEngine<double> engine;
   Sphere sphere{0.5};
-  Isometry3<double> pose = Isometry3<double>::Identity();
-  ProximityIndex a_index = engine.AddAnchoredGeometry(sphere, pose,
-                                                      GeometryIndex(0));
-  EXPECT_EQ(a_index, 0);
-  ProximityIndex g_index = engine.AddDynamicGeometry(sphere,
-                                                     GeometryIndex(0));
-  EXPECT_EQ(g_index, 0);
+  RigidTransformd pose = RigidTransformd::Identity();
+  engine.AddAnchoredGeometry(sphere, pose, GeometryId::get_new_id());
+  engine.AddDynamicGeometry(sphere, GeometryId::get_new_id());
 
   ProximityEngine<double> move_construct(move(engine));
   EXPECT_EQ(move_construct.num_geometries(), 2);
@@ -290,54 +441,45 @@ GTEST_TEST(ProximityEngineTests, MoveSemantics) {
 // A scene with no geometry reports no witness pairs.
 GTEST_TEST(ProximityEngineTests, SignedDistanceClosestPointsOnEmptyScene) {
   ProximityEngine<double> engine;
-  std::vector<GeometryId> empty_map;
-  std::vector<Isometry3d> X_WGs;
+  const unordered_map<GeometryId, RigidTransformd> X_WGs;
 
   const auto results =
-      engine.ComputeSignedDistancePairwiseClosestPoints(empty_map, X_WGs, kInf);
+      engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs, kInf);
   EXPECT_EQ(results.size(), 0);
 }
 
 // A scene with a single anchored geometry reports no distance.
 GTEST_TEST(ProximityEngineTests, SignedDistanceClosestPointsSingleAnchored) {
   ProximityEngine<double> engine;
-  std::vector<GeometryId> geometry_map;
-  std::vector<Isometry3d> X_WGs;
 
   Sphere sphere{0.5};
-  Isometry3<double> pose = Isometry3<double>::Identity();
-  X_WGs.push_back(pose);
-  ProximityIndex index = engine.AddAnchoredGeometry(sphere, pose,
-                                                    GeometryIndex(0));
-  geometry_map.push_back(GeometryId::get_new_id());
-  EXPECT_EQ(index, 0);
-  const auto results = engine.ComputeSignedDistancePairwiseClosestPoints(
-      geometry_map, X_WGs, kInf);
+  const GeometryId id = GeometryId::get_new_id();
+  const unordered_map<GeometryId, RigidTransformd> X_WGs{
+      {id, RigidTransformd::Identity()}};
+  engine.AddAnchoredGeometry(sphere, X_WGs.at(id), id);
+
+  const auto results =
+      engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs, kInf);
   EXPECT_EQ(results.size(), 0);
 }
 
 // Tests that anchored geometry don't report closest distance with each other.
 GTEST_TEST(ProximityEngineTests, SignedDistanceClosestPointsMultipleAnchored) {
   ProximityEngine<double> engine;
-  std::vector<GeometryId> geometry_map;
-  std::vector<Isometry3d> X_WGs;
+  unordered_map<GeometryId, RigidTransformd> X_WGs;
 
   const double radius = 0.5;
   Sphere sphere{radius};
-  Isometry3<double> pose = Isometry3<double>::Identity();
-  X_WGs.push_back(pose);
-  ProximityIndex index1 = engine.AddAnchoredGeometry(sphere, pose,
-                                                     GeometryIndex(0));
-  geometry_map.push_back(GeometryId::get_new_id());
-  EXPECT_EQ(index1, 0);
-  pose.translation() << 1.8 * radius, 0, 0;
-  X_WGs.push_back(pose);
-  ProximityIndex index2 = engine.AddAnchoredGeometry(sphere, pose,
-                                                     GeometryIndex(1));
-  geometry_map.push_back(GeometryId::get_new_id());
-  EXPECT_EQ(index2, 1);
-  const auto results = engine.ComputeSignedDistancePairwiseClosestPoints(
-      geometry_map, X_WGs, kInf);
+  const GeometryId id_A = GeometryId::get_new_id();
+  X_WGs[id_A] = RigidTransformd::Identity();
+  engine.AddAnchoredGeometry(sphere, X_WGs.at(id_A), id_A);
+
+  const GeometryId id_B = GeometryId::get_new_id();
+  X_WGs[id_B] = RigidTransformd{Translation3d{1.8 * radius, 0, 0}};
+  engine.AddAnchoredGeometry(sphere, X_WGs.at(id_B), id_B);
+
+  const auto results =
+      engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs, kInf);
   EXPECT_EQ(results.size(), 0);
 }
 
@@ -346,15 +488,15 @@ GTEST_TEST(ProximityEngineTests, SignedDistanceClosestPointsMultipleAnchored) {
 // maximum distance, respectively.
 GTEST_TEST(ProximityEngineTests, SignedDistanceClosestPointsMaxDistance) {
   ProximityEngine<double> engine;
-  std::vector<GeometryId> geometry_map{GeometryId::get_new_id(),
-                                       GeometryId::get_new_id()};
-  std::vector<Isometry3d> X_WGs{Isometry3d::Identity(), Isometry3d::Identity()};
+  const GeometryId id_A = GeometryId::get_new_id();
+  const GeometryId id_B = GeometryId::get_new_id();
+  unordered_map<GeometryId, RigidTransformd> X_WGs{
+      {id_A, RigidTransformd::Identity()}, {id_B, RigidTransformd::Identity()}};
 
   const double radius = 0.5;
   Sphere sphere{radius};
-  std::vector<GeometryIndex> indices{GeometryIndex(0), GeometryIndex(1)};
-  engine.AddDynamicGeometry(sphere, indices[0]);
-  engine.AddDynamicGeometry(sphere, indices[1]);
+  engine.AddDynamicGeometry(sphere, id_A);
+  engine.AddDynamicGeometry(sphere, id_B);
 
   const double kMaxDistance = 1.0;
   const double kEps = 2 * std::numeric_limits<double>::epsilon();
@@ -364,10 +506,10 @@ GTEST_TEST(ProximityEngineTests, SignedDistanceClosestPointsMaxDistance) {
   {
     const Vector3d p_WB =
         Vector3d(2, 3, 4).normalized() * (kCenterDistance - kEps);
-    X_WGs[1].translation() = p_WB;
-    engine.UpdateWorldPoses(X_WGs, indices);
-    const auto results = engine.ComputeSignedDistancePairwiseClosestPoints(
-        geometry_map, X_WGs, kMaxDistance);
+    X_WGs[id_B].set_translation(p_WB);
+    engine.UpdateWorldPoses(X_WGs);
+    const auto results =
+        engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs, kMaxDistance);
     EXPECT_EQ(results.size(), 1);
   }
 
@@ -375,18 +517,79 @@ GTEST_TEST(ProximityEngineTests, SignedDistanceClosestPointsMaxDistance) {
   {
     const Vector3d p_WB =
         Vector3d(2, 3, 4).normalized() * (kCenterDistance + kEps);
-    X_WGs[1].translation() = p_WB;
-    engine.UpdateWorldPoses(X_WGs, indices);
-    const auto results = engine.ComputeSignedDistancePairwiseClosestPoints(
-        geometry_map, X_WGs, kMaxDistance);
+    X_WGs[id_B].set_translation(p_WB);
+    engine.UpdateWorldPoses(X_WGs);
+    const auto results =
+        engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs, kMaxDistance);
     EXPECT_EQ(results.size(), 0);
   }
 }
 
-// ComputeSignedDistanceToPoint tests
+// Tests the computation of signed distance for a single geometry pair. Confirms
+// successful case as well as failure case.
+GTEST_TEST(ProximityEngineTests, SignedDistancePairClosestPoint) {
+  ProximityEngine<double> engine;
+  const GeometryId id_A = GeometryId::get_new_id();
+  const GeometryId id_B = GeometryId::get_new_id();
+  const GeometryId bad_id = GeometryId::get_new_id();
+  unordered_map<GeometryId, RigidTransformd> X_WGs{
+      {id_A, RigidTransformd::Identity()}, {id_B, RigidTransformd::Identity()}};
 
-using std::make_shared;
-using std::shared_ptr;
+  const double radius = 0.5;
+  Sphere sphere{radius};
+  engine.AddDynamicGeometry(sphere, id_A);
+  engine.AddDynamicGeometry(sphere, id_B);
+
+  const double kDistance = 1.0;
+  const double kCenterDistance = kDistance + radius + radius;
+  // Displace B the desired distance in an arbitrary direction.
+  const Vector3d p_WB = Vector3d(2, 3, 4).normalized() * kCenterDistance;
+  X_WGs[id_B].set_translation(p_WB);
+  engine.UpdateWorldPoses(X_WGs);
+
+  // Case: good case produces the correct value.
+  {
+    const SignedDistancePair<double> result =
+        engine.ComputeSignedDistancePairClosestPoints(id_A, id_B, X_WGs);
+    EXPECT_EQ(result.id_A, id_A);
+    EXPECT_EQ(result.id_B, id_B);
+    EXPECT_NEAR(result.distance, kDistance,
+                std::numeric_limits<double>::epsilon());
+    // We're not testing *all* the fields. The callback is setting the fields,
+    // we assume if ids and distance are correct, the previously tested callback
+    // code does it all correctly.
+  }
+
+  // Case: the first id is invalid.
+  {
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        engine.ComputeSignedDistancePairClosestPoints(bad_id, id_B, X_WGs),
+        std::runtime_error,
+        fmt::format("The geometry given by id {} does not reference .+ used in "
+                    "a signed distance query", bad_id));
+  }
+
+  // Case: the second id is invalid.
+  {
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        engine.ComputeSignedDistancePairClosestPoints(id_A, bad_id, X_WGs),
+        std::runtime_error,
+        fmt::format("The geometry given by id {} does not reference .+ used in "
+                    "a signed distance query", bad_id));
+  }
+
+  // Case: the pair is filtered.
+  {
+    engine.ExcludeCollisionsWithin({id_A, id_B}, {});
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        engine.ComputeSignedDistancePairClosestPoints(id_A, id_B, X_WGs),
+        std::runtime_error,
+        fmt::format("The geometry pair \\({}, {}\\) does not support a signed "
+                    "distance query", id_A, id_B));
+  }
+}
+
+// ComputeSignedDistanceToPoint tests
 
 // Test the broad-phase part of ComputeSignedDistanceToPoint.
 
@@ -400,35 +603,37 @@ GTEST_TEST(ProximityEngineTests, SignedDistanceToPointNonPositiveThreshold) {
   const double kRadius = 0.5;
   const double kPenetration = kRadius * 0.1;
 
-  std::vector<Isometry3d> X_WGs{
-      Isometry3d{Translation3d{-kRadius + 0.5 * kPenetration, 0, 0}},
-      Isometry3d{Translation3d{kRadius - 0.5 * kPenetration, 0, 0}}};
-  std::vector<GeometryId> geometry_map{GeometryId::get_new_id(),
-                                       GeometryId::get_new_id()};
+  const GeometryId id_A = GeometryId::get_new_id();
+  const GeometryId id_B = GeometryId::get_new_id();
+  const unordered_map<GeometryId, RigidTransformd> X_WGs{
+      {id_A,
+       RigidTransformd{Translation3d{-kRadius + 0.5 * kPenetration, 0, 0}}},
+      {id_B,
+       RigidTransformd{Translation3d{kRadius - 0.5 * kPenetration, 0, 0}}}};
+
   Sphere sphere{kRadius};
-  std::vector<GeometryIndex> indices{GeometryIndex{0}, GeometryIndex{1}};
-  engine.AddDynamicGeometry(sphere, indices[0]);
-  engine.AddDynamicGeometry(sphere, indices[1]);
-  engine.UpdateWorldPoses(X_WGs, indices);
+  engine.AddDynamicGeometry(sphere, id_A);
+  engine.AddDynamicGeometry(sphere, id_B);
+  engine.UpdateWorldPoses(X_WGs);
 
   const Vector3d p_WQ{0, 0, 0};
   std::vector<SignedDistanceToPoint<double>> results_all =
-      engine.ComputeSignedDistanceToPoint(p_WQ, geometry_map, X_WGs, kInf);
+      engine.ComputeSignedDistanceToPoint(p_WQ, X_WGs, kInf);
   EXPECT_EQ(results_all.size(), 2u);
 
   std::vector<SignedDistanceToPoint<double>> results_zero =
-      engine.ComputeSignedDistanceToPoint(p_WQ, geometry_map, X_WGs, 0);
+      engine.ComputeSignedDistanceToPoint(p_WQ, X_WGs, 0);
   EXPECT_EQ(results_zero.size(), 2u);
 
   const double kEps = std::numeric_limits<double>::epsilon();
 
   std::vector<SignedDistanceToPoint<double>> results_barely_in =
-      engine.ComputeSignedDistanceToPoint(p_WQ, geometry_map, X_WGs,
+      engine.ComputeSignedDistanceToPoint(p_WQ, X_WGs,
                                           -kPenetration * 0.5 + kEps);
   EXPECT_EQ(results_barely_in.size(), 2u);
 
   std::vector<SignedDistanceToPoint<double>> results_barely_out =
-      engine.ComputeSignedDistanceToPoint(p_WQ, geometry_map, X_WGs,
+      engine.ComputeSignedDistanceToPoint(p_WQ, X_WGs,
                                           -kPenetration * 0.5 - kEps);
   EXPECT_EQ(results_barely_out.size(), 0u);
 }
@@ -451,60 +656,56 @@ GTEST_TEST(ProximityEngineTests, SignedDistanceToPointNonPositiveThreshold) {
 //
 GTEST_TEST(SignedDistanceToPointBroadphaseTest, MultipleThreshold) {
   ProximityEngine<double> engine;
-  std::vector<GeometryId> geometry_map;
-  std::vector<Isometry3d> X_WGs;
+  unordered_map<GeometryId, RigidTransformd> X_WGs;
   const double radius = 0.1;
   const Vector3d center1(1., 1., 1.);
   const Vector3d center2(-1, -1, -1.);
-  int index = 0;
-  for (const Vector3d p_WG : {center1, center2}) {
-    const RigidTransformd X_WG(p_WG);
-    X_WGs.push_back(X_WG.GetAsIsometry3());
-    engine.AddAnchoredGeometry(Sphere(radius), X_WG.GetAsIsometry3(),
-                               GeometryIndex(index++));
-    geometry_map.push_back(GeometryId::get_new_id());
+  for (const Vector3d& p_WG : {center1, center2}) {
+    const RigidTransformd X_WG(Translation3d{p_WG});
+    const GeometryId id = GeometryId::get_new_id();
+    X_WGs[id] = X_WG;
+    engine.AddAnchoredGeometry(Sphere(radius), X_WG, id);
   }
   const Vector3d p_WQ(3., 3., 3.);
   // This small threshold allows no sphere.
   double threshold = 0.001;
-  auto results = engine.ComputeSignedDistanceToPoint(p_WQ, geometry_map, X_WGs,
-                                                     threshold);
+  auto results = engine.ComputeSignedDistanceToPoint(p_WQ, X_WGs, threshold);
   EXPECT_EQ(0, results.size());
+
   // This threshold touches the corner of the bounding box of the first sphere.
   // It is still too small to yield any result.
   threshold = (p_WQ - (center1 + Vector3d(radius, radius, radius))).norm();
-  results =
-      engine.ComputeSignedDistanceToPoint(p_WQ, geometry_map, X_WGs, threshold);
+  results = engine.ComputeSignedDistanceToPoint(p_WQ, X_WGs, threshold);
   EXPECT_EQ(0, results.size());
+
   // This threshold barely touches outside the first sphere, so it still gives
   // no result.
   threshold = (p_WQ - center1).norm() - radius - 1e-10;
-  results =
-      engine.ComputeSignedDistanceToPoint(p_WQ, geometry_map, X_WGs, threshold);
+  results = engine.ComputeSignedDistanceToPoint(p_WQ, X_WGs, threshold);
   EXPECT_EQ(0, results.size());
+
   // This threshold barely touches inside the first sphere, so it gives
   // one result.
   threshold = (p_WQ - center1).norm() - radius + 1e-10;
-  results =
-      engine.ComputeSignedDistanceToPoint(p_WQ, geometry_map, X_WGs, threshold);
+  results = engine.ComputeSignedDistanceToPoint(p_WQ, X_WGs, threshold);
   EXPECT_EQ(1, results.size());
+
   // This threshold touches the corner of the bounding box of the second
   // sphere, so it is still too small to allow the second sphere.
   threshold = (p_WQ - (center2 + Vector3d(radius, radius, radius))).norm();
-  results =
-      engine.ComputeSignedDistanceToPoint(p_WQ, geometry_map, X_WGs, threshold);
+  results = engine.ComputeSignedDistanceToPoint(p_WQ, X_WGs, threshold);
   EXPECT_EQ(1, results.size());
+
   // This threshold barely touches the outside the second sphere, so it still
   // gives one result.
   threshold = (p_WQ - center2).norm() - radius - 1e-10;
-  results =
-      engine.ComputeSignedDistanceToPoint(p_WQ, geometry_map, X_WGs, threshold);
+  results = engine.ComputeSignedDistanceToPoint(p_WQ, X_WGs, threshold);
   EXPECT_EQ(1, results.size());
+
   // This threshold barely touches inside the second sphere, so it starts to
   // give two results.
   threshold = (p_WQ - center2).norm() - radius + 1e-10;
-  results =
-      engine.ComputeSignedDistanceToPoint(p_WQ, geometry_map, X_WGs, threshold);
+  results = engine.ComputeSignedDistanceToPoint(p_WQ, X_WGs, threshold);
   EXPECT_EQ(2, results.size());
 }
 
@@ -575,7 +776,7 @@ std::vector<SignedDistanceToPointTestData> GenDistanceTestDataSphere(
   // nearest point N and the gradient vector.
   auto sphere = make_shared<Sphere>(0.7);
   std::vector<SignedDistanceToPointTestData> test_data{
-      // p_GQ = (2,3,6) is outside G at the positive distance 6.3.
+      // p_GQ = (2,3,6) is outside G at the positive distance 6.3 = 7 - 0.7.
       {sphere, X_WG, X_WG * Vector3d{2.0, 3.0, 6.0},
        SignedDistanceToPoint<double>(
            GeometryId::get_new_id(), Vector3d(0.2, 0.3, 0.6), 6.3,
@@ -729,7 +930,7 @@ std::vector<SignedDistanceToPointTestData> GenDistTestTransformBoxBoundary() {
 //
 // where h_G = (h(x), h(y), h(z)) is the vector of the half width, half depth,
 // and half height of G. It is the vector from the origin Go to a corner
-// of G expressed in G's frame. The opertor ∘ is the entrywise product:
+// of G expressed in G's frame. The operator ∘ is the entry-wise product:
 // (a,b,c)∘(u,v,w) = (a*u, b*v, c*w).
 //     The chosen d is small enough that Q at the inward normal offset from a
 // face center is still unambiguously closest to that face.
@@ -873,8 +1074,8 @@ GenDistTestDataCylinderBoundaryCircle(
     const RigidTransformd& X_WG = RigidTransformd::Identity()) {
   const RotationMatrixd& R_WG = X_WG.rotation();
   auto cylinder = make_shared<Cylinder>(3.0, 5.0);
-  const double radius = cylinder->get_radius();
-  const double half_length = cylinder->get_length() / 2.0;
+  const double radius = cylinder->radius();
+  const double half_length = cylinder->length() / 2.0;
   // We want the test to cover all the combinations of positive, negative,
   // and zero values of both x and y coordinates on the two boundary circles
   // of the cylinder. Furthermore, each (x,y) has |x| ≠ |y| to avoid
@@ -921,8 +1122,8 @@ GenDistTestDataCylinderBoundarySurface(
     const RigidTransformd& X_WG = RigidTransformd::Identity()) {
   const RotationMatrixd& R_WG = X_WG.rotation();
   auto cylinder = make_shared<Cylinder>(3.0, 5.0);
-  const double radius = cylinder->get_radius();
-  const double half_length = cylinder->get_length() / 2.0;
+  const double radius = cylinder->radius();
+  const double half_length = cylinder->length() / 2.0;
   // We want the test to cover all the combinations of positive, negative,
   // and zero values of both x and y coordinates on some circles on the
   // barrel or on the caps. Furthermore, each (x,y) has |x| ≠ |y| to avoid
@@ -1092,7 +1293,7 @@ std::vector<SignedDistanceToPointTestData> GenDistTestDataCylinderCenter(
     const RigidTransformd& X_WG = RigidTransformd::Identity()) {
   const RotationMatrixd& R_WG = X_WG.rotation();
   auto long_cylinder = make_shared<Cylinder>(1.0, 20.0);
-  const double radius = long_cylinder->get_radius();
+  const double radius = long_cylinder->radius();
   const GeometryId id = GeometryId::get_new_id();
   // The query point Q is at the center of the cylinder.
   const Vector3d p_GQ(0., 0., 0.);
@@ -1127,8 +1328,8 @@ std::vector<SignedDistanceToPointTestData> GenDistTestDataCylinderTransform() {
   return test_data;
 }
 
-// Generate test data for a query point Q relative to a halfspace.
-std::vector<SignedDistanceToPointTestData> GenDistTestDataHalfspace() {
+// Generate test data for a query point Q relative to a half space.
+std::vector<SignedDistanceToPointTestData> GenDistTestDataHalfSpace() {
   std::vector<SignedDistanceToPointTestData> test_data;
 
   const RigidTransformd X_WG1(RollPitchYawd(M_PI / 3., M_PI / 6., M_PI_2),
@@ -1138,25 +1339,25 @@ std::vector<SignedDistanceToPointTestData> GenDistTestDataHalfspace() {
   const bool well_defined_grad = true;
 
   for (const auto& X_WG : {RigidTransformd(), X_WG1}) {
-    const auto& R_WG = X_WG.linear();
+    const auto& R_WG = X_WG.rotation();
     const Vector3d grad_W = R_WG.col(2);
     const Vector3d p_GN(1.25, 1.5, 0);
     const Vector3d p_WN = X_WG * p_GN;
 
-    // Outside the halfspace.
+    // Outside the half space.
     const double distance = 1.5;
     const Vector3d p_WQ1 = p_WN + distance * grad_W;
     test_data.emplace_back(hs, X_WG, p_WQ1,
                            SignedDistanceToPoint<double>(
                                id, p_GN, distance, grad_W, well_defined_grad));
 
-    // On the halfspace boundary.
+    // On the half space boundary.
     const Vector3d p_WQ2 = p_WN;
     test_data.emplace_back(hs, X_WG, p_WQ2,
                            SignedDistanceToPoint<double>(id, p_GN, 0.0, grad_W,
                                                          well_defined_grad));
 
-    // Inside the halfspace.
+    // Inside the half space.
     const Vector3d p_WQ3 = p_WN - distance * grad_W;
     test_data.emplace_back(hs, X_WG, p_WQ3,
                            SignedDistanceToPoint<double>(
@@ -1171,59 +1372,53 @@ std::vector<SignedDistanceToPointTestData> GenDistTestDataHalfspace() {
 struct SignedDistanceToPointTest
     : public testing::TestWithParam<SignedDistanceToPointTestData> {
   ProximityEngine<double> engine;
-  std::vector<GeometryId> geometry_map;
-  std::vector<Isometry3d> X_WGs;
+  unordered_map<GeometryId, RigidTransformd> X_WGs;
 
   // The tolerance value for determining equivalency between expected and
   // tested results. The underlying algorithms have an empirically-determined,
   // hard-coded tolerance of 1e-14 to account for loss of precision due to
   // rigid transformations and this tolerance reflects that.
-  static constexpr double tolerance = 1e-14;
+  static constexpr double kTolerance = 1e-14;
 
   SignedDistanceToPointTest() {
-    auto data = GetParam();
-    engine.AddAnchoredGeometry(*(data.geometry), data.X_WG.GetAsIsometry3(),
-                               GeometryIndex(0));
-    X_WGs.push_back(data.X_WG.GetAsIsometry3());
-    geometry_map.push_back(data.expected_result.id_G);
+    const auto& data = GetParam();
+    const GeometryId id = data.expected_result.id_G;
+    engine.AddAnchoredGeometry(*data.geometry, data.X_WG, id);
+    X_WGs[id] = data.X_WG;
   }
 };
 
 TEST_P(SignedDistanceToPointTest, SingleQueryPoint) {
-  auto data = GetParam();
+  const auto& data = GetParam();
 
-  auto results =
-      engine.ComputeSignedDistanceToPoint(data.p_WQ, geometry_map, X_WGs);
+  auto results = engine.ComputeSignedDistanceToPoint(data.p_WQ, X_WGs);
   EXPECT_EQ(results.size(), 1);
   EXPECT_EQ(results[0].id_G, data.expected_result.id_G);
   EXPECT_TRUE(
-      CompareMatrices(results[0].p_GN, data.expected_result.p_GN, tolerance))
-      << "Incorrect nearest point.";
-  EXPECT_NEAR(results[0].distance, data.expected_result.distance, tolerance)
-      << "Incorrect signed distance.";
+      CompareMatrices(results[0].p_GN, data.expected_result.p_GN, kTolerance))
+            << "Incorrect nearest point.";
+  EXPECT_NEAR(results[0].distance, data.expected_result.distance, kTolerance)
+            << "Incorrect signed distance.";
   EXPECT_TRUE(CompareMatrices(results[0].grad_W, data.expected_result.grad_W,
-                              tolerance))
-      << "Incorrect gradient vector.";
+                              kTolerance))
+            << "Incorrect gradient vector.";
 }
 
 TEST_P(SignedDistanceToPointTest, SingleQueryPointWithThreshold) {
-  auto data = GetParam();
+  const auto& data = GetParam();
 
   const double large_threshold = data.expected_result.distance + 0.01;
   auto results =
-      engine.ComputeSignedDistanceToPoint(data.p_WQ, geometry_map, X_WGs,
-                                          large_threshold);
+      engine.ComputeSignedDistanceToPoint(data.p_WQ, X_WGs, large_threshold);
   // The large threshold allows one object in the results.
   EXPECT_EQ(results.size(), 1);
 
   const double small_threshold = data.expected_result.distance - 0.01;
   results =
-      engine.ComputeSignedDistanceToPoint(data.p_WQ, geometry_map, X_WGs,
-                                          small_threshold);
+      engine.ComputeSignedDistanceToPoint(data.p_WQ, X_WGs, small_threshold);
   // The small threshold skips all objects.
   EXPECT_EQ(results.size(), 0);
 }
-
 
 // To debug a specific test, you can use Bazel flag --test_filter and
 // --test_output.  For example, you can use the command:
@@ -1236,72 +1431,72 @@ TEST_P(SignedDistanceToPointTest, SingleQueryPointWithThreshold) {
 // GenDistanceTestDataSphere() with the function
 // TEST_P(SignedDistanceToPointTest, SingleQueryPoint).
 // Sphere
-INSTANTIATE_TEST_CASE_P(Sphere, SignedDistanceToPointTest,
+INSTANTIATE_TEST_SUITE_P(Sphere, SignedDistanceToPointTest,
                         testing::ValuesIn(GenDistanceTestDataSphere()));
-INSTANTIATE_TEST_CASE_P(TransformSphere, SignedDistanceToPointTest,
+
+INSTANTIATE_TEST_SUITE_P(TransformSphere, SignedDistanceToPointTest,
                         testing::ValuesIn(GenDistTestTransformSphere()));
+
 // Box
-INSTANTIATE_TEST_CASE_P(OutsideBox, SignedDistanceToPointTest,
+INSTANTIATE_TEST_SUITE_P(OutsideBox, SignedDistanceToPointTest,
                         testing::ValuesIn(GenDistanceTestDataOutsideBox()));
-INSTANTIATE_TEST_CASE_P(BoxBoundary, SignedDistanceToPointTest,
+INSTANTIATE_TEST_SUITE_P(BoxBoundary, SignedDistanceToPointTest,
                         testing::ValuesIn(GenDistanceTestDataBoxBoundary()));
-INSTANTIATE_TEST_CASE_P(InsideBoxUnique, SignedDistanceToPointTest,
+INSTANTIATE_TEST_SUITE_P(InsideBoxUnique, SignedDistanceToPointTest,
                         testing::ValuesIn(GenDistTestDataInsideBoxUnique()));
-INSTANTIATE_TEST_CASE_P(InsideBoxNonUnique, SignedDistanceToPointTest,
+INSTANTIATE_TEST_SUITE_P(InsideBoxNonUnique, SignedDistanceToPointTest,
                         testing::ValuesIn(GenDistTestDataInsideBoxNonUnique()));
-INSTANTIATE_TEST_CASE_P(TranslateBox, SignedDistanceToPointTest,
+INSTANTIATE_TEST_SUITE_P(TranslateBox, SignedDistanceToPointTest,
                         testing::ValuesIn(GenDistanceTestDataTranslateBox()));
-INSTANTIATE_TEST_CASE_P(TransformOutsideBox, SignedDistanceToPointTest,
+INSTANTIATE_TEST_SUITE_P(TransformOutsideBox, SignedDistanceToPointTest,
                         testing::ValuesIn(GenDistTestTransformOutsideBox()));
-INSTANTIATE_TEST_CASE_P(TransformBoxBoundary, SignedDistanceToPointTest,
+INSTANTIATE_TEST_SUITE_P(TransformBoxBoundary, SignedDistanceToPointTest,
                         testing::ValuesIn(GenDistTestTransformBoxBoundary()));
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     TransformInsideBoxUnique, SignedDistanceToPointTest,
     testing::ValuesIn(GenDistTestTransformInsideBoxUnique()));
+
 // Cylinder
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     CylinderBoundary, SignedDistanceToPointTest,
     testing::ValuesIn(GenDistTestDataCylinderBoundary()));
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     OutsideCylinder, SignedDistanceToPointTest,
     testing::ValuesIn(GenDistTestDataOutsideCylinder()));
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     InsideCylinder, SignedDistanceToPointTest,
     testing::ValuesIn(GenDistTestDataInsideCylinder()));
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     CenterCylinder, SignedDistanceToPointTest,
     testing::ValuesIn(GenDistTestDataCylinderCenter()));
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     CylinderTransform, SignedDistanceToPointTest,
     testing::ValuesIn(GenDistTestDataCylinderTransform()));
-// Halfspace
-INSTANTIATE_TEST_CASE_P(
+
+// Half space
+INSTANTIATE_TEST_SUITE_P(
     Halfspace, SignedDistanceToPointTest,
-    testing::ValuesIn(GenDistTestDataHalfspace()));
+    testing::ValuesIn(GenDistTestDataHalfSpace()));
 
 // Penetration tests -- testing data flow; not testing the value of the query.
 
 // A scene with no geometry reports no penetrations.
 GTEST_TEST(ProximityEngineTests, PenetrationOnEmptyScene) {
   ProximityEngine<double> engine;
-  std::vector<GeometryId> empty_map;
 
-  auto results = engine.ComputePointPairPenetration(empty_map);
+  auto results = engine.ComputePointPairPenetration();
   EXPECT_EQ(results.size(), 0);
 }
 
 // A scene with a single anchored geometry reports no penetrations.
 GTEST_TEST(ProximityEngineTests, PenetrationSingleAnchored) {
   ProximityEngine<double> engine;
-  std::vector<GeometryId> geometry_map;
 
   Sphere sphere{0.5};
-  Isometry3<double> pose = Isometry3<double>::Identity();
-  ProximityIndex index = engine.AddAnchoredGeometry(sphere, pose,
-                                                    GeometryIndex(0));
-  geometry_map.push_back(GeometryId::get_new_id());
-  EXPECT_EQ(index, 0);
-  auto results = engine.ComputePointPairPenetration(geometry_map);
+  RigidTransformd pose = RigidTransformd::Identity();
+  const GeometryId id = GeometryId::get_new_id();
+  engine.AddAnchoredGeometry(sphere, pose, id);
+  auto results = engine.ComputePointPairPenetration();
   EXPECT_EQ(results.size(), 0);
 }
 
@@ -1309,21 +1504,14 @@ GTEST_TEST(ProximityEngineTests, PenetrationSingleAnchored) {
 // they actually *are* in penetration.
 GTEST_TEST(ProximityEngineTests, PenetrationMultipleAnchored) {
   ProximityEngine<double> engine;
-  std::vector<GeometryId> geometry_map;
 
   const double radius = 0.5;
   Sphere sphere{radius};
-  Isometry3<double> pose = Isometry3<double>::Identity();
-  ProximityIndex index1 = engine.AddAnchoredGeometry(sphere, pose,
-                                                     GeometryIndex(0));
-  geometry_map.push_back(GeometryId::get_new_id());
-  EXPECT_EQ(index1, 0);
-  pose.translation() << 1.8 * radius, 0, 0;
-  ProximityIndex index2 = engine.AddAnchoredGeometry(sphere, pose,
-                                                     GeometryIndex(1));
-  geometry_map.push_back(GeometryId::get_new_id());
-  EXPECT_EQ(index2, 1);
-  auto results = engine.ComputePointPairPenetration(geometry_map);
+  RigidTransformd pose = RigidTransformd::Identity();
+  engine.AddAnchoredGeometry(sphere, pose, GeometryId::get_new_id());
+  pose.set_translation({1.8 * radius, 0, 0});
+  engine.AddAnchoredGeometry(sphere, pose, GeometryId::get_new_id());
+  auto results = engine.ComputePointPairPenetration();
   EXPECT_EQ(results.size(), 0);
 }
 
@@ -1344,9 +1532,9 @@ GTEST_TEST(ProximityEngineTests, PenetrationMultipleAnchored) {
 class SimplePenetrationTest : public ::testing::Test {
  protected:
   // Moves the dynamic sphere to either a penetrating or non-penetrating
-  // position. The sphere is indicated by its engine `index` which belongs to
-  // the given `source_id`. If `is_colliding` is true, the sphere is placed in
-  // a colliding configuration.
+  // position. The sphere is indicated by its `id` which belongs to the given
+  // `source_id`. If `is_colliding` is true, the sphere is placed in a colliding
+  // configuration.
   //
   // Non-colliding state
   //       y           x = free_x_
@@ -1370,47 +1558,46 @@ class SimplePenetrationTest : public ::testing::Test {
   //    *   │  o*      o
   //       *│*    o o
 
-  // Updates a pose in X_WGs_ to be colliding or non-colliding. Then udpates the
-  // position of all dynamic geometries (as given by index).
-  void MoveDynamicSphere(GeometryIndex index, bool is_colliding,
-      const std::vector<GeometryIndex>& dynamic_indices,
+  // Updates a pose in X_WGs_ to be colliding or non-colliding. Then updates the
+  // position of all dynamic geometries.
+  void MoveDynamicSphere(GeometryId id, bool is_colliding,
                          ProximityEngine<double>* engine = nullptr) {
     engine = engine == nullptr ? &engine_ : engine;
 
     DRAKE_DEMAND(engine->num_geometries() == static_cast<int>(X_WGs_.size()));
 
     const double x_pos = is_colliding ? colliding_x_ : free_x_;
-    X_WGs_[index] = Isometry3<double>(Translation3d{x_pos, 0, 0});
+    X_WGs_[id].set_translation({x_pos, 0, 0});
 
-    engine->UpdateWorldPoses(X_WGs_, dynamic_indices);
+    engine->UpdateWorldPoses(X_WGs_);
   }
 
   // Poses have been defined as doubles; get them in the required scalar type.
   template <typename T>
-  std::vector<Isometry3<T>> GetTypedPoses() const {
-    std::vector<Isometry3<T>> typed_X_WG;
-    for (const auto& X_WG : X_WGs_) {
-      Isometry3<T> X_WG_t;
-      X_WG_t.matrix() = X_WG.matrix();
-      typed_X_WG.push_back(X_WG_t);
+  unordered_map<GeometryId, RigidTransform<T>> GetTypedPoses() const {
+    unordered_map<GeometryId, RigidTransform<T>> typed_X_WG;
+    for (const auto& id_pose_pair : X_WGs_) {
+      const GeometryId id = id_pose_pair.first;
+      const RigidTransformd& X_WG = id_pose_pair.second;
+      typed_X_WG[id] = X_WG.cast<T>();
     }
     return typed_X_WG;
   }
 
   // Compute penetration and confirm that a single penetration with the expected
-  // properties was found. Provide the engine indices of the sphere located at
+  // properties was found. Provide the geometry ids of the sphere located at
   // the origin and the sphere positioned to be in collision.
   template <typename T>
   void ExpectPenetration(GeometryId origin_sphere, GeometryId colliding_sphere,
                          ProximityEngine<T>* engine) {
     std::vector<PenetrationAsPointPair<double>> penetration_results =
-        engine->ComputePointPairPenetration(geometry_map_);
+        engine->ComputePointPairPenetration();
     ASSERT_EQ(penetration_results.size(), 1);
     const PenetrationAsPointPair<double>& penetration = penetration_results[0];
 
     std::vector<SignedDistancePair<T>> distance_results =
-        engine->ComputeSignedDistancePairwiseClosestPoints(
-            geometry_map_, GetTypedPoses<T>(), kInf);
+        engine->ComputeSignedDistancePairwiseClosestPoints(GetTypedPoses<T>(),
+                                                           kInf);
     ASSERT_EQ(distance_results.size(), 1);
     const SignedDistancePair<T>& distance = distance_results[0];
 
@@ -1478,12 +1665,12 @@ class SimplePenetrationTest : public ::testing::Test {
                                 GeometryId colliding_sphere,
                                 ProximityEngine<T>* engine) {
     std::vector<PenetrationAsPointPair<double>> penetration_results =
-        engine->ComputePointPairPenetration(geometry_map_);
+        engine->ComputePointPairPenetration();
     EXPECT_EQ(penetration_results.size(), 0);
 
     std::vector<SignedDistancePair<T>> distance_results =
-        engine->ComputeSignedDistancePairwiseClosestPoints(
-            geometry_map_, GetTypedPoses<T>(), kInf);
+        engine->ComputeSignedDistancePairwiseClosestPoints(GetTypedPoses<T>(),
+                                                           kInf);
     ASSERT_EQ(distance_results.size(), 0);
   }
 
@@ -1493,12 +1680,11 @@ class SimplePenetrationTest : public ::testing::Test {
                            GeometryId colliding_sphere,
                            ProximityEngine<T>* engine) {
     std::vector<PenetrationAsPointPair<double>> penetration_results =
-        engine->ComputePointPairPenetration(geometry_map_);
+        engine->ComputePointPairPenetration();
     EXPECT_EQ(penetration_results.size(), 0);
 
     std::vector<SignedDistancePair<double>> distance_results =
-        engine->ComputeSignedDistancePairwiseClosestPoints(geometry_map_,
-                                                           X_WGs_, kInf);
+        engine->ComputeSignedDistancePairwiseClosestPoints(X_WGs_, kInf);
     ASSERT_EQ(distance_results.size(), 1);
     SignedDistancePair<double> distance = distance_results[0];
 
@@ -1525,8 +1711,7 @@ class SimplePenetrationTest : public ::testing::Test {
   }
 
   ProximityEngine<double> engine_;
-  std::vector<GeometryId> geometry_map_;
-  std::vector<Isometry3d> X_WGs_;
+  unordered_map<GeometryId, RigidTransformd> X_WGs_;
   const double radius_{0.5};
   const Sphere sphere_{radius_};
   const double free_x_{2.5 * radius_};
@@ -1536,102 +1721,147 @@ class SimplePenetrationTest : public ::testing::Test {
 // Tests collision between dynamic and anchored sphere. One case colliding, one
 // case *not* colliding.
 TEST_F(SimplePenetrationTest, PenetrationDynamicAndAnchored) {
-  std::vector<GeometryIndex> dynamic_indices;
-  // Set up anchored geometry
-  Isometry3<double> pose = Isometry3<double>::Identity();
-  ProximityIndex anchored_pindex =
-      engine_.AddAnchoredGeometry(sphere_, pose, GeometryIndex(0));
-  EXPECT_EQ(anchored_pindex, 0);
-  GeometryId origin_id = GeometryId::get_new_id();
-  geometry_map_.push_back(origin_id);
+  // Set up anchored geometry.
+  RigidTransformd pose = RigidTransformd::Identity();
+  const GeometryId anchored_id = GeometryId::get_new_id();
+  engine_.AddAnchoredGeometry(sphere_, pose, anchored_id);
 
-  // Set up dynamic geometry
-  GeometryIndex dynamic_index(1);
-  dynamic_indices.push_back(dynamic_index);
-  ProximityIndex dynamic_pindex =
-      engine_.AddDynamicGeometry(sphere_, dynamic_index);
-  EXPECT_EQ(dynamic_pindex, 0);
-  GeometryId dynamic_id = GeometryId::get_new_id();
-  geometry_map_.push_back(dynamic_id);
+  // Set up dynamic geometry.
+  const GeometryId dynamic_id = GeometryId::get_new_id();
+  engine_.AddDynamicGeometry(sphere_, dynamic_id);
   EXPECT_EQ(engine_.num_geometries(), 2);
 
-  X_WGs_.push_back(pose);
-  X_WGs_.push_back(Isometry3d::Identity());
+  X_WGs_[anchored_id] = pose;
+  X_WGs_[dynamic_id] = RigidTransformd::Identity();
 
-  // Non-colliding case
-  MoveDynamicSphere(dynamic_index, false /* not colliding */, dynamic_indices);
-  ExpectNoPenetration(origin_id, dynamic_id, &engine_);
+  // Non-colliding case.
+  MoveDynamicSphere(dynamic_id, false /* not colliding */);
+  ExpectNoPenetration(anchored_id, dynamic_id, &engine_);
 
-  // Colliding case
-  MoveDynamicSphere(dynamic_index, true /* colliding */, dynamic_indices);
-  ExpectPenetration(origin_id, dynamic_id, &engine_);
+  // Colliding case.
+  MoveDynamicSphere(dynamic_id, true /* colliding */);
+  ExpectPenetration(anchored_id, dynamic_id, &engine_);
 
   // Test colliding case on copy.
   ProximityEngine<double> copy_engine(engine_);
-  ExpectPenetration(origin_id, dynamic_id, &copy_engine);
+  ExpectPenetration(anchored_id, dynamic_id, &copy_engine);
 
-  // Test AutoDiffXd converted engine
+  // Test AutoDiffXd converted engine.
   std::unique_ptr<ProximityEngine<AutoDiffXd>> ad_engine =
       engine_.ToAutoDiffXd();
-  ExpectPenetration(origin_id, dynamic_id, ad_engine.get());
+  ExpectPenetration(anchored_id, dynamic_id, ad_engine.get());
 }
 
 // Performs the same collision test between two dynamic spheres which belong to
-// the same source
+// the same source.
 TEST_F(SimplePenetrationTest, PenetrationDynamicAndDynamicSingleSource) {
-  std::vector<GeometryIndex> dynamic_indices;
-  dynamic_indices.emplace_back(0);
-  // ProximityIndex --> pindex (in contrast with GeometryIndex --> index).
-  ProximityIndex origin_pindex =
-      engine_.AddDynamicGeometry(sphere_, dynamic_indices.back());
-  GeometryId origin_id = GeometryId::get_new_id();
-  geometry_map_.push_back(origin_id);
-  EXPECT_EQ(origin_pindex, 0);
+  const GeometryId origin_id = GeometryId::get_new_id();
+  engine_.AddDynamicGeometry(sphere_, origin_id);
 
-  GeometryIndex collide_index(1);
-  dynamic_indices.push_back(collide_index);
-  ProximityIndex collide_pindex =
-      engine_.AddDynamicGeometry(sphere_, dynamic_indices.back());
   GeometryId collide_id = GeometryId::get_new_id();
-  geometry_map_.push_back(collide_id);
-  EXPECT_EQ(collide_pindex, 1);
+  engine_.AddDynamicGeometry(sphere_, collide_id);
   EXPECT_EQ(engine_.num_geometries(), 2);
 
-  X_WGs_.push_back(Isometry3d::Identity());
-  X_WGs_.push_back(Isometry3d::Identity());
+  X_WGs_[origin_id] = RigidTransformd::Identity();
+  X_WGs_[collide_id] = RigidTransformd::Identity();
 
-  // Non-colliding case
-  MoveDynamicSphere(collide_index, false /* not colliding */, dynamic_indices);
+  // Non-colliding case.
+  MoveDynamicSphere(collide_id, false /* not colliding */);
   ExpectNoPenetration(origin_id, collide_id, &engine_);
 
-  // Colliding case
-  MoveDynamicSphere(collide_index, true /* colliding */, dynamic_indices);
+  // Colliding case.
+  MoveDynamicSphere(collide_id, true /* colliding */);
   ExpectPenetration(origin_id, collide_id, &engine_);
 
   // Test colliding case on copy.
   ProximityEngine<double> copy_engine(engine_);
   ExpectPenetration(origin_id, collide_id, &copy_engine);
 
-  // Test AutoDiffXd converted engine
+  // Test AutoDiffXd converted engine.
   std::unique_ptr<ProximityEngine<AutoDiffXd>> ad_engine =
       engine_.ToAutoDiffXd();
   ExpectPenetration(origin_id, collide_id, ad_engine.get());
+}
+
+// Tests if collisions exist between dynamic and anchored sphere. One case
+// colliding, one case *not* colliding.
+TEST_F(SimplePenetrationTest, HasCollisionsDynamicAndAnchored) {
+  // Set up anchored geometry.
+  const RigidTransformd pose = RigidTransformd::Identity();
+  const GeometryId anchored_id = GeometryId::get_new_id();
+  engine_.AddAnchoredGeometry(sphere_, pose, anchored_id);
+
+  // Set up dynamic geometry.
+  const GeometryId dynamic_id = GeometryId::get_new_id();
+  engine_.AddDynamicGeometry(sphere_, dynamic_id);
+  EXPECT_EQ(engine_.num_geometries(), 2);
+
+  X_WGs_[anchored_id] = pose;
+  X_WGs_[dynamic_id] = RigidTransformd::Identity();
+
+  // Non-colliding case.
+  MoveDynamicSphere(dynamic_id, false /* not colliding */);
+  EXPECT_FALSE(engine_.HasCollisions());
+
+  // Colliding case.
+  MoveDynamicSphere(dynamic_id, true /* colliding */);
+  EXPECT_TRUE(engine_.HasCollisions());
+
+  // Test colliding case on copy.
+  ProximityEngine<double> copy_engine(engine_);
+  EXPECT_TRUE(copy_engine.HasCollisions());
+
+  // Test AutoDiffXd converted engine.
+  std::unique_ptr<ProximityEngine<AutoDiffXd>> ad_engine =
+      engine_.ToAutoDiffXd();
+  EXPECT_TRUE(ad_engine->HasCollisions());
+}
+
+// Performs the same collision test between two dynamic spheres which belong to
+// the same source.
+TEST_F(SimplePenetrationTest, HasCollisionsDynamicAndDynamicSingleSource) {
+  const GeometryId origin_id = GeometryId::get_new_id();
+  engine_.AddDynamicGeometry(sphere_, origin_id);
+
+  GeometryId collide_id = GeometryId::get_new_id();
+  engine_.AddDynamicGeometry(sphere_, collide_id);
+  EXPECT_EQ(engine_.num_geometries(), 2);
+
+  X_WGs_[origin_id] = RigidTransformd::Identity();
+  X_WGs_[collide_id] = RigidTransformd::Identity();
+
+  // Non-colliding case.
+  MoveDynamicSphere(collide_id, false /* not colliding */);
+  EXPECT_FALSE(engine_.HasCollisions());
+
+  // Colliding case.
+  MoveDynamicSphere(collide_id, true /* colliding */);
+  EXPECT_TRUE(engine_.HasCollisions());
+
+  // Test colliding case on copy.
+  ProximityEngine<double> copy_engine(engine_);
+  EXPECT_TRUE(copy_engine.HasCollisions());
+
+  // Test AutoDiffXd converted engine.
+  std::unique_ptr<ProximityEngine<AutoDiffXd>> ad_engine =
+      engine_.ToAutoDiffXd();
+  EXPECT_TRUE(ad_engine->HasCollisions());
 }
 
 // Invokes ExcludeCollisionsWithin in various scenarios which will and won't
 // generate cliques.
 TEST_F(SimplePenetrationTest, ExcludeCollisionsWithinCliqueGeneration) {
   using PET = ProximityEngineTester;
-  GeometryIndex dynamic1(0);
-  engine_.AddDynamicGeometry(sphere_, dynamic1);
-  GeometryIndex dynamic2(1);
-  engine_.AddDynamicGeometry(sphere_, dynamic2);
+  const GeometryId id_dynamic1 = GeometryId::get_new_id();
+  engine_.AddDynamicGeometry(sphere_, id_dynamic1);
+  const GeometryId id_dynamic2 = GeometryId::get_new_id();
+  engine_.AddDynamicGeometry(sphere_, id_dynamic2);
 
-  Isometry3<double> pose{Isometry3<double>::Identity()};
-  GeometryIndex anchored1(2);
-  engine_.AddAnchoredGeometry(sphere_, pose, anchored1);
-  GeometryIndex anchored2(3);
-  engine_.AddAnchoredGeometry(sphere_, pose, anchored2);
+  RigidTransformd pose = RigidTransformd::Identity();
+  const GeometryId id_anchored1 = GeometryId::get_new_id();
+  engine_.AddAnchoredGeometry(sphere_, pose, id_anchored1);
+  const GeometryId id_anchored2 = GeometryId::get_new_id();
+  engine_.AddAnchoredGeometry(sphere_, pose, id_anchored2);
 
   int expected_clique = PET::peek_next_clique(engine_);
 
@@ -1642,76 +1872,68 @@ TEST_F(SimplePenetrationTest, ExcludeCollisionsWithinCliqueGeneration) {
   const bool is_dynamic = true;
 
   // No dynamic geometry --> no cliques generated.
-  engine_.ExcludeCollisionsWithin({}, {anchored1, anchored2});
+  engine_.ExcludeCollisionsWithin({}, {id_anchored1, id_anchored2});
   ASSERT_EQ(PET::peek_next_clique(engine_), expected_clique);
-  EXPECT_TRUE(engine_.CollisionFiltered(anchored1, is_anchored,
-                                        anchored2, is_anchored));
+  EXPECT_TRUE(engine_.CollisionFiltered(id_anchored1, is_anchored, id_anchored2,
+                                        is_anchored));
 
   // Single dynamic and no anchored geometry --> no cliques generated.
-  engine_.ExcludeCollisionsWithin({dynamic1}, {});
+  engine_.ExcludeCollisionsWithin({id_dynamic1}, {});
   ASSERT_EQ(PET::peek_next_clique(engine_), expected_clique);
 
   // Multiple dynamic and no anchored geometry --> cliques generated.
-  engine_.ExcludeCollisionsWithin({dynamic1, dynamic2}, {});
+  engine_.ExcludeCollisionsWithin({id_dynamic1, id_dynamic2}, {});
   ASSERT_EQ(PET::peek_next_clique(engine_), ++expected_clique);
-  EXPECT_TRUE(engine_.CollisionFiltered(dynamic1, is_dynamic,
-                                        dynamic2, is_dynamic));
+  EXPECT_TRUE(engine_.CollisionFiltered(id_dynamic1, is_dynamic, id_dynamic2,
+                                        is_dynamic));
 
   // Single dynamic and (one or more) anchored geometry --> cliques generated.
-  engine_.ExcludeCollisionsWithin({dynamic1}, {anchored1});
+  engine_.ExcludeCollisionsWithin({id_dynamic1}, {id_anchored1});
   ASSERT_EQ(PET::peek_next_clique(engine_), ++expected_clique);
-  EXPECT_TRUE(engine_.CollisionFiltered(anchored1, is_anchored,
-                                        dynamic1, is_dynamic));
-  engine_.ExcludeCollisionsWithin({dynamic1}, {anchored1, anchored2});
+  EXPECT_TRUE(engine_.CollisionFiltered(id_anchored1, is_anchored, id_dynamic1,
+                                        is_dynamic));
+  engine_.ExcludeCollisionsWithin({id_dynamic1}, {id_anchored1, id_anchored2});
   ASSERT_EQ(PET::peek_next_clique(engine_), ++expected_clique);
-  EXPECT_TRUE(engine_.CollisionFiltered(anchored2, is_anchored,
-                                        dynamic1, is_dynamic));
+  EXPECT_TRUE(engine_.CollisionFiltered(id_anchored2, is_anchored, id_dynamic1,
+                                        is_dynamic));
 
   // Multiple dynamic and (one or more) anchored geometry --> cliques generated.
-  engine_.ExcludeCollisionsWithin({dynamic1, dynamic2}, {anchored1});
+  engine_.ExcludeCollisionsWithin({id_dynamic1, id_dynamic2}, {id_anchored1});
   ASSERT_EQ(PET::peek_next_clique(engine_), ++expected_clique);
-  engine_.ExcludeCollisionsWithin({dynamic1, dynamic2}, {anchored1, anchored2});
+  engine_.ExcludeCollisionsWithin({id_dynamic1, id_dynamic2},
+                                  {id_anchored1, id_anchored2});
   ASSERT_EQ(PET::peek_next_clique(engine_), ++expected_clique);
 }
 
 // Performs the same collision test where the geometries have been filtered.
 TEST_F(SimplePenetrationTest, ExcludeCollisionsWithin) {
-  std::vector<GeometryIndex> dynamic_indices;
-  GeometryIndex origin_index(0);
-  dynamic_indices.push_back(origin_index);
-  engine_.AddDynamicGeometry(sphere_, origin_index);
   GeometryId origin_id = GeometryId::get_new_id();
-  geometry_map_.push_back(origin_id);
+  engine_.AddDynamicGeometry(sphere_, origin_id);
 
-  GeometryIndex collide_index(1);
-  engine_.AddDynamicGeometry(sphere_, collide_index);
-  dynamic_indices.push_back(collide_index);
   GeometryId collide_id = GeometryId::get_new_id();
-  geometry_map_.push_back(collide_id);
+  engine_.AddDynamicGeometry(sphere_, collide_id);
   EXPECT_EQ(engine_.num_geometries(), 2);
 
-  X_WGs_.push_back(Isometry3d::Identity());
-  X_WGs_.push_back(Isometry3d::Identity());
+  X_WGs_[origin_id] = RigidTransformd::Identity();
+  X_WGs_[collide_id] = RigidTransformd::Identity();
 
-  EXPECT_FALSE(engine_.CollisionFiltered(origin_index, true,
-                                         collide_index, true));
-  engine_.ExcludeCollisionsWithin({origin_index, collide_index}, {});
-  EXPECT_TRUE(engine_.CollisionFiltered(origin_index, true,
-                                        collide_index, true));
+  EXPECT_FALSE(engine_.CollisionFiltered(origin_id, true, collide_id, true));
+  engine_.ExcludeCollisionsWithin({origin_id, collide_id}, {});
+  EXPECT_TRUE(engine_.CollisionFiltered(origin_id, true, collide_id, true));
 
-  // Non-colliding case
-  MoveDynamicSphere(collide_index, false /* not colliding */, dynamic_indices);
+  // Non-colliding case.
+  MoveDynamicSphere(collide_id, false /* not colliding */);
   ExpectIgnoredPenetration(origin_id, collide_id, &engine_);
 
-  // Colliding case
-  MoveDynamicSphere(collide_index, true /* colliding */, dynamic_indices);
+  // Colliding case.
+  MoveDynamicSphere(collide_id, true /* colliding */);
   ExpectIgnoredPenetration(origin_id, collide_id, &engine_);
 
   // Test colliding case on copy.
   ProximityEngine<double> copy_engine(engine_);
   ExpectIgnoredPenetration(origin_id, collide_id, &copy_engine);
 
-  // Test AutoDiffXd converted engine
+  // Test AutoDiffXd converted engine.
   std::unique_ptr<ProximityEngine<AutoDiffXd>> ad_engine =
       engine_.ToAutoDiffXd();
   ExpectIgnoredPenetration(origin_id, collide_id, ad_engine.get());
@@ -1721,19 +1943,19 @@ TEST_F(SimplePenetrationTest, ExcludeCollisionsWithin) {
 // generate cliques.
 TEST_F(SimplePenetrationTest, ExcludeCollisionsBetweenCliqueGeneration) {
   using PET = ProximityEngineTester;
-  GeometryIndex dynamic1(0);
+  GeometryId dynamic1 = GeometryId::get_new_id();
   engine_.AddDynamicGeometry(sphere_, dynamic1);
-  GeometryIndex dynamic2(1);
+  GeometryId dynamic2 = GeometryId::get_new_id();
   engine_.AddDynamicGeometry(sphere_, dynamic2);
-  GeometryIndex dynamic3(2);
+  GeometryId dynamic3 = GeometryId::get_new_id();
   engine_.AddDynamicGeometry(sphere_, dynamic3);
 
-  Isometry3<double> pose{Isometry3<double>::Identity()};
-  GeometryIndex anchored1(0);
+  RigidTransformd pose = RigidTransformd::Identity();
+  GeometryId anchored1 = GeometryId::get_new_id();
   engine_.AddAnchoredGeometry(sphere_, pose, anchored1);
-  GeometryIndex anchored2(1);
+  GeometryId anchored2 = GeometryId::get_new_id();
   engine_.AddAnchoredGeometry(sphere_, pose, anchored2);
-  GeometryIndex anchored3(2);
+  GeometryId anchored3 = GeometryId::get_new_id();
   engine_.AddAnchoredGeometry(sphere_, pose, anchored3);
 
   int expected_clique = PET::peek_next_clique(engine_);
@@ -1779,42 +2001,35 @@ TEST_F(SimplePenetrationTest, ExcludeCollisionsBetweenCliqueGeneration) {
 }
 
 TEST_F(SimplePenetrationTest, ExcludeCollisionsBetween) {
-  std::vector<GeometryIndex> dynamic_indices;
-  GeometryIndex origin_index(0);
-  dynamic_indices.push_back(origin_index);
-  engine_.AddDynamicGeometry(sphere_, origin_index);
   GeometryId origin_id = GeometryId::get_new_id();
-  geometry_map_.push_back(origin_id);
+  engine_.AddDynamicGeometry(sphere_, origin_id);
 
-  GeometryIndex collide_index(1);
-  engine_.AddDynamicGeometry(sphere_, collide_index);
-  dynamic_indices.push_back(collide_index);
   GeometryId collide_id = GeometryId::get_new_id();
-  geometry_map_.push_back(collide_id);
+  engine_.AddDynamicGeometry(sphere_, collide_id);
   EXPECT_EQ(engine_.num_geometries(), 2);
 
-  EXPECT_FALSE(engine_.CollisionFiltered(origin_index, true,
-                                         collide_index, true));
-  engine_.ExcludeCollisionsBetween({origin_index}, {}, {collide_index}, {});
-  EXPECT_TRUE(engine_.CollisionFiltered(origin_index, true,
-                                        collide_index, true));
+  EXPECT_FALSE(engine_.CollisionFiltered(origin_id, true,
+                                         collide_id, true));
+  engine_.ExcludeCollisionsBetween({origin_id}, {}, {collide_id}, {});
+  EXPECT_TRUE(engine_.CollisionFiltered(origin_id, true,
+                                        collide_id, true));
 
-  X_WGs_.push_back(Isometry3d::Identity());
-  X_WGs_.push_back(Isometry3d::Identity());
+  X_WGs_[origin_id] = RigidTransformd::Identity();
+  X_WGs_[collide_id] = RigidTransformd::Identity();
 
-  // Non-colliding case
-  MoveDynamicSphere(collide_index, false /* not colliding */, dynamic_indices);
+  // Non-colliding case.
+  MoveDynamicSphere(collide_id, false /* not colliding */);
   ExpectIgnoredPenetration(origin_id, collide_id, &engine_);
 
-  // Colliding case
-  MoveDynamicSphere(collide_index, true /* colliding */, dynamic_indices);
+  // Colliding case.
+  MoveDynamicSphere(collide_id, true /* colliding */);
   ExpectIgnoredPenetration(origin_id, collide_id, &engine_);
 
   // Test colliding case on copy.
   ProximityEngine<double> copy_engine(engine_);
   ExpectIgnoredPenetration(origin_id, collide_id, &copy_engine);
 
-  // Test AutoDiffXd converted engine
+  // Test AutoDiffXd converted engine.
   std::unique_ptr<ProximityEngine<AutoDiffXd>> ad_engine =
       engine_.ToAutoDiffXd();
   ExpectIgnoredPenetration(origin_id, collide_id, ad_engine.get());
@@ -1827,47 +2042,45 @@ TEST_F(SimplePenetrationTest, ExcludeCollisionsBetween) {
 // everything.
 GTEST_TEST(ProximityEngineTests, PairwiseSignedDistanceNonPositiveThreshold) {
   ProximityEngine<double> engine;
+  const GeometryId id1 = GeometryId::get_new_id();
+  const GeometryId id2 = GeometryId::get_new_id();
+  const GeometryId id3 = GeometryId::get_new_id();
   const double kRadius = 0.5;
-  std::vector<Isometry3d> X_WGs{Isometry3d{Translation3d{0, 2 * kRadius, 0}},
-                                Isometry3d{Translation3d{-kRadius * 0.9, 0, 0}},
-                                Isometry3d{Translation3d{kRadius * 0.9, 0, 0}}};
-  std::vector<GeometryId> geometry_map{GeometryId::get_new_id(),
-                                       GeometryId::get_new_id(),
-                                       GeometryId::get_new_id()};
+  const unordered_map<GeometryId, RigidTransformd> X_WGs{
+      {id1, RigidTransformd{Translation3d{0, 2 * kRadius, 0}}},
+      {id2, RigidTransformd{Translation3d{-kRadius * 0.9, 0, 0}}},
+      {id3, RigidTransformd{Translation3d{kRadius * 0.9, 0, 0}}}};
+
   Sphere sphere{kRadius};
-  std::vector<GeometryIndex> indices{GeometryIndex{0}, GeometryIndex{1},
-                                     GeometryIndex{2}};
-  engine.AddDynamicGeometry(sphere, indices[0]);
-  engine.AddDynamicGeometry(sphere, indices[1]);
-  engine.AddDynamicGeometry(sphere, indices[2]);
-  engine.UpdateWorldPoses(X_WGs, indices);
+  engine.AddDynamicGeometry(sphere, id1);
+  engine.AddDynamicGeometry(sphere, id2);
+  engine.AddDynamicGeometry(sphere, id3);
+  engine.UpdateWorldPoses(X_WGs);
   std::vector<SignedDistancePair<double>> results_all =
-      engine.ComputeSignedDistancePairwiseClosestPoints(geometry_map, X_WGs,
-                                                        kInf);
+      engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs, kInf);
   EXPECT_EQ(results_all.size(), 3u);
 
   std::vector<SignedDistancePair<double>> results_zero =
-      engine.ComputeSignedDistancePairwiseClosestPoints(geometry_map, X_WGs,
-                                                        0);
+      engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs, 0);
   EXPECT_EQ(results_zero.size(), 1u);
 
   const double penetration = -kRadius * 0.2;
   const double kEps = std::numeric_limits<double>::epsilon();
 
   std::vector<SignedDistancePair<double>> results_barely_in =
-      engine.ComputeSignedDistancePairwiseClosestPoints(geometry_map, X_WGs,
+      engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs,
                                                         penetration + kEps);
   EXPECT_EQ(results_barely_in.size(), 1u);
 
   std::vector<SignedDistancePair<double>> results_barely_out =
-      engine.ComputeSignedDistancePairwiseClosestPoints(geometry_map, X_WGs,
+      engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs,
                                                         penetration - kEps);
   EXPECT_EQ(results_barely_out.size(), 0u);
 }
 
 // Test ComputeSignedDistancePairwiseClosestPoints with sphere-sphere,
-// sphere-box, sphere-cylinder pairs, and sphere-halfspace.  The definition of
-// this test suite consists of four sections.
+// sphere-box, sphere-capsule, sphere-cylinder pairs, and sphere-half space.
+// The definition of this test suite consists of four sections.
 // 1. Generate test data as a vector of SignedDistancePairTestData. Each
 //    record consists of both input and expected result.  See the function
 //    GenDistancePairTestSphereSphere(), for example.
@@ -1878,19 +2091,21 @@ GTEST_TEST(ProximityEngineTests, PairwiseSignedDistanceNonPositiveThreshold) {
 //    ComputeSignedDistancePairwiseClosestPoints() from here.
 //    See TEST_P(SignedDistancePairTest, SinglePair), for example.
 // 4. Initiate all the tests by specifying the test fixture and the test data.
-//    See INSTANTIATE_TEST_CASE_P() below.
+//    See INSTANTIATE_TEST_SUITE_P() below.
 class SignedDistancePairTestData {
  public:
   SignedDistancePairTestData(shared_ptr<const Shape> a,
                              shared_ptr<const Shape> b,
                              const RigidTransformd& X_WA,
                              const RigidTransformd& X_WB,
-                             const SignedDistancePair<double>& expect)
+                             const SignedDistancePair<double>& expect,
+                             const double tolerance = 0)
       : a_(a),
         b_(b),
         X_WA_(X_WA),
         X_WB_(X_WB),
-        expected_result_(expect) {}
+        expected_result_(expect),
+        tolerance_(tolerance) {}
 
   // Generates new test data by swapping geometry A and geometry B. It will
   // help us test the symmetric interface. For example, we can generate the
@@ -1904,7 +2119,8 @@ class SignedDistancePairTestData {
     auto& distance = expected_result_.distance;
     return SignedDistancePairTestData(
         b_, a_, X_WB_, X_WA_,
-        SignedDistancePair<double>(id_B, id_A, p_BCb, p_ACa, distance));
+        SignedDistancePair<double>(id_B, id_A, p_BCb, p_ACa, distance),
+        tolerance_);
   }
 
   // Google Test uses this operator to report the test data in the log file
@@ -1934,6 +2150,7 @@ class SignedDistancePairTestData {
   const RigidTransformd X_WA_;
   const RigidTransformd X_WB_;
   const SignedDistancePair<double> expected_result_;
+  const double tolerance_;
 };
 
 // Two spheres with varying degrees of overlapping.  The first sphere A is
@@ -1951,8 +2168,8 @@ std::vector<SignedDistancePairTestData> GenDistancePairTestSphereSphere(
     const RotationMatrixd& R_WB = RotationMatrixd::Identity()) {
   auto sphere_A = make_shared<const Sphere>(1.0);
   auto sphere_B = make_shared<const Sphere>(2.0);
-  double radius_A = sphere_A->get_radius();
-  double radius_B = sphere_B->get_radius();
+  double radius_A = sphere_A->radius();
+  double radius_B = sphere_B->radius();
   // Set up R_AB and R_BA from X_WA and R_WB.
   const RotationMatrixd& R_WA = X_WA.rotation();
   const RotationMatrixd R_AW = R_WA.transpose();
@@ -2047,7 +2264,7 @@ std::vector<SignedDistancePairTestData> GenDistPairTestSphereSphereNonAligned(
     const RotationMatrixd& R_WB = RotationMatrixd::Identity()) {
   auto sphere_A = make_shared<const Sphere>(2.25);
   auto sphere_B = make_shared<const Sphere>(9.);
-  const double radius_A = sphere_A->get_radius();
+  const double radius_A = sphere_A->radius();
   // Set up Ca and Bo in A's frame.
   const Vector3d p_ACa(0.25, 1., 2.);
   const Vector3d p_ABo(1., 4., 8.);
@@ -2102,7 +2319,7 @@ std::vector<SignedDistancePairTestData> GenDistPairTestSphereBox(
     const RigidTransformd& X_WB = RigidTransformd::Identity()) {
   auto sphere_A = make_shared<const Sphere>(2.);
   auto box_B = make_shared<const Box>(16., 12., 8.);
-  const double radius = sphere_A->get_radius();
+  const double radius = sphere_A->radius();
   const double half_x = box_B->size()(0) / 2.;
   struct Configuration {
     Vector3d p_BAo;
@@ -2206,7 +2423,7 @@ std::vector<SignedDistancePairTestData> GenDistPairTestSphereBoxBoundary(
     const RigidTransformd& X_WB = RigidTransformd::Identity()) {
   auto sphere_A = make_shared<const Sphere>(2.);
   auto box_B = make_shared<const Box>(16., 12., 8.);
-  const double radius_A = sphere_A->get_radius();
+  const double radius_A = sphere_A->radius();
   const Vector3d half_B = box_B->size() / 2.;
   std::vector<SignedDistancePairTestData> test_data;
   // We use sign_x, sign_y, and sign_z to parameterize the positions on the
@@ -2250,6 +2467,86 @@ GenDistPairTestSphereBoxBoundaryTransform() {
                       Vector3d(1., 2., 3.)));
 }
 
+// Sphere-capsule data for testing ComputeSignedDistancePairwiseClosestPoints.
+// We move a small sphere through different configurations:-
+// 1. outside the capsule,
+// 2. touching the capsule,
+// 3. slightly overlap the capsule,
+// 4. half inside half outside the capsule,
+// 5. more than half inside the capsule,
+// 6. completely inside and osculating the capsule, and
+// 7. deeply inside the capsule.
+// The sphere's center always stays on the capsule's positive z-axis.
+// The witness point on the capsule stays the same in all cases.
+// The witness point on the sphere is always the lowest point as expressed
+// in the frame of the capsule.
+//
+// @param R_WA specifies the orientation of the sphere A in world.
+// @param X_WB specifies the pose of the capsule B in world.
+// @return the test data for testing sphere-capsule pairwise signed distances.
+std::vector<SignedDistancePairTestData> GenDistPairTestSphereCapsule(
+    const RotationMatrixd& R_WA = RotationMatrixd::Identity(),
+    const RigidTransformd& X_WB = RigidTransformd::Identity()) {
+  // TODO(SeanCurtis-TRI): There are underlying fcl issues that prevent the
+  // collision result from being more precise. See related Drake issue 7656.
+  const double kTolerance = 1e-3;
+  auto sphere_A = make_shared<const Sphere>(2.);
+  auto capsule_B = make_shared<const Capsule>(6., 16.);
+  const double radius_A = sphere_A->radius();
+  const double half_length =
+      capsule_B->length() / 2. + capsule_B->radius();
+  const std::vector<double> pair_distances{
+      // The sphere is outside the capsule.
+      radius_A * 2.,
+      // The sphere touches the capsule.
+      0.,
+      // The sphere slightly overlaps the capsule.
+      -radius_A * 0.5,
+      // The sphere is half inside and half outside the capsule.
+      -radius_A,
+      // The sphere's center is inside, but the sphere is not completely
+      // encapsulated.
+      -radius_A * 1.5,
+      // The sphere is completely inside and osculating the capsule.
+      -radius_A * 2,
+      // The sphere is deeply inside the capsule (whose size is much larger
+      // than radius).
+      -radius_A * 2.5};
+  // Witness point Cb on B.
+  const Vector3d p_BCb(0., 0., half_length);
+  std::vector<SignedDistancePairTestData> test_data;
+  for (const auto& pair_distance : pair_distances) {
+    const Vector3d p_BAo =
+        Vector3d(0., 0., pair_distance + half_length + radius_A);
+    // Set up the pose of A from the translation vector in the configuration
+    // and the given rotation parameter R_WA.
+    const Vector3d p_WAo = X_WB * p_BAo;
+    const RigidTransformd X_WA(R_WA, p_WAo);
+    // Set up the transformation form B's frame to A's frame.
+    const RigidTransformd X_AW = X_WA.inverse();
+    const RigidTransformd X_AB = X_AW * X_WB;
+    // Witness point Ca on A. Calculate its position in B's frame then change
+    // to A's frame.
+    const Vector3d p_BCa = p_BAo + Vector3d(0, 0, -radius_A);
+    const Vector3d p_ACa = X_AB * p_BCa;
+    test_data.emplace_back(
+        sphere_A, capsule_B, X_WA, X_WB,
+        SignedDistancePair<double>(GeometryId::get_new_id(),
+                                   GeometryId::get_new_id(), p_ACa, p_BCb,
+                                   pair_distance),
+        kTolerance);
+  }
+  return test_data;
+}
+
+std::vector<SignedDistancePairTestData>
+GenDistPairTestSphereCapsuleTransform() {
+  return GenDistPairTestSphereCapsule(
+      RotationMatrixd(RollPitchYawd(M_PI, M_PI / 6., M_PI / 3.)),
+      RigidTransformd(RollPitchYawd(3. * M_PI / 8., 5 * M_PI / 6., M_PI / 12.),
+                      Vector3d(1., 2., 3.)));
+}
+
 // Sphere-cylinder data for testing ComputeSignedDistancePairwiseClosestPoints.
 // We move a small sphere through different configurations:-
 // 1. outside the cylinder,
@@ -2272,8 +2569,8 @@ std::vector<SignedDistancePairTestData> GenDistPairTestSphereCylinder(
     const RigidTransformd& X_WB = RigidTransformd::Identity()) {
   auto sphere_A = make_shared<const Sphere>(2.);
   auto cylinder_B = make_shared<const Cylinder>(12., 16.);
-  const double radius_A = sphere_A->get_radius();
-  const double half_length = cylinder_B->get_length() / 2.;
+  const double radius_A = sphere_A->radius();
+  const double half_length = cylinder_B->length() / 2.;
   struct Configuration {
     Vector3d p_BAo;
     double pair_distance;
@@ -2372,9 +2669,9 @@ std::vector<SignedDistancePairTestData> GenDistPairTestSphereCylinderBoundary(
     const RigidTransformd& X_WB = RigidTransformd::Identity()) {
   auto sphere_A = make_shared<const Sphere>(4.);
   auto cylinder_B = make_shared<const Cylinder>(8., 16.);
-  const double r_A = sphere_A->get_radius();
-  const double r_B = cylinder_B->get_radius();
-  const double h = cylinder_B->get_length() / 2.;
+  const double r_A = sphere_A->radius();
+  const double r_B = cylinder_B->radius();
+  const double h = cylinder_B->length() / 2.;
   std::vector<SignedDistancePairTestData> test_data;
   for (const double i : {-2., -1., 0., 1., 2.}) {
     for (const double j : {-2., -1., 0., 1., 2.}) {
@@ -2449,58 +2746,58 @@ GenDistPairTestHalfspaceSphere() {
   std::vector<SignedDistancePairTestData> test_data;
   auto sphere = make_shared<const Sphere>(radius);
   const GeometryId sphere_id = GeometryId::get_new_id();
-  auto halfspace = make_shared<const HalfSpace>();
-  const GeometryId halfspace_id = GeometryId::get_new_id();
+  auto half_space = make_shared<const HalfSpace>();
+  const GeometryId half_space_id = GeometryId::get_new_id();
   const bool well_defined_grad = true;
   const RigidTransformd X_WG1(RollPitchYawd(M_PI / 3., M_PI / 6., M_PI_2),
                               Vector3d{10., 11., 12.});
   const RotationMatrixd R_WS;
 
   for (const auto& X_WH : {RigidTransformd(), X_WG1}) {
-    const auto& R_WH = X_WH.linear();
-    // Halfspace's outward normal is in the direction of the z-axis of the
-    // halfspace's canonical frame H.
+    const auto& R_WH = X_WH.rotation();
+    // Half space's outward normal is in the direction of the z-axis of the
+    // half space's canonical frame H.
     const Vector3d nhat_HS_W = R_WH.col(2);
     const Vector3d p_HCh(1.25, 1.5, 0);
     const Vector3d p_WCh = X_WH * p_HCh;
 
-    // Outside the halfspace (with permuted ordering).
+    // Outside the half space (with permuted ordering).
     {
       const Vector3d p_WS = p_WCh + (distance + radius) * nhat_HS_W;
       const RigidTransformd X_WS(p_WS);
       const Vector3d p_SCs = -radius * (R_WS.inverse() * nhat_HS_W);
-      SignedDistancePair<double> expected(sphere_id, halfspace_id, p_SCs, p_HCh,
-                                          distance, nhat_HS_W,
+      SignedDistancePair<double> expected(sphere_id, half_space_id, p_SCs,
+                                          p_HCh, distance, nhat_HS_W,
                                           well_defined_grad);
-      test_data.emplace_back(sphere, halfspace, X_WS, X_WH, expected);
+      test_data.emplace_back(sphere, half_space, X_WS, X_WH, expected);
       expected.SwapAAndB();
-      test_data.emplace_back(halfspace, sphere, X_WH, X_WS, expected);
+      test_data.emplace_back(half_space, sphere, X_WH, X_WS, expected);
     }
 
-    // On the halfspace boundary.
+    // On the half space boundary.
     {
       const Vector3d p_WS = p_WCh + radius * nhat_HS_W;
       const RigidTransformd X_WS(p_WS);
       const Vector3d p_SCs = -radius * (R_WS.inverse() * nhat_HS_W);
-      SignedDistancePair<double> expected(sphere_id, halfspace_id, p_SCs, p_HCh,
-                                          0, nhat_HS_W,
+      SignedDistancePair<double> expected(sphere_id, half_space_id, p_SCs,
+                                          p_HCh, 0, nhat_HS_W,
                                           well_defined_grad);
-      test_data.emplace_back(sphere, halfspace, X_WS, X_WH, expected);
+      test_data.emplace_back(sphere, half_space, X_WS, X_WH, expected);
       expected.SwapAAndB();
-      test_data.emplace_back(halfspace, sphere, X_WH, X_WS, expected);
+      test_data.emplace_back(half_space, sphere, X_WH, X_WS, expected);
     }
 
-    // Inside the halfspace.
+    // Inside the half space.
     {
       const Vector3d p_WS = p_WCh + (radius - distance) * nhat_HS_W;
       const RigidTransformd X_WS(p_WS);
       const Vector3d p_SCs = -radius * (R_WS.inverse() * nhat_HS_W);
-      SignedDistancePair<double> expected(sphere_id, halfspace_id, p_SCs, p_HCh,
-                                          -distance, nhat_HS_W,
+      SignedDistancePair<double> expected(sphere_id, half_space_id, p_SCs,
+                                          p_HCh, -distance, nhat_HS_W,
                                           well_defined_grad);
-      test_data.emplace_back(sphere, halfspace, X_WS, X_WH, expected);
+      test_data.emplace_back(sphere, half_space, X_WS, X_WH, expected);
       expected.SwapAAndB();
-      test_data.emplace_back(halfspace, sphere, X_WH, X_WS, expected);
+      test_data.emplace_back(half_space, sphere, X_WH, X_WS, expected);
     }
   }
 
@@ -2511,55 +2808,52 @@ class SignedDistancePairTest
     : public testing::TestWithParam<SignedDistancePairTestData> {
  public:
   SignedDistancePairTest() {
-    auto data = GetParam();
-    engine_.AddAnchoredGeometry(*(data.a_), data.X_WA_.GetAsIsometry3(),
-                                GeometryIndex(0));
-    geometry_map_.push_back(data.expected_result_.id_A);
+    const auto& data = GetParam();
+    engine_.AddAnchoredGeometry(*data.a_, data.X_WA_,
+                                data.expected_result_.id_A);
 
-    std::vector<GeometryIndex> dynamic_indices{GeometryIndex(1)};
-    engine_.AddDynamicGeometry(*(data.b_), dynamic_indices.back());
-    geometry_map_.push_back(data.expected_result_.id_B);
+    engine_.AddDynamicGeometry(*(data.b_), data.expected_result_.id_B);
 
-    X_WGs_.push_back(data.X_WA_.GetAsIsometry3());
-    X_WGs_.push_back(data.X_WB_.GetAsIsometry3());
-    engine_.UpdateWorldPoses(X_WGs_, dynamic_indices);
+    X_WGs_[data.expected_result_.id_A] = data.X_WA_;
+    X_WGs_[data.expected_result_.id_B] = data.X_WB_;
+    engine_.UpdateWorldPoses(X_WGs_);
   }
 
  protected:
   ProximityEngine<double> engine_;
-  std::vector<GeometryId> geometry_map_;
-  std::vector<Isometry3d> X_WGs_;
+  unordered_map<GeometryId, RigidTransformd> X_WGs_;
 
  public:
   // The tolerance value for determining equivalency between expected and
   // tested results. The underlying algorithms have an empirically-determined,
   // hard-coded tolerance of 1e-14 to account for loss of precision due to
   // rigid transformations and this tolerance reflects that.
-  static constexpr double tolerance_ = 1e-14;
+  static constexpr double kTolerance = 1e-14;
 };
 
 TEST_P(SignedDistancePairTest, SinglePair) {
   const auto& data = GetParam();
-  const auto results = engine_.ComputeSignedDistancePairwiseClosestPoints(
-      geometry_map_, X_WGs_, kInf);
+  const auto results =
+      engine_.ComputeSignedDistancePairwiseClosestPoints(X_WGs_, kInf);
   ASSERT_EQ(results.size(), 1);
   const auto& result = results[0];
+  const double tolerance = data.tolerance_ ? data.tolerance_ : kTolerance;
 
-  EXPECT_NEAR(result.distance, data.expected_result_.distance, tolerance_)
+  EXPECT_NEAR(result.distance, data.expected_result_.distance, tolerance)
             << "Incorrect signed distance";
 
-  const bool a_then_b = (result.id_A == data.expected_result_.id_A)&&
+  const bool a_then_b = (result.id_A == data.expected_result_.id_A) &&
                         (result.id_B == data.expected_result_.id_B);
-  const bool b_then_a = (result.id_B == data.expected_result_.id_A)&&
+  const bool b_then_a = (result.id_B == data.expected_result_.id_A) &&
                         (result.id_A == data.expected_result_.id_B);
-  ASSERT_TRUE(a_then_b ^ b_then_a);
+  ASSERT_NE(a_then_b, b_then_a);
   const Vector3d& p_ACa = a_then_b? result.p_ACa : result.p_BCb;
   const Vector3d& p_BCb = a_then_b? result.p_BCb : result.p_ACa;
 
-  EXPECT_TRUE(CompareMatrices(p_ACa, data.expected_result_.p_ACa, tolerance_))
+  EXPECT_TRUE(CompareMatrices(p_ACa, data.expected_result_.p_ACa, tolerance))
     << "Incorrect witness point.";
-  EXPECT_TRUE(CompareMatrices(p_BCb, data.expected_result_.p_BCb, tolerance_))
-    << "Incorrect witness point.";
+  EXPECT_TRUE(CompareMatrices(p_BCb, data.expected_result_.p_BCb, tolerance))
+      << "Incorrect witness point.";
 
   // Check the invariance that the distance between the two witness points
   // equal the signed distance.
@@ -2567,50 +2861,55 @@ TEST_P(SignedDistancePairTest, SinglePair) {
   const RigidTransformd X_AW = data.X_WA_.inverse();
   const Vector3d p_ACb = X_AW * p_WCb;
   const double distance_between_witnesses = (p_ACa-p_ACb).norm();
-  EXPECT_NEAR(distance_between_witnesses, std::abs(result.distance), tolerance_)
-    << "Distance between witness points do not equal the signed distance.";
+  EXPECT_NEAR(distance_between_witnesses, std::abs(result.distance), tolerance)
+      << "Distance between witness points do not equal the signed distance.";
 }
 
-INSTANTIATE_TEST_CASE_P(SphereSphere, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereSphere, SignedDistancePairTest,
     testing::ValuesIn(GenDistancePairTestSphereSphere()));
-INSTANTIATE_TEST_CASE_P(SphereSphereTransform, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereSphereTransform, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereSphereTransform()));
-INSTANTIATE_TEST_CASE_P(SphereSphereGimbalLock, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereSphereGimbalLock, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereSphereGimbalLock()));
 
-INSTANTIATE_TEST_CASE_P(SphereSphreNonAligned, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereSphreNonAligned, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereSphereNonAligned()));
-INSTANTIATE_TEST_CASE_P(SphereSphreNonAlignedTransform, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereSphreNonAlignedTransform, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereSphereNonAlignedTransform()));
 
-INSTANTIATE_TEST_CASE_P(SphereBox, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereBox, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereBox()));
-INSTANTIATE_TEST_CASE_P(SphereBoxTransform, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereBoxTransform, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereBoxTransform()));
-INSTANTIATE_TEST_CASE_P(SphereBoxGimbalLock, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereBoxGimbalLock, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereBoxGimbalLock()));
 
-INSTANTIATE_TEST_CASE_P(BoxSphere, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(BoxSphere, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestBoxSphere()));
-INSTANTIATE_TEST_CASE_P(BoxSphereTransform, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(BoxSphereTransform, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestBoxSphereTransform()));
 
-INSTANTIATE_TEST_CASE_P(SphereBoxBoundary, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereBoxBoundary, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereBoxBoundary()));
-INSTANTIATE_TEST_CASE_P(SphereBoxBoundaryTransform, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereBoxBoundaryTransform, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereBoxBoundaryTransform()));
 
-INSTANTIATE_TEST_CASE_P(SphereCylinder, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereCapsule, SignedDistancePairTest,
+    testing::ValuesIn(GenDistPairTestSphereCapsule()));
+INSTANTIATE_TEST_SUITE_P(SphereCapsuleTransform, SignedDistancePairTest,
+    testing::ValuesIn(GenDistPairTestSphereCapsuleTransform()));
+
+INSTANTIATE_TEST_SUITE_P(SphereCylinder, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereCylinder()));
-INSTANTIATE_TEST_CASE_P(SphereCylinderTransform, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereCylinderTransform, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereCylinderTransform()));
-INSTANTIATE_TEST_CASE_P(SphereCylinderBoundary, SignedDistancePairTest,
+INSTANTIATE_TEST_SUITE_P(SphereCylinderBoundary, SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereCylinderBoundary()));
-INSTANTIATE_TEST_CASE_P(SphereCylinderBoundaryTransform,
+INSTANTIATE_TEST_SUITE_P(SphereCylinderBoundaryTransform,
     SignedDistancePairTest,
     testing::ValuesIn(GenDistPairTestSphereCylinderBoundaryTransform()));
 
-INSTANTIATE_TEST_CASE_P(HalfspaceSphere,
+INSTANTIATE_TEST_SUITE_P(HalfspaceSphere,
                         SignedDistancePairTest,
                         testing::ValuesIn(GenDistPairTestHalfspaceSphere()));
 
@@ -2623,24 +2922,20 @@ GTEST_TEST(SignedDistancePairError, HalfspaceException) {
   // intended to be long-lasting; we want to correct FCL's short-coming soon
   // so that the behavior (and this test) can be removed.
   ProximityEngine<double> engine;
-  std::vector<GeometryId> geometry_map;
   // NOTE: It's not necessary to put any poses into X_WGs; they never get
   // evaluated due to the error condition.
-  std::vector<Isometry3d> X_WGs;
+  unordered_map<GeometryId, RigidTransformd> X_WGs;
 
   // We can't use sphere, because sphere-halfspace is supported.
   Box box{0.5, 0.25, 0.75};
-  engine.AddDynamicGeometry(box, GeometryIndex(0));
-  geometry_map.push_back(GeometryId::get_new_id());
+  engine.AddDynamicGeometry(box, GeometryId::get_new_id());
 
   HalfSpace halfspace;
-  engine.AddAnchoredGeometry(halfspace, Isometry3d::Identity(),
-                             GeometryIndex(1));
-  geometry_map.push_back(GeometryId::get_new_id());
+  engine.AddAnchoredGeometry(halfspace, RigidTransformd::Identity(),
+                             GeometryId::get_new_id());
 
   DRAKE_EXPECT_THROWS_MESSAGE(
-      engine.ComputeSignedDistancePairwiseClosestPoints(geometry_map, X_WGs,
-                                                        kInf),
+      engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs, kInf),
       std::logic_error,
       "Signed distance queries between shapes .* and .* are not supported.*");
 }
@@ -2653,12 +2948,12 @@ class SignedDistancePairConcentricTest : public SignedDistancePairTest {};
 
 TEST_P(SignedDistancePairConcentricTest, DistanceInvariance) {
   const auto& data = GetParam();
-  const auto results = engine_.ComputeSignedDistancePairwiseClosestPoints(
-      geometry_map_, X_WGs_, kInf);
+  const auto results =
+      engine_.ComputeSignedDistancePairwiseClosestPoints(X_WGs_, kInf);
   ASSERT_EQ(results.size(), 1);
   const auto& result = results[0];
 
-  EXPECT_NEAR(result.distance, data.expected_result_.distance, tolerance_)
+  EXPECT_NEAR(result.distance, data.expected_result_.distance, kTolerance)
     << "Incorrect signed distance";
 
   const bool a_then_b = (result.id_A == data.expected_result_.id_A)&&
@@ -2674,8 +2969,8 @@ TEST_P(SignedDistancePairConcentricTest, DistanceInvariance) {
   const Vector3d p_WCb = data.X_WB_ * p_BCb;
   const RigidTransformd X_AW = data.X_WA_.inverse();
   const Vector3d p_ACb = X_AW * p_WCb;
-  const double distance_between_witnesses = (p_ACa-p_ACb).norm();
-  EXPECT_NEAR(distance_between_witnesses, -result.distance, tolerance_)
+  const double distance_between_witnesses = (p_ACa - p_ACb).norm();
+  EXPECT_NEAR(distance_between_witnesses, -result.distance, kTolerance)
     << "Incorrect distance between witness points.";
 }
 
@@ -2762,7 +3057,7 @@ GenDistPairTestSphereBoxConcentric(
     const RotationMatrixd& R_WB = RotationMatrixd::Identity()) {
   auto sphere_A = make_shared<const Sphere>(2.);
   auto box_B = make_shared<const Box>(4., 8., 16.);
-  const double radius_A = sphere_A->get_radius();
+  const double radius_A = sphere_A->radius();
   const Vector3d half_B = box_B->size() / 2.;
   const RigidTransformd X_WB(R_WB, X_WA.translation());
   const RigidTransformd X_AW = X_WA.inverse();
@@ -2792,20 +3087,20 @@ GenDistPairTestSphereBoxConcentricTransform() {
       RotationMatrixd(RollPitchYawd(M_PI, M_PI/6., M_PI)));
 }
 
-INSTANTIATE_TEST_CASE_P(SphereSphereConcentric,
+INSTANTIATE_TEST_SUITE_P(SphereSphereConcentric,
     SignedDistancePairConcentricTest,
     testing::ValuesIn(GenDistPairTestSphereSphereConcentric()));
-INSTANTIATE_TEST_CASE_P(SphereSphereConcentricTransform,
+INSTANTIATE_TEST_SUITE_P(SphereSphereConcentricTransform,
     SignedDistancePairConcentricTest,
     testing::ValuesIn(GenDistPairTestSphereSphereConcentricTransform()));
-INSTANTIATE_TEST_CASE_P(SphereSphereConcentricGimbalLock,
+INSTANTIATE_TEST_SUITE_P(SphereSphereConcentricGimbalLock,
     SignedDistancePairConcentricTest,
     testing::ValuesIn(GenDistPairTestSphereSphereConcentricGimbalLock()));
 
-INSTANTIATE_TEST_CASE_P(SphereBoxConcentric,
+INSTANTIATE_TEST_SUITE_P(SphereBoxConcentric,
     SignedDistancePairConcentricTest,
     testing::ValuesIn(GenDistPairTestSphereBoxConcentric()));
-INSTANTIATE_TEST_CASE_P(SphereBoxConcentricTransform,
+INSTANTIATE_TEST_SUITE_P(SphereBoxConcentricTransform,
     SignedDistancePairConcentricTest,
     testing::ValuesIn(GenDistPairTestSphereBoxConcentricTransform()));
 
@@ -2885,16 +3180,14 @@ GTEST_TEST(ProximityEngineCollisionTest, SpherePunchThroughBox) {
   const double h = 10 * radius;   // Box height much larger than sphere.
   const double d = 10 * radius;   // Box depth much larger than sphere.
   const double eps = std::numeric_limits<double>::epsilon();
-  GeometryIndex box_index(0);
-  engine.AddDynamicGeometry(Box{w, h, d}, box_index);
-  GeometryIndex sphere_index(1);
-  engine.AddDynamicGeometry(Sphere{radius}, sphere_index);
+  const GeometryId box_id = GeometryId::get_new_id();
+  engine.AddDynamicGeometry(Box{w, h, d}, box_id);
+  const GeometryId sphere_id = GeometryId::get_new_id();
+  engine.AddDynamicGeometry(Sphere{radius}, sphere_id);
 
-  GeometryId box_id = GeometryId::get_new_id();
-  GeometryId sphere_id = GeometryId::get_new_id();
-  std::vector<GeometryId> geometry_map{box_id, sphere_id};
-
-  std::vector<Isometry3d> poses{Isometry3d::Identity(), Isometry3d::Identity()};
+  unordered_map<GeometryId, RigidTransformd> poses{
+      {box_id, RigidTransformd::Identity()},
+      {sphere_id, RigidTransformd::Identity()}};
   // clang-format off
   std::vector<SpherePunchData> test_data{
       // In non-penetration, contact_normal and depth values don't matter; they
@@ -2910,13 +3203,11 @@ GTEST_TEST(ProximityEngineCollisionTest, SpherePunchThroughBox) {
       {"sphere's center has crossed the box's origin - flipped normal",
        {-eps, 0, 0}, 1, {1, 0, 0}, radius + half_w - eps}};
   // clang-format on
-  std::vector<GeometryIndex> indices(poses.size());
-  std::iota(indices.begin(), indices.end(), GeometryIndex(0));
   for (const auto& test : test_data) {
-    poses[1].translation() = test.sphere_pose;
-    engine.UpdateWorldPoses(poses, indices);
+    poses[sphere_id].set_translation(test.sphere_pose);
+    engine.UpdateWorldPoses(poses);
     std::vector<PenetrationAsPointPair<double>> results =
-        engine.ComputePointPairPenetration(geometry_map);
+        engine.ComputePointPairPenetration();
 
     ASSERT_EQ(static_cast<int>(results.size()), test.contact_count)
         << "Failed for the " << test.description << " case";
@@ -2927,18 +3218,43 @@ GTEST_TEST(ProximityEngineCollisionTest, SpherePunchThroughBox) {
       ASSERT_EQ(penetration.id_B, sphere_id);
       EXPECT_TRUE(CompareMatrices(penetration.nhat_BA_W, test.contact_normal,
                                   eps, MatrixCompareType::absolute))
-                << "Failed for the " << test.description << " case";
+          << "Failed for the " << test.description << " case";
       // For this simple, axis-aligned test (where all the values are nicely
       // powers of 2), I should expect perfect answers.
       EXPECT_EQ(penetration.depth - test.depth, 0)
-                << "Failed for the " << test.description << " case";
+          << "Failed for the " << test.description << " case";
     }
   }
 }
 
+// TODO(SeanCurtis-TRI): All of the FCL-based queries should have *limited*
+//  testing in proximity engine. They should only test the following:
+//  Successful evaluation between two dynamic shapes and between a dynamic
+//  and anchored shape. Those simple tests confirm ProximityEngine handles its
+//  responsibilty correctly; it calls the appropriate broadphase methods on FCL.
+//  Unit tests on ProximityEngine for the FCL-based query methods should *not*
+//  be concerned with the correctness of the results' values -- that lies in the
+//  responsibility of the callback and underlying geometric algorithms. They
+//  were originally created here because FCL wasn't completely trusted. So,
+//  create a set of tests that can be evaluated on each of the FCL-based queries
+//  that performs those two tests.
+
+// TODO(SeanCurtis-TRI): Remove these geometric tests from here and put them
+//  in their own test. We're keeping them, ultimately, so that we can use these
+//  tests for our own implementation of shape-shape point-intersection
+//  algorithms. In the short-term, these tests should be expressed directly
+//  in terms of the penetration_as_point_pair::Callback and moved to that set
+//  of tests.
+
 // Robust Box-Primitive tests. Tests collision of the box with other primitives
 // in a uniform framework. These tests parallel tests located in fcl.
-
+//
+// All of the tests below here are using the callback to exercise the black box.
+// They exist because of FCL; FCL's unit tests were sporadic at best and these
+// tests revealed errors/properties of FCL that weren't otherwise apparent.
+// Ultimately, these tests don't belong here. But they can be re-used when we
+// replace FCL with Drake's own implementations.
+//
 // This performs a very specific test. It collides a rotated box with a
 // surface that is tangent to the z = 0 plane. The box is a cube with unit size.
 // The goal is to transform the box such that:
@@ -2985,7 +3301,11 @@ GTEST_TEST(ProximityEngineCollisionTest, SpherePunchThroughBox) {
 //   - cylinder: There are two valid configurations (radius & length >> depth).
 //     - Place a "standing" cylinder at (0, 0, -length/2).
 //     - Rotate the cylinder so that its length axis is parallel with the z = 0
-//       plane and the displace downward (0, 0, -radius). Described as "prone".
+//       plane and then displace downward (0, 0, -radius). Described as "prone".
+//   - capsule: There are two valid configurations (radius & length >> depth).
+//     - Place a "standing" capsule at (0, 0, -length/2 - radius).
+//     - Rotate the capsule so that its length axis is parallel with the z = 0
+//       plane and then displace downward (0, 0, -radius). Described as "prone".
 //
 // Note: there are an infinite number of orientations that satisfy the
 // configuration described above. They should *all* provide the same collision
@@ -3039,7 +3359,9 @@ class BoxPenetrationTest : public ::testing::Test {
     TangentBox,
     TangentStandingCylinder,
     TangentProneCylinder,
-    TangentConvex
+    TangentConvex,
+    TangentStandingCapsule,
+    TangentProneCapsule
   };
 
   // The test that produces *bad* results based on the box orientation. Not
@@ -3059,29 +3381,21 @@ class BoxPenetrationTest : public ::testing::Test {
   // results to the given tolerance.
   void TestCollision(TangentShape shape_type, double tolerance,
                      const math::RigidTransformd& X_WB) {
-    GeometryIndex tangent_index(0);
-    engine_.AddDynamicGeometry(shape(shape_type), tangent_index);
-    GeometryId tangent_id = GeometryId::get_new_id();
-    geometry_map_.push_back(tangent_id);
+    const GeometryId tangent_id = GeometryId::get_new_id();
+    engine_.AddDynamicGeometry(shape(shape_type), tangent_id);
 
-    GeometryIndex box_index(1);
-    engine_.AddDynamicGeometry(box_, box_index);
-    GeometryId box_id = GeometryId::get_new_id();
-    geometry_map_.push_back(box_id);
+    const GeometryId box_id = GeometryId::get_new_id();
+    engine_.AddDynamicGeometry(box_, box_id);
 
     // Confirm that there are no other geometries interfering.
-    EXPECT_EQ(tangent_index, 0);
-    EXPECT_EQ(box_index, 1);
     ASSERT_EQ(engine_.num_dynamic(), 2);
 
     // Update the poses of the geometry.
-    std::vector<Isometry3d> poses{shape_pose(shape_type),
-                                  X_WB.GetAsIsometry3()};
-    std::vector<GeometryIndex> indices(poses.size());
-    std::iota(indices.begin(), indices.end(), GeometryIndex(0));
-    engine_.UpdateWorldPoses(poses, indices);
+    unordered_map<GeometryId, RigidTransformd> poses{
+        {tangent_id, shape_pose(shape_type)}, {box_id, X_WB}};
+    engine_.UpdateWorldPoses(poses);
     std::vector<PenetrationAsPointPair<double>> results =
-        engine_.ComputePointPairPenetration(geometry_map_);
+        engine_.ComputePointPairPenetration();
 
     ASSERT_EQ(results.size(), 1u) << "Against tangent "
                                   << shape_name(shape_type);
@@ -3167,6 +3481,10 @@ class BoxPenetrationTest : public ::testing::Test {
         return "prone cylinder";
       case TangentConvex:
         return "convex";
+      case TangentStandingCapsule:
+        return "standing capsule";
+      case TangentProneCapsule:
+        return "prone capsule";
     }
     return "undefined shape";
   }
@@ -3185,6 +3503,9 @@ class BoxPenetrationTest : public ::testing::Test {
         return tangent_cylinder_;
       case TangentConvex:
         return tangent_convex_;
+      case TangentStandingCapsule:
+      case TangentProneCapsule:
+        return tangent_capsule_;
     }
     // GCC considers this function ill-formed - no apparent return value. This
     // exception alleviates its concern.
@@ -3194,24 +3515,28 @@ class BoxPenetrationTest : public ::testing::Test {
   }
 
   // Map enumeration to tangent pose.
-  Isometry3d shape_pose(TangentShape shape) {
-    Isometry3d pose = Isometry3d::Identity();
+  RigidTransformd shape_pose(TangentShape shape) {
+    RigidTransformd pose = RigidTransformd::Identity();
     switch (shape) {
       case TangentPlane:
         break;  // leave it at the identity
       case TangentSphere:
-        pose.translation() = Vector3d{0, 0, -kRadius};
+        pose.set_translation({0, 0, -kRadius});
         break;
       case TangentBox:
       // The tangent convex is a cube of the same size as the tangent box.
       // That is why we give them the same pose.
       case TangentConvex:
       case TangentStandingCylinder:
-        pose.translation() = Vector3d{0, 0, -kLength / 2};
+        pose.set_translation({0, 0, -kLength / 2});
+        break;
+      case TangentStandingCapsule:
+        pose.set_translation({0, 0, -kLength / 2 - kRadius});
         break;
       case TangentProneCylinder:
-        pose = AngleAxisd{M_PI_2, Vector3d::UnitX()};
-        pose.translation() = Vector3d{0, 0, -kRadius};
+      case TangentProneCapsule:
+        pose = RigidTransformd(AngleAxisd{M_PI_2, Vector3d::UnitX()},
+                               Vector3d{0, 0, -kRadius});
         break;
     }
     return pose;
@@ -3225,7 +3550,6 @@ class BoxPenetrationTest : public ::testing::Test {
   static const double kLength;
 
   ProximityEngine<double> engine_;
-  std::vector<GeometryId> geometry_map_;
 
   // The various geometries used in the collision test.
   const Box box_{1, 1, 1};
@@ -3237,6 +3561,7 @@ class BoxPenetrationTest : public ::testing::Test {
   // The file "quad_cube.obj" contains the cube of size 2.0.
   const Convex tangent_convex_{drake::FindResourceOrThrow(
       "drake/geometry/test/quad_cube.obj"), 5.0};
+  const Capsule tangent_capsule_{kRadius, kLength};
 
   const Vector3d p_WC_{0, 0, -kDepth};
   const Vector3d p_BoC_B_{-0.5, -0.5, -0.5};
@@ -3304,25 +3629,23 @@ TEST_F(BoxPenetrationTest, TangentConvex2) {
   TestCollision2(TangentConvex, 1e-3);
 }
 
-// Attempting to add a dynamic Mesh should cause an abort.
-GTEST_TEST(ProximityEngineTests, AddDynamicMesh) {
-  ProximityEngine<double> engine;
-  Mesh mesh{"invalid/path/thing.obj", 1.0};
-  DRAKE_EXPECT_THROWS_MESSAGE(
-      engine.AddDynamicGeometry(mesh, GeometryIndex(0)),
-      std::exception,
-      ".*The proximity engine does not support meshes yet.*");
+TEST_F(BoxPenetrationTest, TangentStandingCapsule1) {
+  // TODO(tehbelinda): We should check why we cannot use a smaller tolerance.
+  TestCollision1(TangentStandingCapsule, 1e-1);
 }
 
-// Attempting to add a anchored Mesh should cause an abort.
-GTEST_TEST(ProximityEngineTests, AddAnchoredMesh) {
-  ProximityEngine<double> engine;
-  Mesh mesh{"invalid/path/thing.obj", 1.0};
-  DRAKE_EXPECT_THROWS_MESSAGE(
-      engine.AddAnchoredGeometry(mesh, Isometry3d::Identity(),
-                                 GeometryIndex(0)),
-      std::exception,
-      ".*The proximity engine does not support meshes yet.*");
+TEST_F(BoxPenetrationTest, TangentStandingCapsule2) {
+  TestCollision2(TangentStandingCapsule, 1e-12);
+}
+
+TEST_F(BoxPenetrationTest, TangentProneCapsule1) {
+  // TODO(tehbelinda): We should check why we cannot use a smaller tolerance.
+  TestCollision1(TangentProneCapsule, 1e-1);
+}
+
+TEST_F(BoxPenetrationTest, TangentProneCapsule2) {
+  // TODO(tehbelinda): We should check why we cannot use a smaller tolerance.
+  TestCollision2(TangentProneCapsule, 1e-4);
 }
 
 // This is a one-off test. Exposed in issue #10577. A point penetration pair
@@ -3347,33 +3670,19 @@ GTEST_TEST(ProximityEngineTests, Issue10577Regression_Osculation) {
   ProximityEngine<double> engine;
   GeometryId id_A = GeometryId::get_new_id();
   GeometryId id_B = GeometryId::get_new_id();
-  GeometryIndex index_A(0);
-  GeometryIndex index_B(1);
-  ProximityIndex engine_index_A =
-      engine.AddDynamicGeometry(Box(0.49, 0.63, 0.015), index_A);
-  ProximityIndex engine_index_B =
-      engine.AddDynamicGeometry(Cylinder(0.08, 0.002), index_B);
-  ASSERT_EQ(engine_index_A, 0);
-  ASSERT_EQ(engine_index_B, 1);
-  std::vector<GeometryIndex> indices{index_A, index_B};
-  Isometry3<double> X_WA;
+  engine.AddDynamicGeometry(Box(0.49, 0.63, 0.015), id_A);
+  engine.AddDynamicGeometry(Cylinder(0.08, 0.002), id_B);
+
   // Original translation was p_WA = (-0.145, -0.63, 0.2425) and
   // p_WB = (0, -0.6, 0.251), respectively.
-  // clang-format off
-  X_WA.matrix() << 0, -1, 0, -0.25,
-                   1,  0, 0,     0,
-                   0,  0, 1,     0,
-                   0,  0, 0,     1;
-  Isometry3<double> X_WB;
-  X_WB.matrix() << 1, 0, 0,      0,
-                   0, 1, 0,      0,
-                   0, 0, 1, 0.0085,
-                   0, 0, 0,      1;
-  // clang-format on
-  std::vector<Isometry3<double>> X_WG{X_WA, X_WB};
-  engine.UpdateWorldPoses(X_WG, indices);
+  RigidTransformd X_WA(Eigen::AngleAxisd{M_PI_2, Vector3d::UnitZ()},
+                       Vector3d{-0.25, 0, 0});
+  RigidTransformd X_WB(Vector3d{0, 0, 0.0085});
+  const unordered_map<GeometryId, RigidTransformd> X_WG{{id_A, X_WA},
+                                                        {id_B, X_WB}};
+  engine.UpdateWorldPoses(X_WG);
   std::vector<GeometryId> geometry_map{id_A, id_B};
-  auto pairs = engine.ComputePointPairPenetration(geometry_map);
+  auto pairs = engine.ComputePointPairPenetration();
   EXPECT_EQ(pairs.size(), 0);
 }
 
@@ -3387,35 +3696,22 @@ GTEST_TEST(ProximityEngineTests, AnchoredBroadPhaseInitialization) {
   ProximityEngine<double> engine;
   GeometryId id_D = GeometryId::get_new_id();
   GeometryId id_A = GeometryId::get_new_id();
-  GeometryIndex index_D(0);
-  GeometryIndex index_A(1);
-  ProximityIndex engine_index_D =
-      engine.AddDynamicGeometry(Sphere(0.5), index_D);
+  engine.AddDynamicGeometry(Sphere(0.5), id_D);
 
-  Isometry3<double> X_WA{Translation3d{-3, 0, 0}};
-  ProximityIndex engine_index_A =
-      engine.AddAnchoredGeometry(Sphere(0.5), X_WA, index_A);
+  RigidTransformd X_WA{Translation3d{-3, 0, 0}};
+  engine.AddAnchoredGeometry(Sphere(0.5), X_WA, id_A);
 
-  // These should have the same index value because one draws from the dynamic
-  // set, the other from the anchored.
-  ASSERT_EQ(engine_index_D, 0);
-  ASSERT_EQ(engine_index_A, 0);
-
-  Isometry3<double> X_WD{Translation3d{-3, 0.75, 0}};
-  // NOTE: The vector of indicies should *only* be the indices of the dynamic
-  // geometry. The only requirement for the vector of poses is that the
-  // poses[indices[i]] must be defined and should map to the geometry with
-  // index indices[i]. In this case, a single dynamic geometry with index 0,
-  // means it is sufficient to create a pose vector with a single pose.
-  engine.UpdateWorldPoses({X_WD}, {index_D});
-  std::vector<GeometryId> geometry_map{id_D, id_A};
-  auto pairs = engine.ComputePointPairPenetration(geometry_map);
+  RigidTransformd X_WD{Translation3d{-3, 0.75, 0}};
+  // NOTE: We only update the dynamic geometries, so we simply provide a map
+  // containing the ids of the dynamic geometries with their pose as a cheat.
+  engine.UpdateWorldPoses({{id_D, X_WD}});
+  auto pairs = engine.ComputePointPairPenetration();
   EXPECT_EQ(pairs.size(), 1);
 
   // Confirm that it survives copying.
   ProximityEngine<double> engine_copy(engine);
-  engine_copy.UpdateWorldPoses({X_WD}, {index_D});
-  auto pairs_copy = engine_copy.ComputePointPairPenetration(geometry_map);
+  engine_copy.UpdateWorldPoses({{id_D, X_WD}});
+  auto pairs_copy = engine_copy.ComputePointPairPenetration();
   EXPECT_EQ(pairs_copy.size(), 1);
 }
 
@@ -3438,25 +3734,24 @@ GTEST_TEST(ProximityEngineTests, ComputePointSignedDistanceAutoDiffAnchored) {
 
   // An empty world inherently produces no results.
   {
-    std::vector<GeometryId> geometry_map;
-    std::vector<Isometry3<AutoDiffXd>> X_WGs;
-    const auto results = engine.ComputeSignedDistanceToPoint(
-        p_WQ_ad, geometry_map, X_WGs);
+    const unordered_map<GeometryId, RigidTransform<AutoDiffXd>> X_WGs;
+    const auto results = engine.ComputeSignedDistanceToPoint(p_WQ_ad, X_WGs);
     EXPECT_EQ(results.size(), 0);
   }
 
   // Against an anchored sphere.
   {
     const RigidTransformd X_WS = RigidTransformd(p_WS_W);
-    engine.AddAnchoredGeometry(Sphere(0.7), X_WS, GeometryIndex(0));
-    std::vector<GeometryId> geometry_map{GeometryId::get_new_id()};
+    const GeometryId anchored_id = GeometryId::get_new_id();
+    engine.AddAnchoredGeometry(Sphere(0.7), X_WS, anchored_id);
     const RigidTransform<AutoDiffXd> X_WS_ad = X_WS.cast<AutoDiffXd>();
-    std::vector<Isometry3<AutoDiffXd>> X_WGs{X_WS_ad};
+    const unordered_map<GeometryId, RigidTransform<AutoDiffXd>> X_WGs{
+        {anchored_id, X_WS_ad}};
 
     // Distance is just beyond the threshold.
     {
       std::vector<SignedDistanceToPoint<AutoDiffXd>> results =
-          engine.ComputeSignedDistanceToPoint(p_WQ_ad, geometry_map, X_WGs,
+          engine.ComputeSignedDistanceToPoint(p_WQ_ad, X_WGs,
                                               expected_distance - 1e-14);
       EXPECT_EQ(results.size(), 0);
     }
@@ -3464,7 +3759,7 @@ GTEST_TEST(ProximityEngineTests, ComputePointSignedDistanceAutoDiffAnchored) {
     // Distance is just within the threshold
     {
       std::vector<SignedDistanceToPoint<AutoDiffXd>> results =
-          engine.ComputeSignedDistanceToPoint(p_WQ_ad, geometry_map, X_WGs,
+          engine.ComputeSignedDistanceToPoint(p_WQ_ad, X_WGs,
                                               expected_distance + 1e-14);
       EXPECT_EQ(results.size(), 1);
       const SignedDistanceToPoint<AutoDiffXd>& distance_data = results[0];
@@ -3498,18 +3793,17 @@ GTEST_TEST(ProximityEngineTests, ComputePointSignedDistanceAutoDiffDynamic) {
   Vector3<AutoDiffXd> p_WQ_ad = math::initializeAutoDiff(p_WQ);
 
   // Against a dynamic sphere.
-  GeometryIndex index(0);
-  engine.AddDynamicGeometry(Sphere(0.7), index);
-  std::vector<GeometryId> geometry_map{GeometryId::get_new_id()};
-  const auto X_WS_ad =
-      RigidTransformd(p_WS).cast<AutoDiffXd>().GetAsIsometry3();
-  std::vector<Isometry3<AutoDiffXd>> X_WGs{X_WS_ad};
-  engine.UpdateWorldPoses(X_WGs, {index});
+  const GeometryId id = GeometryId::get_new_id();
+  engine.AddDynamicGeometry(Sphere(0.7), id);
+  const auto X_WS_ad = RigidTransformd(p_WS).cast<AutoDiffXd>();
+  const unordered_map<GeometryId, RigidTransform<AutoDiffXd>> X_WGs{
+      {id, X_WS_ad}};
+  engine.UpdateWorldPoses(X_WGs);
 
   // Distance is just beyond the threshold.
   {
     std::vector<SignedDistanceToPoint<AutoDiffXd>> results =
-        engine.ComputeSignedDistanceToPoint(p_WQ_ad, geometry_map, X_WGs,
+        engine.ComputeSignedDistanceToPoint(p_WQ_ad, X_WGs,
                                             expected_distance - 1e-14);
     EXPECT_EQ(results.size(), 0);
   }
@@ -3517,7 +3811,7 @@ GTEST_TEST(ProximityEngineTests, ComputePointSignedDistanceAutoDiffDynamic) {
   // Distance is just within the threshold
   {
     std::vector<SignedDistanceToPoint<AutoDiffXd>> results =
-        engine.ComputeSignedDistanceToPoint(p_WQ_ad, geometry_map, X_WGs,
+        engine.ComputeSignedDistanceToPoint(p_WQ_ad, X_WGs,
                                             expected_distance + 1e-14);
     EXPECT_EQ(results.size(), 1);
     const SignedDistanceToPoint<AutoDiffXd>& distance_data = results[0];
@@ -3549,23 +3843,21 @@ GTEST_TEST(ProximityEngineTests, ComputePairwiseSignedDistanceAutoDiff) {
 
   // Add a pair of dynamic spheres. We'll differentiate w.r.t. the pose of the
   // first sphere.
-  GeometryIndex index2(0);
-  engine.AddDynamicGeometry(Sphere(radius), index2);
+  const GeometryId id1 = GeometryId::get_new_id();
+  engine.AddDynamicGeometry(Sphere(radius), id1);
   const RigidTransform<AutoDiffXd> X_WS1_ad(p_WQ_ad);
 
-  GeometryIndex index1(1);
-  engine.AddDynamicGeometry(Sphere(radius), index1);
-  std::vector<GeometryId> geometry_map{GeometryId::get_new_id(),
-                                       GeometryId::get_new_id()};
+  const GeometryId id2 = GeometryId::get_new_id();
+  engine.AddDynamicGeometry(Sphere(radius), id2);
   const auto X_WS2_ad =
-      RigidTransformd(p_WS).cast<AutoDiffXd>().GetAsIsometry3();
+      RigidTransformd(p_WS).cast<AutoDiffXd>();
 
-  std::vector<Isometry3<AutoDiffXd>> X_WGs{X_WS1_ad, X_WS2_ad};
-  engine.UpdateWorldPoses(X_WGs, {index1, index2});
+  const unordered_map<GeometryId, RigidTransform<AutoDiffXd>> X_WGs{
+      {id1, X_WS1_ad}, {id2, X_WS2_ad}};
+  engine.UpdateWorldPoses(X_WGs);
 
   std::vector<SignedDistancePair<AutoDiffXd>> results =
-      engine.ComputeSignedDistancePairwiseClosestPoints(geometry_map, X_WGs,
-                                                        kInf);
+      engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs, kInf);
   ASSERT_EQ(results.size(), 1);
 
   const SignedDistancePair<AutoDiffXd>& distance_data = results[0];
@@ -3581,21 +3873,20 @@ GTEST_TEST(ProximityEngineTests, ComputePairwiseSignedDistanceAutoDiff) {
 
 // Tests that an unsupported geometry causes the engine to throw.
 GTEST_TEST(ProximityEngineTests,
-    ComputePairwiseSignedDistanceAutoDiffUnsupported) {
+           ComputePairwiseSignedDistanceAutoDiffUnsupported) {
   ProximityEngine<AutoDiffXd> engine;
 
   // Add two geometries that can't be queried.
-  engine.AddDynamicGeometry(Box(1, 2, 3), GeometryIndex(0));
-  engine.AddDynamicGeometry(Box(2, 4, 6), GeometryIndex(1));
+  const GeometryId id1 = GeometryId::get_new_id();
+  const GeometryId id2 = GeometryId::get_new_id();
+  engine.AddDynamicGeometry(Box(1, 2, 3), id1);
+  engine.AddDynamicGeometry(Box(2, 4, 6), id2);
 
-  Eigen::Isometry3d a;
-  std::vector<GeometryId> geometry_map{GeometryId::get_new_id(),
-                                       GeometryId::get_new_id()};
-  std::vector<Isometry3<AutoDiffXd>> X_WGs{Isometry3<AutoDiffXd>::Identity(),
-                                           Isometry3<AutoDiffXd>::Identity()};
+  const unordered_map<GeometryId, RigidTransform<AutoDiffXd>> X_WGs{
+      {id1, RigidTransform<AutoDiffXd>::Identity()},
+      {id2, RigidTransform<AutoDiffXd>::Identity()}};
   DRAKE_EXPECT_THROWS_MESSAGE(
-      engine.ComputeSignedDistancePairwiseClosestPoints(geometry_map, X_WGs,
-                                                        kInf),
+      engine.ComputeSignedDistancePairwiseClosestPoints(X_WGs, kInf),
       std::logic_error,
       "Signed distance queries between shapes 'Box' and 'Box' are not "
       "supported for scalar type drake::AutoDiffXd");

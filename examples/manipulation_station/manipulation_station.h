@@ -7,13 +7,11 @@
 #include <vector>
 
 #include "drake/common/eigen_types.h"
-#include "drake/geometry/dev/render/render_engine.h"
-#include "drake/geometry/dev/scene_graph.h"
+#include "drake/geometry/render/render_engine.h"
 #include "drake/geometry/scene_graph.h"
 #include "drake/math/rigid_transform.h"
 #include "drake/multibody/plant/multibody_plant.h"
 #include "drake/systems/framework/diagram.h"
-#include "drake/systems/sensors/dev/rgbd_camera.h"
 
 namespace drake {
 namespace examples {
@@ -23,7 +21,7 @@ namespace manipulation_station {
 enum class IiwaCollisionModel { kNoCollision, kBoxCollision };
 
 /// Determines which manipulation station is simulated.
-enum class Setup { kNone, kDefault, kClutterClearing };
+enum class Setup { kNone, kManipulationClass, kClutterClearing, kPlanarIiwa };
 
 /// @defgroup manipulation_station_systems Manipulation Station
 /// @{
@@ -149,19 +147,28 @@ class ManipulationStation : public systems::Diagram<T> {
   /// @param X_WCameraBody Transformation between the world and the camera body.
   /// @param collision_model Determines which sdf is loaded for the IIWA.
   void SetupClutterClearingStation(
-      const optional<const math::RigidTransformd>& X_WCameraBody = {},
+      const std::optional<const math::RigidTransformd>& X_WCameraBody = {},
       IiwaCollisionModel collision_model = IiwaCollisionModel::kNoCollision);
 
-  // TODO(kmuhlrad): Rename SetupMITClassStation.
-  /// Adds a default iiwa, wsg, cupboard, and 8020 frame for the MIT
+  /// Adds a default iiwa, wsg, cupboard, and 80/20 frame for the MIT
   /// Intelligent Robot Manipulation class, then calls
   /// RegisterIiwaControllerModel() and RegisterWsgControllerModel() with
   /// the appropriate arguments.
   /// @note Must be called before Finalize().
   /// @note Only one of the `Setup___()` methods should be called.
   /// @param collision_model Determines which sdf is loaded for the IIWA.
-  void SetupDefaultStation(
+  void SetupManipulationClassStation(
       IiwaCollisionModel collision_model = IiwaCollisionModel::kNoCollision);
+
+  /// Adds a version of the iiwa with joints that would result in
+  /// out-of-plane rotations welded in a fixed orientation, reducing the
+  /// total degrees of freedom of the arm to 3.  This arm lives in the X-Z
+  /// plane.  Also adds the WSG planar gripper and two tables to form the
+  /// workspace.  Note that additional floating base objects (aka
+  /// manipulands) will still potentially move in 3D.
+  /// @note Must be called before Finalize().
+  /// @note Only one of the `Setup___()` methods should be called.
+  void SetupPlanarIiwaStation();
 
   /// Sets the default State for the chosen setup.
   /// @param context A const reference to the ManipulationStation context.
@@ -239,19 +246,19 @@ class ManipulationStation : public systems::Diagram<T> {
       const multibody::Frame<T>& child_frame,
       const math::RigidTransform<double>& X_PC);
 
-  /// Registers a RGBD camera. Must be called before Finalize().
+  /// Registers a RGBD sensor. Must be called before Finalize().
   /// @param name Name for the camera.
   /// @param parent_frame The parent frame (frame P). The body that
   /// @p parent_frame is attached to must have a corresponding
   /// geometry::FrameId. Otherwise, an exception will be thrown in Finalize().
   /// @param X_PCameraBody Transformation between frame P and the camera body.
-  /// see systems::sensors::dev::RgbdCamera for descriptions about how the
+  /// see systems::sensors:::RgbdSensor for descriptions about how the
   /// camera body, RGB, and depth image frames are related.
   /// @param properties Properties for the RGBD camera.
-  void RegisterRgbdCamera(
+  void RegisterRgbdSensor(
       const std::string& name, const multibody::Frame<T>& parent_frame,
       const math::RigidTransform<double>& X_PCameraBody,
-      const geometry::dev::render::DepthCameraProperties& properties);
+      const geometry::render::DepthCameraProperties& properties);
 
   /// Adds a single object for the robot to manipulate
   /// @note Must be called before Finalize().
@@ -277,7 +284,7 @@ class ManipulationStation : public systems::Diagram<T> {
   /// manipulation station uses. Calling this method with an empty map is
   /// equivalent to calling Finalize(). See Finalize() for more details.
   void Finalize(std::map<std::string,
-                         std::unique_ptr<geometry::dev::render::RenderEngine>>
+                         std::unique_ptr<geometry::render::RenderEngine>>
                     render_engines);
 
   /// Returns a reference to the main plant responsible for the dynamics of
@@ -309,30 +316,6 @@ class ManipulationStation : public systems::Diagram<T> {
   /// Returns the name of the station's default renderer.
   static std::string default_renderer_name() { return default_renderer_name_; }
 
-  /// Returns a const reference to the SceneGraph used for rendering
-  /// camera images. Since the SceneGraph for rendering is constructed in
-  /// Finalize(), this throws when called before Finalize().
-  /// Note: the current implementation of the manipulation station uses a
-  /// separate development version of SceneGraph for rendering (as opposed to
-  /// the one returned by get_scene_graph() used for contact detection and
-  /// visualization). This method will be deprecated soon.
-  const geometry::dev::SceneGraph<T>& get_render_scene_graph() const {
-    DRAKE_THROW_UNLESS(render_scene_graph_);
-    return *render_scene_graph_;
-  }
-
-  /// Returns a mutable reference to the SceneGraph used for rendering
-  /// camera images. Since the SceneGraph for rendering is constructed in
-  /// Finalize(), this throws when called before Finalize().
-  /// Note: the current implementation of the manipulation station uses a
-  /// separate development version of SceneGraph for rendering (as opposed to
-  /// the one returned by get_scene_graph() used for contact detection and
-  /// visualization). This method will be deprecated soon.
-  geometry::dev::SceneGraph<T>& get_mutable_render_scene_graph() {
-    DRAKE_THROW_UNLESS(render_scene_graph_);
-    return *render_scene_graph_;
-  }
-
   /// Return a reference to the plant used by the inverse dynamics controller
   /// (which contains only a model of the iiwa + equivalent mass of the
   /// gripper).
@@ -342,7 +325,9 @@ class ManipulationStation : public systems::Diagram<T> {
 
   /// Get the number of joints in the IIWA (only -- does not include the
   /// gripper).
-  int num_iiwa_joints() const { return 7; }
+  /// @pre must call one of the "setup" methods first to register an IIWA
+  /// model.
+  int num_iiwa_joints() const;
 
   /// Convenience method for getting all of the joint angles of the Kuka IIWA.
   /// This does not include the gripper.
@@ -467,7 +452,7 @@ class ManipulationStation : public systems::Diagram<T> {
   struct CameraInformation {
     const multibody::Frame<T>* parent_frame{};
     math::RigidTransform<double> X_PC{math::RigidTransform<double>::Identity()};
-    geometry::dev::render::DepthCameraProperties properties{
+    geometry::render::DepthCameraProperties properties{
         0, 0, 0, default_renderer_name_, 0, 0};
   };
 
@@ -486,8 +471,6 @@ class ManipulationStation : public systems::Diagram<T> {
   std::unique_ptr<multibody::MultibodyPlant<T>> owned_controller_plant_;
   multibody::MultibodyPlant<T>* plant_;
   geometry::SceneGraph<T>* scene_graph_;
-  // This is made in Finalize().
-  geometry::dev::SceneGraph<T>* render_scene_graph_{};
   static constexpr const char* default_renderer_name_ =
       "manip_station_renderer";
 
@@ -513,8 +496,9 @@ class ManipulationStation : public systems::Diagram<T> {
   double wsg_kd_{5};
 
   // Represents the manipulation station to simulate. This gets set in the
-  // corresponding station setup function (e.g., SetupDefaultStation()), and
-  // informs how SetDefaultState() initializes the sim.
+  // corresponding station setup function (e.g.,
+  // SetupManipulationClassStation()), and informs how SetDefaultState()
+  // initializes the sim.
   Setup setup_{Setup::kNone};
 };
 

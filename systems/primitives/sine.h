@@ -4,6 +4,7 @@
 
 #include "drake/common/default_scalars.h"
 #include "drake/common/drake_copyable.h"
+#include "drake/common/drake_throw.h"
 #include "drake/common/eigen_types.h"
 #include "drake/systems/framework/vector_system.h"
 
@@ -140,12 +141,12 @@ Sine<T>::Sine(const Eigen::VectorXd& amplitudes,
               const Eigen::VectorXd& frequencies,
               const Eigen::VectorXd& phases,
               bool is_time_based)
-      : LeafSystem<T>(SystemTypeTag<systems::Sine>{}),
+      : LeafSystem<T>(SystemTypeTag<Sine>{}),
       amplitude_(amplitudes), frequency_(frequencies), phase_(phases),
       is_time_based_(is_time_based) {
   // Ensure the incoming vectors are all the same size
-  DRAKE_DEMAND(amplitudes.size() == frequencies.size());
-  DRAKE_DEMAND(amplitudes.size() == phases.size());
+  DRAKE_THROW_UNLESS(amplitudes.size() == frequencies.size());
+  DRAKE_THROW_UNLESS(amplitudes.size() == phases.size());
 
   // Check each of the incoming vectors. For each vector, set a flag if every
   // element in that vector is the same.

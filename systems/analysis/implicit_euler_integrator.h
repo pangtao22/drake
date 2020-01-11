@@ -9,6 +9,7 @@
 #include "drake/common/drake_copyable.h"
 #include "drake/math/autodiff_gradient.h"
 #include "drake/systems/analysis/implicit_integrator.h"
+#include "drake/systems/analysis/runge_kutta2_integrator.h"
 
 namespace drake {
 namespace systems {
@@ -85,7 +86,10 @@ class ImplicitEulerIntegrator final : public ImplicitIntegrator<T> {
   /// The integrator supports error estimation.
   bool supports_error_estimation() const final { return true; }
 
-  /// This integrator provides second order error estimates.
+  /// This first-order integrator uses embedded second order methods to compute
+  /// estimates of the local truncation error. The order of the asymptotic
+  /// difference between these two methods (from which the error estimate is
+  /// computed) is O(h²).
   int get_error_estimate_order() const final { return 2; }
 
  private:
@@ -127,24 +131,26 @@ class ImplicitEulerIntegrator final : public ImplicitIntegrator<T> {
   bool AttemptStepPaired(const T& t0, const T& h, const VectorX<T>& xt0,
       VectorX<T>* xtplus_euler, VectorX<T>* xtplus_trap);
   bool StepAbstract(const T& t0, const T& h, const VectorX<T>& xt0,
-      const std::function<VectorX<T>()>& g,
-      const std::function<void(const MatrixX<T>&, const T&,
-          typename ImplicitIntegrator<T>::IterationMatrix*)>&
-          compute_and_factor_iteration_matrix,
-      VectorX<T>* xtplus, int trial = 1);
+                    const std::function<VectorX<T>()>& g,
+                    const std::function<
+                        void(const MatrixX<T>&, const T&,
+                             typename ImplicitIntegrator<T>::IterationMatrix*)>&
+                        compute_and_factor_iteration_matrix,
+                    const VectorX<T>& xtplus_guess,
+                    typename ImplicitIntegrator<T>::IterationMatrix*,
+                    VectorX<T>* xtplus, int trial = 1);
   bool DoImplicitIntegratorStep(const T& h) final;
   bool StepImplicitEuler(const T& t0, const T& h, const VectorX<T>& xt0,
       VectorX<T>* xtplus);
   bool StepImplicitTrapezoid(const T& t0, const T& h, const VectorX<T>& xt0,
-      const VectorX<T>& dx0, VectorX<T>* xtplus);
-  MatrixX<T> ComputeForwardDiffJacobian(const System<T>&, Context<T>*);
-  MatrixX<T> ComputeCentralDiffJacobian(const System<T>&, Context<T>*);
-  MatrixX<T> ComputeAutoDiffJacobian(const System<T>& system,
-                                     const Context<T>& context);
+      const VectorX<T>& dx0, const VectorX<T>& xtplus_ie, VectorX<T>* xtplus);
 
-  // The last computed iteration matrix and factorization, used for both the
-  // integrator and the error estimator.
-  typename ImplicitIntegrator<T>::IterationMatrix iteration_matrix_;
+  // The last computed iteration matrix and factorization for implicit Euler.
+  typename ImplicitIntegrator<T>::IterationMatrix ie_iteration_matrix_;
+
+  // The last computed iteration matrix and factorization for implicit
+  // trapezoid.
+  typename ImplicitIntegrator<T>::IterationMatrix itr_iteration_matrix_;
 
   // Vector used in error estimate calculations.
   VectorX<T> err_est_vec_;
@@ -152,8 +158,15 @@ class ImplicitEulerIntegrator final : public ImplicitIntegrator<T> {
   // The continuous state update vector used during Newton-Raphson.
   std::unique_ptr<ContinuousState<T>> dx_state_;
 
+  // Variables to avoid heap allocations.
+  VectorX<T> xt0_, xdot_, xtplus_ie_, xtplus_tr_;
+
   // Various statistics.
   int64_t num_nr_iterations_{0};
+
+  // Second order Runge-Kutta method for estimating the integration error when
+  // the requested step size lies below the working step size.
+  std::unique_ptr<RungeKutta2Integrator<T>> rk2_;
 
   // Implicit trapezoid specific statistics.
   int64_t num_err_est_jacobian_reforms_{0};

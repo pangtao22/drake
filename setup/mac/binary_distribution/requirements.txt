@@ -1,9 +1,10 @@
+ipywidgets
 lxml
 matplotlib
+notebook
 pydot
 PyYAML
 pyzmq
-six
 tornado
 u-msgpack-python
 virtualenv

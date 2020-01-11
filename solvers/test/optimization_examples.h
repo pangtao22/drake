@@ -47,7 +47,7 @@ class OptimizationProgram {
 
   MathematicalProgram* prog() const { return prog_.get(); }
 
-  virtual const optional<Eigen::VectorXd>& initial_guess() const {
+  virtual const std::optional<Eigen::VectorXd>& initial_guess() const {
     return initial_guess_;
   }
 
@@ -61,7 +61,7 @@ class OptimizationProgram {
   CostForm cost_form_;
   ConstraintForm constraint_form_;
   std::unique_ptr<MathematicalProgram> prog_;
-  optional<Eigen::VectorXd> initial_guess_;
+  std::optional<Eigen::VectorXd> initial_guess_;
 };
 
 /**
@@ -200,8 +200,8 @@ class NonConvexQPproblem1 {
     static size_t numOutputs() { return 1; }
 
     template <typename ScalarType>
-    void eval(detail::VecIn<ScalarType> const& x,
-              detail::VecOut<ScalarType>* y) const {
+    void eval(internal::VecIn<ScalarType> const& x,
+              internal::VecOut<ScalarType>* y) const {
       DRAKE_ASSERT(static_cast<size_t>(x.rows()) == numInputs());
       DRAKE_ASSERT(static_cast<size_t>(y->rows()) == numOutputs());
       (*y)(0) = (-50.0 * x(0) * x(0)) + (42 * x(0)) - (50.0 * x(1) * x(1)) +
@@ -260,8 +260,8 @@ class NonConvexQPproblem2 {
     static size_t numOutputs() { return 1; }
 
     template <typename ScalarType>
-    void eval(detail::VecIn<ScalarType> const& x,
-              detail::VecOut<ScalarType>* y) const {
+    void eval(internal::VecIn<ScalarType> const& x,
+              internal::VecOut<ScalarType>* y) const {
       DRAKE_ASSERT(static_cast<size_t>(x.rows()) == numInputs());
       DRAKE_ASSERT(static_cast<size_t>(y->rows()) == numOutputs());
       (*y)(0) = (-50.0 * x(0) * x(0)) + (-10.5 * x(0)) - (50.0 * x(1) * x(1)) +
@@ -317,8 +317,8 @@ class LowerBoundedProblem {
     static size_t numOutputs() { return 1; }
 
     template <typename ScalarType>
-    void eval(detail::VecIn<ScalarType> const& x,
-              detail::VecOut<ScalarType>* y) const {
+    void eval(internal::VecIn<ScalarType> const& x,
+              internal::VecOut<ScalarType>* y) const {
       DRAKE_ASSERT(static_cast<size_t>(x.rows()) == numInputs());
       DRAKE_ASSERT(static_cast<size_t>(y->rows()) == numOutputs());
       (*y)(0) = -25 * (x(0) - 2) * (x(0) - 2) + (x(1) - 2) * (x(1) - 2) -
@@ -425,8 +425,8 @@ class GloptiPolyConstrainedMinimizationProblem {
     static size_t numOutputs() { return 1; }
 
     template <typename ScalarType>
-    void eval(detail::VecIn<ScalarType> const& x,
-              detail::VecOut<ScalarType>* y) const {
+    void eval(internal::VecIn<ScalarType> const& x,
+              internal::VecOut<ScalarType>* y) const {
       DRAKE_ASSERT(static_cast<size_t>(x.rows()) == numInputs());
       DRAKE_ASSERT(static_cast<size_t>(y->rows()) == numOutputs());
       (*y)(0) = -2 * x(0) + x(1) - x(2);

@@ -7,38 +7,20 @@
 
 #include "drake/common/autodiff.h"
 #include "drake/common/symbolic.h"
+#include "drake/math/rigid_transform.h"
 
 namespace drake {
 namespace geometry {
 
 namespace {
 template <typename T>
-void InitializeKinematicsValue(Isometry3<T>* value) {
-  value->setIdentity();
+void InitializeKinematicsValue(math::RigidTransform<T>* value) {
+  value->SetIdentity();
 }
 }  // namespace
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 template <typename KinematicsValue>
-FrameKinematicsVector<KinematicsValue>::FrameKinematicsVector()
-    : FrameKinematicsVector<KinematicsValue>({}, {}) {}
-#pragma GCC diagnostic pop
-
-template <typename KinematicsValue>
-FrameKinematicsVector<KinematicsValue>::FrameKinematicsVector(
-    SourceId source_id, const std::vector<FrameId>& ids)
-    : source_id_(source_id), values_(0) {
-  optional<KinematicsValue> default_value{KinematicsValue{}};
-  InitializeKinematicsValue(&default_value.value());
-  for (FrameId id : ids) {
-    bool is_unique = values_.emplace(id, default_value).second;
-    if (!is_unique) {
-      throw std::runtime_error(
-          fmt::format("At least one frame id appears multiple times: {}", id));
-    }
-    ++size_;
-  }
+FrameKinematicsVector<KinematicsValue>::FrameKinematicsVector() {
   DRAKE_ASSERT_VOID(CheckInvariants());
 }
 
@@ -68,7 +50,7 @@ FrameKinematicsVector<KinematicsValue>::operator=(
 template <typename KinematicsValue>
 void FrameKinematicsVector<KinematicsValue>::clear() {
   for (auto& item : values_) {
-    item.second = nullopt;
+    item.second = std::nullopt;
   }
   size_ = 0;
 }
@@ -87,7 +69,7 @@ const KinematicsValue& FrameKinematicsVector<KinematicsValue>::value(
   using std::to_string;
   auto iter = values_.find(id);
   if (iter != values_.end()) {
-    const optional<KinematicsValue>& map_value = iter->second;
+    const std::optional<KinematicsValue>& map_value = iter->second;
     if (map_value.has_value()) {
       return *map_value;
     }
@@ -127,9 +109,10 @@ void FrameKinematicsVector<KinematicsValue>::CheckInvariants() const {
 }
 
 // Explicitly instantiates on the most common scalar types.
-template class FrameKinematicsVector<Isometry3<double>>;
-template class FrameKinematicsVector<Isometry3<AutoDiffXd>>;
-template class FrameKinematicsVector<Isometry3<symbolic::Expression>>;
+template class FrameKinematicsVector<math::RigidTransform<double>>;
+template class FrameKinematicsVector<math::RigidTransform<AutoDiffXd>>;
+template class FrameKinematicsVector<
+    math::RigidTransform<symbolic::Expression>>;
 
 }  // namespace geometry
 }  // namespace drake

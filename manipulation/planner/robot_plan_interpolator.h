@@ -28,6 +28,12 @@ enum class InterpolatorType {
 /// The system has two output ports, one with the current desired
 /// state (q,v) of the robot and another for the accelerations.
 ///
+/// @system{ RobotPlanInterpolator,
+///   @input_port{plan},
+///   @output_port{state}
+///   @output_port{acceleration}
+/// }
+///
 /// If a plan is received with no knot points, the system will create
 /// a plan which commands the robot to hold at the measured position.
 ///
@@ -95,7 +101,7 @@ class RobotPlanInterpolator : public systems::LeafSystem<double> {
   const int plan_input_port_{};
   int state_output_port_{-1};
   int acceleration_output_port_{-1};
-  multibody::MultibodyPlant<double> plant_;
+  multibody::MultibodyPlant<double> plant_{0.0};
   const InterpolatorType interp_type_;
 };
 

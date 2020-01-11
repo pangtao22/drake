@@ -41,6 +41,19 @@ std::unique_ptr<SurfaceMesh<T>> GenerateMesh() {
   return surface_mesh;
 }
 
+// Tests Evaluate(VertexIndex).
+GTEST_TEST(MeshFieldLinearTest, EvaluateAtVertex) {
+  auto mesh = GenerateMesh<double>();
+  std::vector<double> e_values = {0., 1., 2., 3.};
+  auto mesh_field =
+      std::make_unique<MeshFieldLinear<double, SurfaceMesh<double>>>(
+          "e", std::move(e_values), mesh.get());
+  EXPECT_EQ(mesh_field->EvaluateAtVertex(SurfaceVertexIndex(0)), 0);
+  EXPECT_EQ(mesh_field->EvaluateAtVertex(SurfaceVertexIndex(1)), 1);
+  EXPECT_EQ(mesh_field->EvaluateAtVertex(SurfaceVertexIndex(2)), 2);
+  EXPECT_EQ(mesh_field->EvaluateAtVertex(SurfaceVertexIndex(3)), 3);
+}
+
 // Tests CloneAndSetMesh(). We use `double` and SurfaceMesh<double> as
 // representative arguments for type parameters.
 GTEST_TEST(MeshFieldLinearTest, TestDoCloneWithMesh) {
@@ -63,6 +76,31 @@ GTEST_TEST(MeshFieldLinearTest, TestDoCloneWithMesh) {
   // Check equivalence.
   EXPECT_EQ(original->name(), clone->name());
   EXPECT_EQ(original->values(), clone->values());
+}
+
+// Tests Equal.
+GTEST_TEST(MeshFieldLinearTest, TestEqual) {
+  auto mesh = GenerateMesh<double>();
+  std::vector<double> e_values = {0., 1., 2., 3.};
+  auto mesh_field =
+      std::make_unique<MeshFieldLinear<double, SurfaceMesh<double>>>(
+          "e", std::move(e_values), mesh.get());
+
+  // Same field.
+  auto field0 = mesh_field->CloneAndSetMesh(mesh.get());
+  EXPECT_TRUE(mesh_field->Equal(*field0));
+
+  // Different mesh.
+  SurfaceMesh<double> alt_mesh = *mesh;
+  alt_mesh.ReverseFaceWinding();
+  auto field1 = mesh_field->CloneAndSetMesh(&alt_mesh);
+  EXPECT_FALSE(mesh_field->Equal(*field1));
+
+  // Different e values.
+  std::vector<double> alt_e_values = {3., 2., 1., 0.};
+  auto field2 = MeshFieldLinear<double, SurfaceMesh<double>>(
+      "e", std::move(alt_e_values), mesh.get());
+  EXPECT_FALSE(mesh_field->Equal(field2));
 }
 
 }  // namespace

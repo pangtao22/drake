@@ -5,13 +5,16 @@
 
 #include <gtest/gtest.h>
 
+#include "drake/common/test_utilities/expect_no_throw.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/geometry/geometry_frame.h"
 #include "drake/geometry/geometry_instance.h"
 #include "drake/geometry/geometry_set.h"
 #include "drake/geometry/geometry_visualization.h"
 #include "drake/geometry/query_object.h"
+#include "drake/geometry/render/render_label.h"
 #include "drake/geometry/shape_specification.h"
+#include "drake/geometry/test_utilities/dummy_render_engine.h"
 #include "drake/systems/framework/context.h"
 #include "drake/systems/framework/diagram_builder.h"
 #include "drake/systems/framework/leaf_system.h"
@@ -26,7 +29,8 @@
 namespace drake {
 namespace geometry {
 
-using Eigen::Isometry3d;
+using internal::DummyRenderEngine;
+using math::RigidTransformd;
 using systems::Context;
 using systems::rendering::PoseBundle;
 using systems::System;
@@ -87,7 +91,7 @@ namespace {
 // Convenience function for making a geometry instance.
 std::unique_ptr<GeometryInstance> make_sphere_instance(
     double radius = 1.0) {
-  return make_unique<GeometryInstance>(Isometry3<double>::Identity(),
+  return make_unique<GeometryInstance>(RigidTransformd::Identity(),
                                        make_unique<Sphere>(radius), "sphere");
 }
 
@@ -190,10 +194,10 @@ TEST_F(SceneGraphTest, InputPortsForInvalidSource) {
 // first time *after* allocation is acceptable.
 TEST_F(SceneGraphTest, AcquireInputPortsAfterAllocation) {
   SourceId id = scene_graph_.RegisterSource();
-  EXPECT_NO_THROW(scene_graph_.get_source_pose_port(id));
+  DRAKE_EXPECT_NO_THROW(scene_graph_.get_source_pose_port(id));
   AllocateContext();
   // Port which *hadn't* been accessed is still accessible.
-  EXPECT_NO_THROW(scene_graph_.get_source_pose_port(id));
+  DRAKE_EXPECT_NO_THROW(scene_graph_.get_source_pose_port(id));
 }
 
 // Tests that topology operations after allocation _are_ allowed. This compares
@@ -267,7 +271,7 @@ TEST_F(SceneGraphTest, DirectFeedThrough) {
 // should be, essentially a no op.
 TEST_F(SceneGraphTest, FullPoseUpdateEmpty) {
   AllocateContext();
-  EXPECT_NO_THROW(
+  DRAKE_EXPECT_NO_THROW(
       SceneGraphTester::FullPoseUpdate(scene_graph_, *context_));
 }
 
@@ -277,7 +281,7 @@ TEST_F(SceneGraphTest, FullPoseUpdateAnchoredOnly) {
   SourceId s_id = scene_graph_.RegisterSource();
   scene_graph_.RegisterAnchoredGeometry(s_id, make_sphere_instance());
   AllocateContext();
-  EXPECT_NO_THROW(
+  DRAKE_EXPECT_NO_THROW(
       SceneGraphTester::FullPoseUpdate(scene_graph_, *context_));
 }
 
@@ -290,7 +294,7 @@ TEST_F(SceneGraphTest, TransmogrifyWithoutAllocation) {
       scene_graph_.ToAutoDiffXd();
   SceneGraph<AutoDiffXd>& scene_graph_ad =
       *dynamic_cast<SceneGraph<AutoDiffXd>*>(system_ad.get());
-  EXPECT_NO_THROW(
+  DRAKE_EXPECT_NO_THROW(
       scene_graph_ad.RegisterAnchoredGeometry(s_id, make_sphere_instance()));
 
   // After allocation, registration should _still_ be valid.
@@ -298,7 +302,7 @@ TEST_F(SceneGraphTest, TransmogrifyWithoutAllocation) {
   system_ad = scene_graph_.ToAutoDiffXd();
   SceneGraph<AutoDiffXd>& scene_graph_ad2 =
       *dynamic_cast<SceneGraph<AutoDiffXd>*>(system_ad.get());
-  EXPECT_NO_THROW(
+  DRAKE_EXPECT_NO_THROW(
       scene_graph_ad2.RegisterAnchoredGeometry(s_id, make_sphere_instance()));
 }
 
@@ -352,9 +356,9 @@ TEST_F(SceneGraphTest, PostAllocationCollisionFiltering) {
   AllocateContext();
 
   GeometrySet geometry_set{frame_id};
-  EXPECT_NO_THROW(scene_graph_.ExcludeCollisionsWithin(geometry_set));
+  DRAKE_EXPECT_NO_THROW(scene_graph_.ExcludeCollisionsWithin(geometry_set));
 
-  EXPECT_NO_THROW(
+  DRAKE_EXPECT_NO_THROW(
       scene_graph_.ExcludeCollisionsBetween(geometry_set, geometry_set));
 }
 
@@ -374,15 +378,15 @@ TEST_F(SceneGraphTest, ModelInspector) {
   // affixed to different nodes, that should be alright.
   GeometryId anchored_id = scene_graph_.RegisterAnchoredGeometry(
       source_id,
-      make_unique<GeometryInstance>(Isometry3d::Identity(),
+      make_unique<GeometryInstance>(RigidTransformd::Identity(),
                                     make_unique<Sphere>(1.0), "sphere"));
   GeometryId sphere_1 = scene_graph_.RegisterGeometry(
       source_id, frame_1,
-      make_unique<GeometryInstance>(Isometry3d::Identity(),
+      make_unique<GeometryInstance>(RigidTransformd::Identity(),
                                     make_unique<Sphere>(1.0), "sphere"));
   GeometryId sphere_2 = scene_graph_.RegisterGeometry(
       source_id, frame_2,
-      make_unique<GeometryInstance>(Isometry3d::Identity(),
+      make_unique<GeometryInstance>(RigidTransformd::Identity(),
                                     make_unique<Sphere>(1.0), "sphere"));
 
   const SceneGraphInspector<double>& inspector = scene_graph_.model_inspector();
@@ -394,6 +398,49 @@ TEST_F(SceneGraphTest, ModelInspector) {
   EXPECT_EQ(inspector.GetGeometryIdByName(scene_graph_.world_frame_id(),
                                           Role::kUnassigned, "sphere"),
             anchored_id);
+}
+
+// SceneGraph provides a thin wrapper on the GeometryState renderer
+// configuration/introspection code. These tests are just smoke tests that the
+// functions work. It relies on GeometryState to properly unit test the
+// full behavior.
+TEST_F(SceneGraphTest, RendererSmokeTest) {
+  const std::string kRendererName = "bob";
+
+  EXPECT_EQ(scene_graph_.RendererCount(), 0);
+  EXPECT_EQ(scene_graph_.RegisteredRendererNames().size(), 0u);
+  EXPECT_FALSE(scene_graph_.HasRenderer(kRendererName));
+
+  DRAKE_EXPECT_NO_THROW(scene_graph_.AddRenderer(
+      kRendererName, make_unique<DummyRenderEngine>()));
+
+  EXPECT_EQ(scene_graph_.RendererCount(), 1);
+  EXPECT_EQ(scene_graph_.RegisteredRendererNames()[0], kRendererName);
+  EXPECT_TRUE(scene_graph_.HasRenderer(kRendererName));
+}
+
+// SceneGraph provides a thin wrapper on the GeometryState role manipulation
+// code. These tests are just smoke tests that the functions work. It relies on
+// GeometryState to properly unit test the full behavior.
+TEST_F(SceneGraphTest, RoleManagementSmokeTest) {
+  SourceId s_id = scene_graph_.RegisterSource("test");
+  FrameId f_id = scene_graph_.RegisterFrame(s_id, GeometryFrame("frame"));
+  auto instance = make_unique<GeometryInstance>(
+      RigidTransformd::Identity(), make_unique<Sphere>(1.0), "sphere");
+  instance->set_illustration_properties(IllustrationProperties());
+  instance->set_proximity_properties(ProximityProperties());
+  instance->set_perception_properties(PerceptionProperties());
+
+  GeometryId g_id = scene_graph_.RegisterGeometry(s_id, f_id, move(instance));
+
+  const SceneGraphInspector<double>& inspector = scene_graph_.model_inspector();
+  EXPECT_NE(inspector.GetProximityProperties(g_id), nullptr);
+  EXPECT_NE(inspector.GetIllustrationProperties(g_id), nullptr);
+  EXPECT_NE(inspector.GetPerceptionProperties(g_id), nullptr);
+
+  EXPECT_EQ(scene_graph_.RemoveRole(s_id, g_id, Role::kPerception), 1);
+  EXPECT_EQ(scene_graph_.RemoveRole(s_id, g_id, Role::kProximity), 1);
+  EXPECT_EQ(scene_graph_.RemoveRole(s_id, g_id, Role::kIllustration), 1);
 }
 
 // Dummy system to serve as geometry source.
@@ -425,7 +472,7 @@ class GeometrySourceSystem : public systems::LeafSystem<double> {
   }
   // Method used to bring frame ids and poses out of sync. Adds a pose in
   // addition to all of the default poses.
-  void add_extra_pose() { extra_poses_.push_back(Isometry3<double>()); }
+  void add_extra_pose() { extra_poses_.push_back(RigidTransformd()); }
 
  private:
   // Populate with the pose data.
@@ -435,7 +482,7 @@ class GeometrySourceSystem : public systems::LeafSystem<double> {
 
     const int base_count = static_cast<int>(frame_ids_.size());
     for (int i = 0; i < base_count; ++i) {
-      poses->set_value(frame_ids_[i], Isometry3<double>::Identity());
+      poses->set_value(frame_ids_[i], RigidTransformd::Identity());
     }
 
     const int extra_count = static_cast<int>(extra_frame_ids_.size());
@@ -448,7 +495,7 @@ class GeometrySourceSystem : public systems::LeafSystem<double> {
   SourceId source_id_;
   std::vector<FrameId> frame_ids_;
   std::vector<FrameId> extra_frame_ids_;
-  std::vector<Isometry3<double>> extra_poses_;
+  std::vector<RigidTransformd> extra_poses_;
 };
 
 // Simple test case; system registers frames and provides correct connections.
@@ -468,7 +515,7 @@ GTEST_TEST(SceneGraphConnectionTest, FullPoseUpdateConnected) {
   diagram->SetDefaultContext(diagram_context.get());
   const auto& sg_context =
       diagram->GetMutableSubsystemContext(*scene_graph, diagram_context.get());
-  EXPECT_NO_THROW(
+  DRAKE_EXPECT_NO_THROW(
       SceneGraphTester::FullPoseUpdate(*scene_graph, sg_context));
 }
 
@@ -532,8 +579,19 @@ GTEST_TEST(SceneGraphVisualizationTest, NoWorldInPoseVector) {
     PoseBundle<double> poses = SceneGraphTester::MakePoseBundle(scene_graph);
     EXPECT_EQ(0, poses.get_num_poses());
     auto context = scene_graph.AllocateContext();
-    EXPECT_NO_THROW(SceneGraphTester::CalcPoseBundle(scene_graph, *context,
-                                                     &poses));
+    DRAKE_EXPECT_NO_THROW(
+        SceneGraphTester::CalcPoseBundle(scene_graph, *context, &poses));
+  }
+
+  // Case: Calculating pose bundle with an input pose bundle the wrong size.
+  {
+    SceneGraph<double> scene_graph;
+    PoseBundle<double> poses(1);
+    EXPECT_EQ(poses.get_num_poses(), 1);
+    auto context = scene_graph.AllocateContext();
+    DRAKE_EXPECT_NO_THROW(
+        SceneGraphTester::CalcPoseBundle(scene_graph, *context, &poses));
+    EXPECT_EQ(poses.get_num_poses(), 0);
   }
 
   // Case: Registered source but no frames or geometry --> empty pose vector.
@@ -543,8 +601,8 @@ GTEST_TEST(SceneGraphVisualizationTest, NoWorldInPoseVector) {
     PoseBundle<double> poses = SceneGraphTester::MakePoseBundle(scene_graph);
     EXPECT_EQ(0, poses.get_num_poses());
     auto context = scene_graph.AllocateContext();
-    EXPECT_NO_THROW(SceneGraphTester::CalcPoseBundle(scene_graph, *context,
-                                                     &poses));
+    DRAKE_EXPECT_NO_THROW(
+        SceneGraphTester::CalcPoseBundle(scene_graph, *context, &poses));
   }
 
   // Case: Registered source with anchored geometry but no frames or dynamic
@@ -554,13 +612,13 @@ GTEST_TEST(SceneGraphVisualizationTest, NoWorldInPoseVector) {
     SourceId s_id = scene_graph.RegisterSource("dummy");
     scene_graph.RegisterGeometry(
         s_id, scene_graph.world_frame_id(),
-        make_unique<GeometryInstance>(Isometry3<double>::Identity(),
+        make_unique<GeometryInstance>(RigidTransformd::Identity(),
                                       make_unique<Sphere>(1.0), "sphere"));
     PoseBundle<double> poses = SceneGraphTester::MakePoseBundle(scene_graph);
     EXPECT_EQ(0, poses.get_num_poses());
     auto context = scene_graph.AllocateContext();
-    EXPECT_NO_THROW(SceneGraphTester::CalcPoseBundle(scene_graph, *context,
-                                                     &poses));
+    DRAKE_EXPECT_NO_THROW(
+        SceneGraphTester::CalcPoseBundle(scene_graph, *context, &poses));
   }
 
   // Case: Registered source with anchored geometry and frame but no dynamic
@@ -571,7 +629,7 @@ GTEST_TEST(SceneGraphVisualizationTest, NoWorldInPoseVector) {
     SourceId s_id = scene_graph.RegisterSource("dummy");
     scene_graph.RegisterGeometry(
         s_id, scene_graph.world_frame_id(),
-        make_unique<GeometryInstance>(Isometry3<double>::Identity(),
+        make_unique<GeometryInstance>(RigidTransformd::Identity(),
                                       make_unique<Sphere>(1.0), "sphere"));
     FrameId f_id = scene_graph.RegisterFrame(s_id, GeometryFrame("f"));
     PoseBundle<double> poses = SceneGraphTester::MakePoseBundle(scene_graph);
@@ -579,10 +637,10 @@ GTEST_TEST(SceneGraphVisualizationTest, NoWorldInPoseVector) {
     // bundle.
     EXPECT_EQ(0, poses.get_num_poses());
     auto context = scene_graph.AllocateContext();
-    const FramePoseVector<double> pose_vector{{
-        f_id, Isometry3<double>::Identity()}};
+    const FramePoseVector<double> pose_vector{
+        {f_id, RigidTransformd::Identity()}};
     scene_graph.get_source_pose_port(s_id).FixValue(context.get(), pose_vector);
-    EXPECT_NO_THROW(
+    DRAKE_EXPECT_NO_THROW(
         SceneGraphTester::CalcPoseBundle(scene_graph, *context, &poses));
   }
 
@@ -593,23 +651,23 @@ GTEST_TEST(SceneGraphVisualizationTest, NoWorldInPoseVector) {
     SourceId s_id = scene_graph.RegisterSource("dummy");
     scene_graph.RegisterGeometry(
         s_id, scene_graph.world_frame_id(),
-        make_unique<GeometryInstance>(Isometry3<double>::Identity(),
+        make_unique<GeometryInstance>(RigidTransformd::Identity(),
                                       make_unique<Sphere>(1.0), "sphere"));
     FrameId f_id = scene_graph.RegisterFrame(s_id, GeometryFrame("f"));
     scene_graph.RegisterGeometry(
         s_id, f_id,
-        make_unique<GeometryInstance>(Isometry3<double>::Identity(),
+        make_unique<GeometryInstance>(RigidTransformd::Identity(),
                                       make_unique<Sphere>(1.0), "sphere"));
     PoseBundle<double> poses = SceneGraphTester::MakePoseBundle(scene_graph);
     // The dynamic geometry has no illustration role, so it doesn't lead the
     // frame to be included in the bundle.
     EXPECT_EQ(0, poses.get_num_poses());
     auto context = scene_graph.AllocateContext();
-    const FramePoseVector<double> pose_vector{{
-        f_id, Isometry3<double>::Identity()}};
+    const FramePoseVector<double> pose_vector{
+        {f_id, RigidTransformd::Identity()}};
     scene_graph.get_source_pose_port(s_id).FixValue(context.get(), pose_vector);
-    EXPECT_NO_THROW(SceneGraphTester::CalcPoseBundle(scene_graph, *context,
-                                                     &poses));
+    DRAKE_EXPECT_NO_THROW(
+        SceneGraphTester::CalcPoseBundle(scene_graph, *context, &poses));
   }
 }
 
@@ -647,8 +705,8 @@ GTEST_TEST(SceneGraphContextModifier, RegisterGeometry) {
   EXPECT_EQ(frame_id, inspector.GetFrameId(sphere_id_2));
 
   // Remove the geometry.
-  EXPECT_NO_THROW(scene_graph.RemoveGeometry(context.get(), source_id,
-                                             sphere_id_2));
+  DRAKE_EXPECT_NO_THROW(
+      scene_graph.RemoveGeometry(context.get(), source_id, sphere_id_2));
   EXPECT_EQ(1, inspector.NumGeometriesForFrame(frame_id));
   DRAKE_EXPECT_THROWS_MESSAGE(
       inspector.GetFrameId(sphere_id_2),
@@ -713,6 +771,34 @@ GTEST_TEST(SceneGraphContextModifier, CollisionFilters) {
 
   // TODO(SeanCurtis-TRI): When post-allocation model modification is allowed,
   // confirm that the model didn't change.
+}
+
+// A limited test -- the majority of this functionality is encoded in and tested
+// via GeometryState. This is just a regression test to make sure SceneGraph's
+// invocation of that function doesn't become corrupt.
+GTEST_TEST(SceneGraphRenderTest, AddRenderer) {
+  SceneGraph<double> scene_graph;
+
+  DRAKE_EXPECT_NO_THROW(
+      scene_graph.AddRenderer("unique", make_unique<DummyRenderEngine>()));
+
+  // Non-unique renderer name.
+  // NOTE: The error message is tested in geometry_state_test.cc.
+  EXPECT_THROW(
+      scene_graph.AddRenderer("unique", make_unique<DummyRenderEngine>()),
+      std::logic_error);
+
+  // Adding a renderer _after_ geometry registration. We rely on geometry state
+  // tests to confirm that the right thing happens; this just confirms that it's
+  // not an error in the SceneGraph API.
+  SourceId s_id = scene_graph.RegisterSource("dummy");
+  scene_graph.RegisterGeometry(
+      s_id, scene_graph.world_frame_id(),
+      make_unique<GeometryInstance>(RigidTransformd::Identity(),
+                                    make_unique<Sphere>(1.0), "sphere"));
+
+  DRAKE_EXPECT_NO_THROW(
+      scene_graph.AddRenderer("different", make_unique<DummyRenderEngine>()));
 }
 
 }  // namespace

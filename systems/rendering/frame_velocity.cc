@@ -6,9 +6,6 @@ namespace drake {
 namespace systems {
 namespace rendering {
 
-// Linkage for kSize.
-template <typename T> constexpr int FrameVelocity<T>::kSize;
-
 template <typename T>
 FrameVelocity<T>::FrameVelocity()
     : FrameVelocity<T>::FrameVelocity(

@@ -7,7 +7,20 @@
 #include "pybind11/pybind11.h"
 
 #include "drake/bindings/pydrake/pydrake_pybind.h"
+
+#ifndef __clang__
+// N.B. Without this, GCC 7.4.0 on Ubuntu complains about
+// `AutoDiffScalar(const AutoDiffScalar& other)` having uninitialized values.
+// TODO(eric.cousineau):  #11566 Figure out why?
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif  // __clang__
+
 #include "drake/common/autodiff.h"
+
+#ifndef __clang__
+#pragma GCC diagnostic pop
+#endif  // __clang__
 
 // The macro `PYBIND11_NUMPY_OBJECT_DTYPE` place symbols into the namespace
 // `pybind11::detail`, so we should not place these in `drake::pydrake`.
@@ -52,7 +65,9 @@ void BindAutoDiffMathOverloads(PyObject* obj) {
       .def("max",
           [](const AutoDiffXd& x, const AutoDiffXd& y) { return max(x, y); })
       .def("ceil", [](const AutoDiffXd& x) { return ceil(x); })
+      .def("__ceil__", [](const AutoDiffXd& x) { return ceil(x); })
       .def("floor", [](const AutoDiffXd& x) { return floor(x); })
+      .def("__floor__", [](const AutoDiffXd& x) { return floor(x); })
       // TODO(eric.cousineau): This is not a NumPy-overridable method using
       // dtype=object. Deprecate and move solely into `pydrake.math`.
       .def("inv", [](const MatrixX<AutoDiffXd>& X) -> MatrixX<AutoDiffXd> {

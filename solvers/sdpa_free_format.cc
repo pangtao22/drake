@@ -1,6 +1,8 @@
 #include "drake/solvers/sdpa_free_format.h"
 
 #include <algorithm>
+#include <fstream>
+#include <iomanip>
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
@@ -9,6 +11,8 @@
 #include <Eigen/Core>
 #include <Eigen/Sparse>
 #include <Eigen/SparseQR>
+
+#include "drake/common/text_logging.h"
 
 namespace drake {
 namespace solvers {
@@ -34,8 +38,9 @@ void SdpaFreeFormat::DeclareXforPositiveSemidefiniteConstraints(
         const symbolic::Variable& psd_ij_var =
             binding.variables()(psd_matrix_variable_index++);
         const int psd_ij_var_index = prog.FindDecisionVariableIndex(psd_ij_var);
-        const bool has_var_registered = !(holds_alternative<std::nullptr_t>(
-            prog_var_in_sdpa_[psd_ij_var_index]));
+        const bool has_var_registered =
+            !(std::holds_alternative<std::nullptr_t>(
+                prog_var_in_sdpa_[psd_ij_var_index]));
         const EntryInX psd_ij_entry_in_X(num_blocks, i, j, num_X_rows_);
         if (!has_var_registered) {
           // This variable has not been registered into X. Now register this
@@ -55,7 +60,7 @@ void SdpaFreeFormat::DeclareXforPositiveSemidefiniteConstraints(
             // There does not exist equality constraint on this variable yet.
             entries_in_X_for_same_decision_variable->emplace_hint(
                 it2, psd_ij_var.get_id(),
-                std::vector<EntryInX>({get<DecisionVariableInSdpaX>(
+                std::vector<EntryInX>({std::get<DecisionVariableInSdpaX>(
                                            prog_var_in_sdpa_[psd_ij_var_index])
                                            .entry_in_X,
                                        psd_ij_entry_in_X}));
@@ -110,26 +115,29 @@ void SdpaFreeFormat::AddLinearEqualityConstraint(
   for (int i = 0; i < static_cast<int>(coeff_prog_vars.size()); ++i) {
     if (coeff_prog_vars[i] != 0) {
       const int prog_var_index = prog_vars_indices[i];
-      if (holds_alternative<DecisionVariableInSdpaX>(
+      if (std::holds_alternative<DecisionVariableInSdpaX>(
               prog_var_in_sdpa_[prog_var_index])) {
         // This variable is an entry in X.
         const auto& decision_var_in_X =
-            get<DecisionVariableInSdpaX>(prog_var_in_sdpa_[prog_var_index]);
+            std::get<DecisionVariableInSdpaX>(
+                prog_var_in_sdpa_[prog_var_index]);
         g_(constraint_index) -= coeff_prog_vars[i] * decision_var_in_X.offset;
         const double coeff = decision_var_in_X.coeff_sign == Sign::kPositive
                                  ? coeff_prog_vars[i]
                                  : -coeff_prog_vars[i];
         AddTermToTriplets(decision_var_in_X.entry_in_X, coeff, &Ai_triplets);
-      } else if (holds_alternative<double>(prog_var_in_sdpa_[prog_var_index])) {
+      } else if (std::holds_alternative<double>(
+          prog_var_in_sdpa_[prog_var_index])) {
         // This variable has a constant value.
-        const double var_value = get<double>(prog_var_in_sdpa_[prog_var_index]);
+        const double var_value = std::get<double>(
+            prog_var_in_sdpa_[prog_var_index]);
         g_(constraint_index) -= coeff_prog_vars[i] * var_value;
-      } else if (holds_alternative<FreeVariableIndex>(
+      } else if (std::holds_alternative<FreeVariableIndex>(
                      prog_var_in_sdpa_[prog_var_index])) {
         // This variable is a free variable (no lower nor upper bound).
         B_triplets_.emplace_back(
             constraint_index,
-            get<FreeVariableIndex>(prog_var_in_sdpa_[prog_var_index]),
+            std::get<FreeVariableIndex>(prog_var_in_sdpa_[prog_var_index]),
             coeff_prog_vars[i]);
       } else {
         throw std::runtime_error(
@@ -216,7 +224,7 @@ void SdpaFreeFormat::AddBoundsOnRegisteredDecisionVariable(
     int* new_X_var_count) {
   // This variable has been registered as a variable in SDPA. It should have
   // been registered as an entry in X.
-  if (holds_alternative<DecisionVariableInSdpaX>(
+  if (std::holds_alternative<DecisionVariableInSdpaX>(
           prog_var_in_sdpa_[variable_index])) {
     if (std::isinf(lower_bound) && std::isinf(upper_bound)) {
       // no finite bounds.
@@ -295,7 +303,7 @@ void SdpaFreeFormat::RegisterMathematicalProgramDecisionVariables(
     // The variable might have been registered when we go through the positive
     // semidefinite constraint.
     bool has_var_registered =
-        !holds_alternative<std::nullptr_t>(prog_var_in_sdpa_[i]);
+        !std::holds_alternative<std::nullptr_t>(prog_var_in_sdpa_[i]);
     // First check if this variable has either finite lower or upper bound. If
     // not, then the variable is a free variable in SDPA.
     if (!has_var_registered) {
@@ -326,22 +334,23 @@ void SdpaFreeFormat::AddLinearCostsFromProgram(
         // Only adds the cost if the cost coefficient is non-zero.
         const int var_index =
             prog.FindDecisionVariableIndex(linear_cost.variables()(i));
-        if (holds_alternative<DecisionVariableInSdpaX>(
+        if (std::holds_alternative<DecisionVariableInSdpaX>(
                 prog_var_in_sdpa_[var_index])) {
           const auto& decision_var_in_X =
-              get<DecisionVariableInSdpaX>(prog_var_in_sdpa_[var_index]);
+              std::get<DecisionVariableInSdpaX>(prog_var_in_sdpa_[var_index]);
           coeff =
               decision_var_in_X.coeff_sign == Sign::kPositive ? coeff : -coeff;
           constant_min_cost_term_ +=
               linear_cost.evaluator()->a()(i) * decision_var_in_X.offset;
           AddTermToTriplets(decision_var_in_X.entry_in_X, coeff, &C_triplets_);
-        } else if (holds_alternative<double>(prog_var_in_sdpa_[var_index])) {
-          const double val = get<double>(prog_var_in_sdpa_[var_index]);
+        } else if (std::holds_alternative<double>(
+            prog_var_in_sdpa_[var_index])) {
+          const double val = std::get<double>(prog_var_in_sdpa_[var_index]);
           constant_min_cost_term_ += linear_cost.evaluator()->a()(i) * val;
-        } else if (holds_alternative<FreeVariableIndex>(
+        } else if (std::holds_alternative<FreeVariableIndex>(
                        prog_var_in_sdpa_[var_index])) {
           const FreeVariableIndex& s_index =
-              get<FreeVariableIndex>(prog_var_in_sdpa_[var_index]);
+              std::get<FreeVariableIndex>(prog_var_in_sdpa_[var_index]);
           d_triplets_.emplace_back(s_index, 0, coeff);
         } else {
           throw std::runtime_error(
@@ -464,6 +473,151 @@ void SdpaFreeFormat::AddLinearMatrixInequalityConstraints(
   }
 }
 
+// A Lorentz cone constraint z₀ ≥ sqrt(z₁² + ... + zₙ²), where z = A*x+b, can
+// be rewritten as a positive semidefinite constraint
+// ⎡ z₀ z₁ ... zₙ ⎤
+// ⎢ z₁ z₀  0  0  ⎥  is positive semidefinite.
+// ⎢    ....      ⎥
+// ⎣ zₙ 0   0  z₀ ⎦
+void SdpaFreeFormat::AddLorentzConeConstraints(
+    const MathematicalProgram& prog) {
+  for (const auto& lorentz_cone_constraint : prog.lorentz_cone_constraints()) {
+    const int num_block_rows = lorentz_cone_constraint.evaluator()->A().rows();
+    const int num_decision_vars = lorentz_cone_constraint.variables().rows();
+    const std::vector<int> prog_vars_indices =
+        prog.FindDecisionVariableIndices(lorentz_cone_constraint.variables());
+
+    // Add the linear constraint that all the diagonal terms of the new block
+    // matrix equals to z0.
+    std::vector<double> a;
+    // The last entry in X_entries would be the diagonal term in the new block.
+    a.reserve(num_decision_vars);
+    // We need to impose the linear equality constraint
+    // lorentz_cone_constraint.evaluator()->A().row(0) *
+    // lorentz_cone_constraint.variables() - new_block(i, i) =
+    // -lorentz_cone_constraint.evaluator()->b()(0).
+    // So we first fill in a, b, X_entries and s_indices with the term from
+    // lorentz_cone_constraint.evaluator()->A().row(0) *
+    // lorentz_cone_constraint.variables()
+    for (int i = 0; i < num_decision_vars; ++i) {
+      const double coeff = lorentz_cone_constraint.evaluator()->A_dense()(0, i);
+      a.push_back(coeff);
+    }
+
+    // For each diagonal entry in the new block matrix, we need to add
+    // -new_block(i, i) to the left-hand side of the equality constraint.
+    for (int i = 0; i < num_block_rows; ++i) {
+      AddLinearEqualityConstraint(
+          a, prog_vars_indices, {-1.0},
+          {EntryInX(static_cast<int>(X_blocks_.size()), i, i, num_X_rows_)}, {},
+          {}, -lorentz_cone_constraint.evaluator()->b()(0));
+    }
+
+    // Now we add the linear equality constraint arising from the first row of
+    // the new block lorentz_cone_constraint.evaluator()->A().row(i) *
+    // lorentz_cone_constraint.variables() +
+    // lorentz_cone_constraint.evaluator()->b()(i) = new_block(0, i) for i
+    for (int i = 1; i < num_block_rows; ++i) {
+      a.clear();
+      a.reserve(num_decision_vars);
+      for (int j = 0; j < num_decision_vars; ++j) {
+        const double coeff =
+            lorentz_cone_constraint.evaluator()->A_dense()(i, j);
+        a.push_back(coeff);
+      }
+      // Add the term -new_block(0, i)
+      AddLinearEqualityConstraint(
+          a, prog_vars_indices, {-1},
+          {EntryInX(static_cast<int>(X_blocks_.size()), 0, i, num_X_rows_)}, {},
+          {}, -lorentz_cone_constraint.evaluator()->b()(i));
+    }
+
+    // Now add the constraint that many entries in this new block is 0.
+    for (int i = 1; i < num_block_rows; ++i) {
+      for (int j = 1; j < i; ++j) {
+        AddLinearEqualityConstraint(
+            {}, {}, {1.0},
+            {EntryInX(static_cast<int>(X_blocks_.size()), i, j, num_X_rows_)},
+            {}, {}, 0);
+      }
+    }
+
+    X_blocks_.emplace_back(BlockType::kMatrix, num_block_rows);
+    num_X_rows_ += num_block_rows;
+  }
+}
+
+// A vector z in rotated Lorentz cone (i.e.,z₀≥0, z₁≥0, z₀z₁≥ sqrt(z₂² + ...
+// zₙ²), where z = Ax+b ) is equivalent to the following positive semidefinite
+// constraint
+// ⎡ z₀ z₂ z₃ ... zₙ ⎤
+// ⎢ z₂ z₁ 0  ...  0 ⎥
+// ⎢ z₃ 0 z₁ 0 ... 0 ⎥ is positive semidefinite.
+// ⎢ z₄ 0 0 z₁ 0   0 ⎥
+// ⎢      ...        ⎥
+// ⎢ zₙ₋₁ ...   z₁ 0 ⎥
+// ⎣ zₙ 0 ... 0    z₁⎦
+void SdpaFreeFormat::AddRotatedLorentzConeConstraints(
+    const MathematicalProgram& prog) {
+  for (const auto& rotated_lorentz_constraint :
+       prog.rotated_lorentz_cone_constraints()) {
+    const int z_size = rotated_lorentz_constraint.evaluator()->A().rows();
+    // The number of rows in the new block matrix
+    const int num_block_rows = z_size - 1;
+    const int num_decision_vars = rotated_lorentz_constraint.variables().rows();
+    const std::vector<int> prog_vars_indices = prog.FindDecisionVariableIndices(
+        rotated_lorentz_constraint.variables());
+    // First add the equality constraint arising from the first row of the PSD
+    // constraint. rotated_lorentz_constraint.evaluator()->A().row(j) *
+    // rotated_lorentz_constraint.variables() +
+    // rotated_lorentz_constraint.evaluator()->b()(j) = new_X(0, i);
+    // where j = 0 if i = 0, and j = i + 1 otherwise.
+    for (int i = 0; i < num_block_rows; ++i) {
+      std::vector<double> a;
+      a.reserve(num_decision_vars);
+      const int j = i == 0 ? 0 : i + 1;
+      for (int k = 0; k < num_decision_vars; ++k) {
+        a.push_back(rotated_lorentz_constraint.evaluator()->A_dense()(j, k));
+      }
+      // Add the term -new_X(0, i)
+      AddLinearEqualityConstraint(
+          a, prog_vars_indices, {-1},
+          {EntryInX(static_cast<int>(X_blocks_.size()), 0, i, num_X_rows_)}, {},
+          {}, -rotated_lorentz_constraint.evaluator()->b()(j));
+    }
+
+    // Add the linear constraint
+    // rotated_lorentz_constraint.evaluator()->A().row(1) *
+    // rotated_lorentz_constraint.variables() +
+    // rotated_lorentz_constraint.evaluator()->b()(1) = new_X(i, i) for i >= 1
+    std::vector<double> a;
+    a.reserve(num_decision_vars);
+    for (int i = 0; i < num_decision_vars; ++i) {
+      a.push_back(rotated_lorentz_constraint.evaluator()->A_dense()(1, i));
+    }
+    for (int i = 1; i < num_block_rows; ++i) {
+      // Add the term -new_block(i, i).
+      AddLinearEqualityConstraint(
+          a, prog_vars_indices, {-1},
+          {EntryInX(static_cast<int>(X_blocks_.size()), i, i, num_X_rows_)}, {},
+          {}, -rotated_lorentz_constraint.evaluator()->b()(1));
+    }
+
+    // Now add the constraint that new_X(i, j) = 0 for j >= 2 and 1 <= i < j
+    for (int j = 2; j < num_block_rows; ++j) {
+      for (int i = 1; i < j; ++i) {
+        AddLinearEqualityConstraint(
+            {}, {}, {1},
+            {EntryInX(static_cast<int>(X_blocks_.size()), i, j, num_X_rows_)},
+            {}, {}, 0);
+      }
+    }
+
+    X_blocks_.emplace_back(BlockType::kMatrix, num_block_rows);
+    num_X_rows_ += num_block_rows;
+  }
+}
+
 void SdpaFreeFormat::Finalize() {
   A_.reserve(A_triplets_.size());
   for (int i = 0; i < static_cast<int>(A_triplets_.size()); ++i) {
@@ -479,6 +633,18 @@ void SdpaFreeFormat::Finalize() {
 }
 
 SdpaFreeFormat::SdpaFreeFormat(const MathematicalProgram& prog) {
+  ProgramAttributes solver_capabilities(std::initializer_list<ProgramAttribute>{
+      ProgramAttribute::kLinearCost, ProgramAttribute::kLinearConstraint,
+      ProgramAttribute::kLinearEqualityConstraint,
+      ProgramAttribute::kLorentzConeConstraint,
+      ProgramAttribute::kRotatedLorentzConeConstraint,
+      ProgramAttribute::kPositiveSemidefiniteConstraint});
+  if (!AreRequiredAttributesSupported(prog.required_capabilities(),
+                                      solver_capabilities)) {
+    throw std::invalid_argument(
+        "SdpaFreeFormat(): the program cannot be formulated as an SDP "
+        "in the standard form.\n");
+  }
   prog_var_in_sdpa_.reserve(prog.num_vars());
   for (int i = 0; i < prog.num_vars(); ++i) {
     prog_var_in_sdpa_.emplace_back(nullptr);
@@ -499,8 +665,114 @@ SdpaFreeFormat::SdpaFreeFormat(const MathematicalProgram& prog) {
 
   AddLinearMatrixInequalityConstraints(prog);
 
+  AddLorentzConeConstraints(prog);
+
+  AddRotatedLorentzConeConstraints(prog);
+
   Finalize();
 }
 }  // namespace internal
+
+bool GenerateSDPA(const MathematicalProgram& prog,
+                  const std::string& file_name) {
+  const internal::SdpaFreeFormat sdpa_free_format(prog);
+  if (sdpa_free_format.num_free_variables() != 0) {
+    drake::log()->warn(
+        "GenerateSDPA(): the program contains variables that are "
+        "unbounded (no upper bound or lower bound). The program "
+        "cannot be formulated as an SDP in the standard form.\n");
+    return false;
+  }
+  std::ofstream sdpa_file;
+  sdpa_file.open(file_name + ".dat-s", std::ios::out | std::ios::trunc);
+  if (sdpa_file.is_open()) {
+    // First line, number of constraints.
+    sdpa_file << sdpa_free_format.g().rows() << "\n";
+    // Second line, number of blocks in X.
+    sdpa_file << sdpa_free_format.X_blocks().size() << "\n";
+    // Third line, size of each block.
+    for (const auto& X_block : sdpa_free_format.X_blocks()) {
+      switch (X_block.block_type) {
+        case internal::BlockType::kMatrix: {
+          sdpa_file << X_block.num_rows;
+          break;
+        }
+        case internal::BlockType::kDiagonal: {
+          // Negative value indates diagonal block according to SDPA format.
+          sdpa_file << -X_block.num_rows;
+          break;
+        }
+      }
+      sdpa_file << " ";
+    }
+    sdpa_file << "\n";
+    // Forth line, the right-hand side of the constraint g.
+    std::stringstream g_stream;
+    g_stream << std::setprecision(20);
+    g_stream << sdpa_free_format.g().transpose() << "\n";
+    sdpa_file << g_stream.str();
+    // block_start_rows[i] records the starting row index of the i'th block in
+    // X. row_to_block_indices[i] records the index of the block that X(i, i)
+    // belongs to.
+    std::vector<int> block_start_rows(sdpa_free_format.A().size());
+    std::vector<int> row_to_block_indices(sdpa_free_format.num_X_rows());
+    int X_row_count = 0;
+    for (int i = 0; i < static_cast<int>(sdpa_free_format.X_blocks().size());
+         ++i) {
+      block_start_rows[i] = X_row_count;
+      for (int j = X_row_count;
+           j < X_row_count + sdpa_free_format.X_blocks()[i].num_rows; ++j) {
+        row_to_block_indices[j] = i;
+      }
+      X_row_count += sdpa_free_format.X_blocks()[i].num_rows;
+    }
+    // The non-zero entries in C
+    for (int i = 0; i < sdpa_free_format.num_X_rows(); ++i) {
+      for (Eigen::SparseMatrix<double>::InnerIterator it(sdpa_free_format.C(),
+                                                         i);
+           it; ++it) {
+        if (it.row() <= it.col()) {
+          const int block_start_row = block_start_rows[row_to_block_indices[i]];
+          sdpa_file << 0 /* 0 for cost matrix C */ << " "
+                    << row_to_block_indices[i] +
+                           1 /* block number, starts from 1 */
+                    << " "
+                    << it.row() - block_start_row +
+                           1 /* block row index, starts from 1*/
+                    << " "
+                    << i - block_start_row +
+                           1 /* block column index, starts from 1*/
+                    << " " << std::setprecision(20) << it.value() << "\n";
+        }
+      }
+    }
+    // The remaining lines are for A
+    for (int i = 0; i < static_cast<int>(sdpa_free_format.A().size()); ++i) {
+      for (int j = 0; j < sdpa_free_format.num_X_rows(); ++j) {
+        for (Eigen::SparseMatrix<double>::InnerIterator it(
+                 sdpa_free_format.A()[i], j);
+             it; ++it) {
+          if (it.row() <= it.col()) {
+            const int block_start_row =
+                block_start_rows[row_to_block_indices[j]];
+            sdpa_file << i + 1 /* constraint number, starts from 1 */ << " "
+                      << row_to_block_indices[j] +
+                             1 /* block number, starts from 1 */
+                      << " " << it.row() - block_start_row + 1 << " "
+                      << j - block_start_row + 1 << std::setprecision(20) << " "
+                      << it.value() << "\n";
+          }
+        }
+      }
+    }
+
+  } else {
+    std::cout << "GenerateSDPA(): Cannot open the file " << file_name
+              << ".dat-s\n";
+    return false;
+  }
+  sdpa_file.close();
+  return true;
+}
 }  // namespace solvers
 }  // namespace drake

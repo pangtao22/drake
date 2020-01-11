@@ -1,11 +1,13 @@
-from __future__ import print_function, absolute_import
-
 from pydrake.solvers import mathematicalprogram as mp
 from pydrake.solvers.gurobi import GurobiSolver
 from pydrake.solvers.snopt import SnoptSolver
 from pydrake.solvers.mathematicalprogram import (
+    LinearConstraint,
+    MathematicalProgramResult,
     SolverOptions,
-    SolverType
+    SolverType,
+    SolverId,
+    SolverInterface
     )
 
 from functools import partial
@@ -16,9 +18,11 @@ import numpy as np
 
 import pydrake
 from pydrake.autodiffutils import AutoDiffXd
+from pydrake.common.test_utilities import numpy_compare
 from pydrake.forwarddiff import jacobian
 from pydrake.math import ge
 import pydrake.symbolic as sym
+
 
 SNOPT_NO_GUROBI = SnoptSolver().available() and not GurobiSolver().available()
 
@@ -97,11 +101,10 @@ class TestMathematicalProgram(unittest.TestCase):
         self.assertEqual(result.get_optimal_cost(), 3.0)
         self.assertTrue(result.get_solver_id().name())
         self.assertTrue(np.allclose(result.GetSolution(), x_expected))
-        self.assertEqual(result.GetSolution(qp.x[0]), 1.0)
+        self.assertAlmostEqual(result.GetSolution(qp.x[0]), 1.0)
         self.assertTrue(np.allclose(result.GetSolution(qp.x), x_expected))
-
-        self.assertTrue(result.GetSolution(
-            sym.Expression(qp.x[0])).EqualTo(1.))
+        self.assertTrue(result.GetSolution(sym.Expression(qp.x[0])).EqualTo(
+            result.GetSolution(qp.x[0])))
         m = np.array([sym.Expression(qp.x[0]), sym.Expression(qp.x[1])])
         self.assertTrue(result.GetSolution(m)[1, 0].EqualTo(
             result.GetSolution(qp.x[1])))
@@ -117,6 +120,9 @@ class TestMathematicalProgram(unittest.TestCase):
         a = np.array([1.0, 2.0, 3.0])
         prog.AddLinearConstraint(a.dot(x) <= 4)
         prog.AddLinearConstraint(x[0] + x[1], 1, np.inf)
+        prog.AddConstraint(
+            LinearConstraint(np.array([[1., 1.]]), np.array([1]),
+                             np.array([np.inf])), [x[0], x[1]])
         solver = GurobiSolver()
         result = solver.Solve(prog, None, None)
         self.assertTrue(result.is_success())
@@ -136,6 +142,7 @@ class TestMathematicalProgram(unittest.TestCase):
         # the workaround overloads from `pydrake.math`.
         prog.AddLinearConstraint(ge(x, 1))
         prog.AddQuadraticCost(np.eye(2), np.zeros(2), x)
+        prog.AddQuadraticCost(np.eye(2), np.zeros(2), 1, x)
         # Redundant cost just to check the spelling.
         prog.AddQuadraticErrorCost(vars=x, Q=np.eye(2),
                                    x_desired=np.zeros(2))
@@ -166,6 +173,8 @@ class TestMathematicalProgram(unittest.TestCase):
 
         self.assertEqual(prog.FindDecisionVariableIndices(vars=[x[0], x[1]]),
                          [0, 1])
+        self.assertEqual(prog.decision_variable_index()[x[0].get_id()], 0)
+        self.assertEqual(prog.decision_variable_index()[x[1].get_id()], 1)
 
         for binding in prog.GetAllCosts():
             self.assertIsInstance(binding.evaluator(), mp.Cost)
@@ -178,12 +187,14 @@ class TestMathematicalProgram(unittest.TestCase):
         for (i, binding) in enumerate(prog.linear_costs()):
             cost = binding.evaluator()
             self.assertTrue(np.allclose(cost.a(), np.ones((1, 2))))
+            self.assertIsNone(cost.gradient_sparsity_pattern())
 
         self.assertTrue(prog.quadratic_costs())
         for (i, binding) in enumerate(prog.quadratic_costs()):
             cost = binding.evaluator()
             self.assertTrue(np.allclose(cost.Q(), np.eye(2)))
             self.assertTrue(np.allclose(cost.b(), np.zeros(2)))
+            self.assertIsNone(cost.gradient_sparsity_pattern())
 
         self.assertTrue(prog.bounding_box_constraints())
         for (i, binding) in enumerate(prog.bounding_box_constraints()):
@@ -191,6 +202,7 @@ class TestMathematicalProgram(unittest.TestCase):
             self.assertEqual(
                 prog.FindDecisionVariableIndex(var=binding.variables()[0]),
                 prog.FindDecisionVariableIndex(var=x[i]))
+            self.assertIsNone(constraint.gradient_sparsity_pattern())
             num_constraints = constraint.num_constraints()
             if num_constraints == 1:
                 self.assertEqual(constraint.A(), 1)
@@ -206,6 +218,7 @@ class TestMathematicalProgram(unittest.TestCase):
         self.assertTrue(prog.linear_constraints())
         for (i, binding) in enumerate(prog.linear_constraints()):
             constraint = binding.evaluator()
+            self.assertIsNone(constraint.gradient_sparsity_pattern())
             self.assertEqual(
                 prog.FindDecisionVariableIndex(var=binding.variables()[0]),
                 prog.FindDecisionVariableIndex(var=x[0]))
@@ -218,6 +231,7 @@ class TestMathematicalProgram(unittest.TestCase):
 
         self.assertTrue(prog.linear_equality_constraints())
         for (i, binding) in enumerate(prog.linear_equality_constraints()):
+            self.assertIsNone(constraint.gradient_sparsity_pattern())
             constraint = binding.evaluator()
             self.assertEqual(
                 prog.FindDecisionVariableIndex(var=binding.variables()[0]),
@@ -270,7 +284,7 @@ class TestMathematicalProgram(unittest.TestCase):
     def test_cost_api(self):
         prog = mp.MathematicalProgram()
         x0, = prog.NewContinuousVariables(1, "x")
-        lc = prog.AddLinearCost(1*x0 + 2).evaluator()
+        lc = prog.AddLinearCost([1], 2, [x0]).evaluator()
         qc = prog.AddQuadraticCost(0.5*x0**2 + 2*x0 + 3).evaluator()
 
         def check_linear_cost(cost, a, b):
@@ -326,6 +340,17 @@ class TestMathematicalProgram(unittest.TestCase):
             y_i = evaluator.Eval(x=[x_i, x_i])
             self.assertIsInstance(y_i[0], T_y_i)
 
+    def test_get_binding_variable_values(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(3)
+        binding1 = prog.AddBoundingBoxConstraint(-1, 1, x[0])
+        binding2 = prog.AddLinearEqualityConstraint(x[1] + 2*x[2], 2)
+        x_val = np.array([-2., 1., 2.])
+        np.testing.assert_allclose(
+            prog.GetBindingVariableValues(binding1, x_val), np.array([-2]))
+        np.testing.assert_allclose(
+            prog.GetBindingVariableValues(binding2, x_val), np.array([1, 2]))
+
     def test_matrix_variables(self):
         prog = mp.MathematicalProgram()
         x = prog.NewContinuousVariables(2, 2, "x")
@@ -363,19 +388,34 @@ class TestMathematicalProgram(unittest.TestCase):
         # c(0)*x^2 + 2*c(1)*x*y + c(2)*y^2 is SOS,
         # d(0)*x^2 is SOS.
         # d(1)*x^2 is SOS.
+        # d(0) + d(1) = 1
         prog = mp.MathematicalProgram()
         x = prog.NewIndeterminates(1, "x")
+        self.assertEqual(prog.indeterminates_index()[x[0].get_id()], 0)
         poly = prog.NewFreePolynomial(sym.Variables(x), 1)
         (poly, binding) = prog.NewSosPolynomial(
             indeterminates=sym.Variables(x), degree=2)
         y = prog.NewIndeterminates(1, "y")
+        self.assertEqual(prog.indeterminates_index()[y[0].get_id()], 1)
         (poly, binding) = prog.NewSosPolynomial(
             monomial_basis=(sym.Monomial(x[0]), sym.Monomial(y[0])))
         d = prog.NewContinuousVariables(2, "d")
         prog.AddSosConstraint(d[0]*x.dot(x))
         prog.AddSosConstraint(d[1]*x.dot(x), [sym.Monomial(x[0])])
+        prog.AddLinearEqualityConstraint(d[0] + d[1] == 1)
         result = mp.Solve(prog)
         self.assertTrue(result.is_success())
+
+    def test_equality_between_polynomials(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewIndeterminates(1, "x")
+        a = prog.NewContinuousVariables(2, "a")
+        prog.AddEqualityConstraintBetweenPolynomials(sym.Polynomial(
+            2 * a[0] * x[0] + a[1] + 2, x), sym.Polynomial(2 * x[0] + 4, x))
+        result = mp.Solve(prog)
+        a_val = result.GetSolution(a)
+        self.assertAlmostEqual(a_val[0], 1)
+        self.assertAlmostEqual(a_val[1], 2)
 
     def test_log_determinant(self):
         # Find the minimal ellipsoid that covers some given points.
@@ -446,6 +486,30 @@ class TestMathematicalProgram(unittest.TestCase):
         prog.AddLinearEqualityConstraint(np.eye(2), np.zeros(2), x)
         prog.AddLinearEqualityConstraint(x[0] == 1)
         prog.AddLinearEqualityConstraint(x[0] + x[1], 1)
+
+    def test_constraint_gradient_sparsity(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+
+        def cost(x):
+            return x[0]**2
+
+        def constraint(x):
+            return x[1] ** 2
+
+        cost_binding = prog.AddCost(cost, vars=x)
+        constraint_binding = prog.AddConstraint(constraint, [0], [1], vars=x)
+        cost_evaluator = cost_binding.evaluator()
+        constraint_evaluator = constraint_binding.evaluator()
+        self.assertIsNone(cost_evaluator.gradient_sparsity_pattern())
+        self.assertIsNone(constraint_evaluator.gradient_sparsity_pattern())
+        # Now set the sparsity
+        cost_evaluator.SetGradientSparsityPattern([(0, 0)])
+        self.assertEqual(cost_evaluator.gradient_sparsity_pattern(), [(0, 0)])
+        constraint_binding.evaluator().SetGradientSparsityPattern([(0, 1)])
+        self.assertEqual(
+            constraint_evaluator.gradient_sparsity_pattern(),
+            [(0, 1)])
 
     def test_pycost_and_pyconstraint(self):
         prog = mp.MathematicalProgram()
@@ -550,16 +614,32 @@ class TestMathematicalProgram(unittest.TestCase):
         prog = mp.MathematicalProgram()
 
         prog.SetSolverOption(SolverType.kGurobi, "double_key", 1.0)
-        prog.SetSolverOption(SolverType.kGurobi, "int_key", 2)
+        prog.SetSolverOption(GurobiSolver().solver_id(), "int_key", 2)
         prog.SetSolverOption(SolverType.kGurobi, "string_key", "3")
 
         options = prog.GetSolverOptions(SolverType.kGurobi)
+        self.assertDictEqual(
+            options, {"double_key": 1.0, "int_key": 2, "string_key": "3"})
+        options = prog.GetSolverOptions(GurobiSolver().solver_id())
         self.assertDictEqual(
             options, {"double_key": 1.0, "int_key": 2, "string_key": "3"})
 
         # For now, just make sure the constructor exists.  Once we bind more
         # accessors, we can test them here.
         options_object = SolverOptions()
+        solver_id = SolverId("dummy")
+        self.assertEqual(solver_id.name(), "dummy")
+        options_object.SetOption(solver_id, "double_key", 1.0)
+        options_object.SetOption(solver_id, "int_key", 2)
+        options_object.SetOption(solver_id, "string_key", "3")
+        options = options_object.GetOptions(solver_id)
+        self.assertDictEqual(
+            options, {"double_key": 1.0, "int_key": 2, "string_key": "3"})
+
+        prog.SetSolverOptions(options_object)
+        prog_options = prog.GetSolverOptions(solver_id)
+        self.assertDictEqual(
+            prog_options, {"double_key": 1.0, "int_key": 2, "string_key": "3"})
 
     def test_infeasible_constraints(self):
         prog = mp.MathematicalProgram()
@@ -568,3 +648,48 @@ class TestMathematicalProgram(unittest.TestCase):
         infeasible = mp.GetInfeasibleConstraints(prog=prog, result=result,
                                                  tol=1e-4)
         self.assertEquals(len(infeasible), 0)
+
+    def test_add_indeterminates_and_decision_variables(self):
+        prog = mp.MathematicalProgram()
+        x0 = sym.Variable("x0")
+        x1 = sym.Variable("x1")
+        a0 = sym.Variable("a0")
+        a1 = sym.Variable("a1")
+        prog.AddIndeterminates(np.array([x0, x1]))
+        prog.AddDecisionVariables(np.array([a0, a1]))
+        numpy_compare.assert_equal(prog.decision_variables()[0], a0)
+        numpy_compare.assert_equal(prog.decision_variables()[1], a1)
+        numpy_compare.assert_equal(prog.indeterminates()[0], x0)
+        numpy_compare.assert_equal(prog.indeterminate(1), x1)
+
+
+class DummySolverInterface(SolverInterface):
+    def __init__(self):
+        SolverInterface.__init__(self)
+
+    def available(self):
+        return True
+
+    def solver_id(self):
+        return SolverId("dummy")
+
+    def Solve(self, prog, initial_guess, solver_options, result):
+        raise Exception("Dummy solver cannot solve")
+
+    def AreProgramAttributesSatisfied(self, prog):
+        return True
+
+
+class TestSolverInterface(unittest.TestCase):
+    def test_dummy_solver_interface(self):
+        solver = DummySolverInterface()
+        self.assertTrue(solver.available())
+        self.assertEqual(solver.solver_id().name(), "dummy")
+        self.assertIsInstance(solver, SolverInterface)
+        prog = mp.MathematicalProgram()
+        result = mp.MathematicalProgramResult()
+        with self.assertRaises(Exception) as context:
+            solver.Solve(prog, None, None, result)
+        self.assertTrue("Dummy solver cannot solve" in str(context.exception))
+        self.assertIsInstance(result, mp.MathematicalProgramResult)
+        self.assertTrue(solver.AreProgramAttributesSatisfied(prog))
