@@ -1,4 +1,5 @@
 
+#include "drake/multibody/plant/multibody_plant.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/task_space_plan_contact.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/plan_utilities.h"
 #include "drake/solvers/solve.h"
@@ -69,8 +70,10 @@ void TaskSpacePlanContact::Step(
   const auto p_WoQ_W = X_WT * p_ToQ_T;
   const auto Q_WT = X_WT.rotation().ToQuaternion();
 
-  plant_->CalcFrameGeometricJacobianExpressedInWorld(
-      *plant_context_, plant_->get_frame(task_frame_idx_), p_ToQ_T, &Jv_WTq_);
+  plant_->CalcJacobianSpatialVelocity(
+      *plant_context_, multibody::JacobianWrtVariable::kQDot,
+      plant_->get_frame(task_frame_idx_), p_ToQ_T,
+      plant_->world_frame(), plant_->world_frame(), &Jv_WTq_);
 
   // Update errors.
   this->UpdatePositionError(t, plan_data, p_WoQ_W);

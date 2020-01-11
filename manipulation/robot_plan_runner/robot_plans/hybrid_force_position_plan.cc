@@ -85,8 +85,11 @@ void HybridForcePositionPlan::Step(
   const auto X_WT =
       plant_->CalcRelativeTransform(*plant_context_, plant_->world_frame(),
                                     plant_->get_frame(task_frame_idx_));
-  plant_->CalcFrameGeometricJacobianExpressedInWorld(
-      *plant_context_, plant_->get_frame(task_frame_idx_), p_ToP_T, &Jv_WTq_);
+
+  plant_->CalcJacobianSpatialVelocity(
+      *plant_context_, multibody::JacobianWrtVariable::kQDot,
+      plant_->get_frame(task_frame_idx_), p_ToP_T,
+      plant_->world_frame(), plant_->world_frame(), &Jv_WTq_);
 
   // Q_CT
   const auto Q_WT = X_WT.rotation().ToQuaternion();

@@ -13,7 +13,7 @@ namespace robot_plan_runner {
 namespace robot_plans {
 
 struct ContactInfo {
-  ContactInfo() {};
+  ContactInfo() = default;
   int num_contacts{0};
   std::vector<int> contact_link_idx{};
   std::vector<Eigen::Vector3d> positions{};

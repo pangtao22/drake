@@ -1,6 +1,5 @@
 #include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
 
-
 namespace drake {
 namespace manipulation {
 namespace robot_plan_runner {

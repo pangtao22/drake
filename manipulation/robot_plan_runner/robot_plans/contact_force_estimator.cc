@@ -39,11 +39,11 @@ Eigen::Vector3d ContactForceEstimator::EstimateContactForce(
 
   // updates contact jacobian.
   const Eigen::Vector3d& pC_C = contact_info.positions[0];
-  Eigen::Vector3d p_WC;
-  plant_->CalcPointsGeometricJacobianExpressedInWorld(
-      *plant_context_,
+
+  plant_->CalcJacobianSpatialVelocity(
+      *plant_context_, multibody::JacobianWrtVariable::kQDot,
       plant_->get_frame(robot_frames_idx_[contact_info.contact_link_idx[0]]),
-      pC_C, &p_WC, &Jv_WCc_);
+      pC_C, plant_->world_frame(), plant_->world_frame(), &Jv_WCc_);
 
   // least square solve Jv_WCc.T.dot(f) = tau_external.
   auto svd =
