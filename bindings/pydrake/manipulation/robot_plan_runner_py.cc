@@ -3,7 +3,6 @@
 #include "pybind11/stl.h"
 
 #include "drake/bindings/pydrake/common/deprecation_pybind.h"
-#include "drake/bindings/pydrake/common/drake_optional_pybind.h"
 #include "drake/bindings/pydrake/common/value_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
@@ -41,12 +40,12 @@ PYBIND11_MODULE(robot_plan_runner, m) {
   py::class_<PlanData> plan_data(m, "PlanData");
   plan_data
       .def(py::init([](PlanType plan_type,
-                        optional<trajectories::PiecewisePolynomial<double>>
+                        std::optional<trajectories::PiecewisePolynomial<double>>
                             joint_traj) {
         return PlanData{plan_type, long{-1}, joint_traj};
       }),
           py::arg("plan_type") = PlanType::kEmptyPlan,
-          py::arg("joint_traj") = nullopt)
+          py::arg("joint_traj") = std::nullopt)
       .def_readwrite("plan_type", &PlanData::plan_type,
           doc.robot_plans.PlanData.plan_type.doc)
       .def_readwrite("joint_traj", &PlanData::joint_traj,
