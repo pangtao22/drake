@@ -308,31 +308,6 @@
           <diffuse>1.0 0.423529411765 0.0392156862745 1.0</diffuse>
         </material>
       </visual>
-
-      <visual name='iiwa_link_6_contact_visual'>
-        <pose frame=''>0 -0.03 0.01 0 -0 0</pose>
-        <geometry>
-          <sphere>
-            <radius>0.06</radius>
-          </sphere>
-        </geometry>
-        <material>
-          <diffuse>0.5 0.5 0.5 1.0</diffuse>
-        </material>
-      </visual>
-
-      <collision name='iiwa_link_6_contact'>
-        <pose frame=''>0 -0.03 0.01 0 -0 0</pose>
-        <geometry>
-          <sphere>
-            <radius>0.06</radius>
-          </sphere>
-        </geometry>
-        <material>
-          <diffuse>0.5 0.5 0.5 1.0</diffuse>
-        </material>
-      </collision>
-
       <gravity>1</gravity>
       <velocity_decay/>
       <self_collide>0</self_collide>
