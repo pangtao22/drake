@@ -46,7 +46,7 @@ Eigen::Vector3d ContactForceEstimator::EstimateContactForce(
       pC_C, plant_->world_frame(), plant_->world_frame(), &Jv_WCc_);
 
   // least square solve Jv_WCc.T.dot(f) = tau_external.
-  auto svd = Jv_WCc_.topRows(3).transpose().bdcSvd(Eigen::ComputeThinU |
+  auto svd = Jv_WCc_.bottomRows(3).transpose().bdcSvd(Eigen::ComputeThinU |
                                                    Eigen::ComputeThinV);
 
   return svd.solve(tau_external);
@@ -72,7 +72,7 @@ Eigen::RowVectorXd ContactForceEstimator::CalcContactJacobian() {
   Eigen::Vector3d f = lpf_->get_current_x();
   auto f_norm = f.norm();
   Eigen::Vector3d contact_normal = f / f_norm;
-  return contact_normal.transpose() * Jv_WCc_.topRows(3);
+  return contact_normal.transpose() * Jv_WCc_.bottomRows(3);
 }
 
 }  // namespace robot_plans
