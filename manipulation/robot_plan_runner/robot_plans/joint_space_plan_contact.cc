@@ -84,7 +84,7 @@ void JointSpacePlanContact::Step(
     }
 
     double f_desired = f_norm_threshold * 1.5;
-    if(desired_contact_force_) {
+    if (desired_contact_force_) {
       f_desired = desired_contact_force_->value(t - t_separation_);
       cout << t << " " << (t - t_separation_) << " " << f_desired << endl;
     }
@@ -112,8 +112,8 @@ void JointSpacePlanContact::Step(
   auto dq_value = prog_result_->GetSolution(dq);
 
   // saturation
-//  const double dq_limit = 1;
-//  ClipEigenVector(&dq_value, -dq_limit, dq_limit);
+  //  const double dq_limit = 1;
+  //  ClipEigenVector(&dq_value, -dq_limit, dq_limit);
 
   *q_cmd = q + dq_value;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);
