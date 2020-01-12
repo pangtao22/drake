@@ -10,7 +10,7 @@ namespace robot_plans {
  * w_cutoff: cut off frequency in rad/s, recommended value 0.5 * 2 * M_PI.
  */
 ContactForceEstimator::ContactForceEstimator(double h, double w_cutoff)
-    : plant_(std::make_unique<multibody::MultibodyPlant<double>>()),
+    : plant_(std::make_unique<multibody::MultibodyPlant<double>>(1e-3)),
       lpf_(std::make_unique<LowPassFilter>(3, h, w_cutoff)) {
   robot_model_ = SetupIiwaControllerPlant(plant_.get());
   plant_context_ = plant_->CreateDefaultContext();

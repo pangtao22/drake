@@ -22,7 +22,7 @@ HybridForcePositionPlan::HybridForcePositionPlan()
       velocity_cost_weight_(0.01) {
   DRAKE_THROW_UNLESS(solver_.available());
 
-  plant_ = std::make_unique<multibody::MultibodyPlant<double>>();
+  plant_ = std::make_unique<multibody::MultibodyPlant<double>>(1e-3);
   robot_model_ = SetupIiwaControllerPlant(plant_.get());
   plant_context_ = plant_->CreateDefaultContext();
   task_frame_idx_ = plant_->GetFrameByName("iiwa_link_7").index();

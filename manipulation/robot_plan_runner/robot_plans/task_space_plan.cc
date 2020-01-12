@@ -13,7 +13,7 @@ using math::RotationMatrixd;
 
 TaskSpacePlan::TaskSpacePlan()
     : PlanBase(PlanType::kTaskSpacePlan, 7),
-      plant_(std::make_unique<multibody::MultibodyPlant<double>>()),
+      plant_(std::make_unique<multibody::MultibodyPlant<double>>(1e-3)),
       kp_translation_(Eigen::Array3d(150, 150, 150)),
       kp_rotation_(Eigen::Array3d(50, 50, 50)) {
   // Constructs MultibodyPlant of iiwa7, which is used for Jacobian

@@ -127,6 +127,15 @@ drake_cc_binary(
 )
 
 drake_cc_binary(
+    name = "run_joint_space_plan",
+    srcs = ["run_joint_space_plan.cc"],
+    deps = [
+        ":plan_runner_hardware_interface",
+        "//math",
+    ],
+)
+
+drake_cc_binary(
     name = "run_contact_aware_plan",
     srcs = ["run_contact_aware_plan.cc"],
     deps = [
@@ -186,7 +195,7 @@ drake_cc_binary(
         ":plan_runner_hardware_interface",
         "//math",
         "//multibody/inverse_kinematics",
-    ]
+    ],
 )
 
 install_data()
