@@ -23,7 +23,7 @@ ContactForceEstimator::ContactForceEstimator(double h, double w_cutoff)
   }
 
   // contact Jacobian.
-  Jv_WCc_.resize(3, num_positions_);
+  Jv_WCc_.resize(6, num_positions_);
 }
 
 /*
@@ -46,8 +46,8 @@ Eigen::Vector3d ContactForceEstimator::EstimateContactForce(
       pC_C, plant_->world_frame(), plant_->world_frame(), &Jv_WCc_);
 
   // least square solve Jv_WCc.T.dot(f) = tau_external.
-  auto svd =
-      Jv_WCc_.transpose().bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
+  auto svd = Jv_WCc_.topRows(3).transpose().bdcSvd(Eigen::ComputeThinU |
+                                                   Eigen::ComputeThinV);
 
   return svd.solve(tau_external);
 }
@@ -58,7 +58,7 @@ Eigen::Vector3d ContactForceEstimator::UpdateContactForce(
   DRAKE_THROW_UNLESS(contact_info.num_contacts <= 1);
 
   Eigen::Vector3d f_contact_new;
-  if(contact_info.num_contacts == 1) {
+  if (contact_info.num_contacts == 1) {
     f_contact_new = this->EstimateContactForce(contact_info, q, tau_external);
   } else {
     f_contact_new.setZero();
@@ -72,7 +72,7 @@ Eigen::RowVectorXd ContactForceEstimator::CalcContactJacobian() {
   Eigen::Vector3d f = lpf_->get_current_x();
   auto f_norm = f.norm();
   Eigen::Vector3d contact_normal = f / f_norm;
-  return contact_normal.transpose() * Jv_WCc_;
+  return contact_normal.transpose() * Jv_WCc_.topRows(3);
 }
 
 }  // namespace robot_plans
