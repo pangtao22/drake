@@ -59,9 +59,9 @@ void JointSpacePlanContact::Step(
   const double f_norm = f_contact.norm();
 
   if (f_norm > f_norm_threshold) {
-    const Eigen::RowVectorXd J_nc =
+    const Eigen::RowVectorXd J_u =
         contact_force_estimator_->CalcContactJacobian();
-    const double dx_along_f = (J_nc * dq_ref)[0];
+    const double dx_along_f = (J_u * dq_ref)[0];
 
     // saturate the norm of dq_ref.
     const double dq_ref_norm = dq_ref.norm();
@@ -89,13 +89,13 @@ void JointSpacePlanContact::Step(
       cout << t << " " << (t - t_separation_) << " " << f_desired << endl;
     }
 
-    Eigen::VectorXd J_nc_pinv = J_nc.transpose() / std::pow(J_nc.norm(), 2);
+    Eigen::VectorXd J_nc_pinv = J_u.transpose() / std::pow(J_u.norm(), 2);
     SetSmallValuesToZero(&J_nc_pinv, 1e-13);
 
     prog->AddLinearEqualityConstraint(
         (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
         dq);
-    prog->AddLinearConstraint(J_nc / control_period,
+    prog->AddLinearConstraint(J_u / control_period,
                               -std::numeric_limits<double>::infinity(), 0, dq);
   }
 

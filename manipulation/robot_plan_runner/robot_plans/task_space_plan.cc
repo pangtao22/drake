@@ -22,7 +22,7 @@ TaskSpacePlan::TaskSpacePlan()
 
   plant_context_ = plant_->CreateDefaultContext();
   task_frame_idx_ = plant_->GetFrameByName("iiwa_link_7").index();
-  Jv_WTq_.resize(6, num_positions_);
+  Jv_WTq_W_.resize(6, num_positions_);
   x_dot_desired_.resize(6);
 };
 
@@ -68,7 +68,7 @@ void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
   plant_->CalcJacobianSpatialVelocity(
       *plant_context_, multibody::JacobianWrtVariable::kQDot,
       plant_->get_frame(task_frame_idx_), p_ToQ_T,
-      plant_->world_frame(), plant_->world_frame(), &Jv_WTq_);
+      plant_->world_frame(), plant_->world_frame(), &Jv_WTq_W_);
 
   // Update errors.
   this->UpdatePositionError(t, plan_data, p_WoQ_W);
@@ -81,7 +81,7 @@ void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
   x_dot_desired_.head(3) =
       Q_WT * (kp_rotation_ * Q_TTr_.vec().array()).matrix();
 
-  auto svd = Jv_WTq_.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
+  auto svd = Jv_WTq_W_.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV);
   svd.setThreshold(0.01);
   const Eigen::VectorXd q_dot_desired = svd.solve(x_dot_desired_);
   *q_cmd = q + q_dot_desired * control_period;

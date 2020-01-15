@@ -45,7 +45,7 @@ int run_plan() {
 
   Eigen::MatrixXd xyz_knots(3, 3);
   xyz_knots.col(0) << 0, 0, 0;
-  xyz_knots.col(2) << 0, -0.22, 0.15;
+  xyz_knots.col(2) << 0, 0.22, -0.15;
   xyz_knots.col(1) = (xyz_knots.col(0) + xyz_knots.col(2)) / 2;
 
   ee_data.ee_xyz_traj = trajectories::PiecewisePolynomial<double>::Cubic(
@@ -65,7 +65,7 @@ int run_plan() {
   // Construct plan runner hardware interface.
   auto plan_runner =
       manipulation::robot_plan_runner::PlanRunnerHardwareInterface(plan_list,
-                                                                   false);
+                                                                   true);
   plan_runner.SaveGraphvizStringToFile();
 
   // Run simulation.

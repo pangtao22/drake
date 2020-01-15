@@ -54,7 +54,8 @@ void TaskSpacePlanContact::Step(
     const Eigen::Ref<const Eigen::VectorXd>& v,
     const Eigen::Ref<const Eigen::VectorXd>& tau_external,
     double control_period, double t, const PlanData& plan_data,
-    const robot_plans::ContactInfo&, EigenPtr<Eigen::VectorXd> q_cmd,
+    const robot_plans::ContactInfo& contact_info, EigenPtr<Eigen::VectorXd>
+        q_cmd,
     EigenPtr<Eigen::VectorXd> tau_cmd) const {
   this->check_plan_type(plan_data);
 
@@ -62,7 +63,7 @@ void TaskSpacePlanContact::Step(
   plant_->SetPositions(plant_context_.get(), robot_model_, q);
   plant_->SetVelocities(plant_context_.get(), robot_model_, v);
 
-  // Update Kinematics.
+  // Update task kinematics.
   const auto X_WT =
       plant_->CalcRelativeTransform(*plant_context_, plant_->world_frame(),
                                     plant_->get_frame(task_frame_idx_));
@@ -73,7 +74,12 @@ void TaskSpacePlanContact::Step(
   plant_->CalcJacobianSpatialVelocity(
       *plant_context_, multibody::JacobianWrtVariable::kQDot,
       plant_->get_frame(task_frame_idx_), p_ToQ_T,
-      plant_->world_frame(), plant_->world_frame(), &Jv_WTq_);
+      plant_->world_frame(), plant_->world_frame(), &Jv_WTq_W_);
+
+  // Update contact kinematics
+
+
+
 
   // Update errors.
   this->UpdatePositionError(t, plan_data, p_WoQ_W);
@@ -84,13 +90,7 @@ void TaskSpacePlanContact::Step(
   x_dot_desired_.head(3) =
       Q_WT * (kp_rotation_ * Q_TTr_.vec().array()).matrix();
 
-  // Estimate contact force, assuming the contact is at the center of the
-  // sphere.
-  const Eigen::Vector3d pC_T(0, 0, 0.075);
-  ContactInfo contact_info;
-  contact_info.num_contacts = 1;
-  contact_info.contact_link_idx.push_back(7);
-  contact_info.positions.push_back(pC_T);
+  // Estimate contact force.
   const Eigen::Vector3d f_contact =
       contact_force_estimator_->UpdateContactForce(contact_info, q,
                                                    tau_external);
@@ -100,7 +100,7 @@ void TaskSpacePlanContact::Step(
   auto dq = prog->NewContinuousVariables(num_positions_);
 
   // alias for task Jacobian.
-  const Eigen::MatrixXd& Jt = Jv_WTq_;
+  const Eigen::MatrixXd& Jt = Jv_WTq_W_;
 
   // joint velocity cost
   prog->AddQuadraticErrorCost(
@@ -110,21 +110,20 @@ void TaskSpacePlanContact::Step(
   // Deal with contact.
   const double f_norm_threshold = 10;
   const double f_norm = f_contact.norm();
-  Eigen::VectorXd dq_force(num_positions_);
-  dq_force.setZero();
+
   if (f_norm > f_norm_threshold) {
-    const Eigen::RowVectorXd J_nc =
+    const Eigen::RowVectorXd J_u =
         contact_force_estimator_->CalcContactJacobian();
 
-    const Eigen::VectorXd J_nc_pinv =
-        J_nc.transpose() / std::pow(J_nc.norm(), 2);
+    const Eigen::VectorXd J_u_pinv =
+        J_u.transpose() / std::pow(J_u.norm(), 2);
 
     const double f_desired = f_norm_threshold * 1.5;
     prog->AddLinearEqualityConstraint(
-        (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
+        (J_u_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
         dq);
 
-    prog->AddLinearConstraint(J_nc / control_period,
+    prog->AddLinearConstraint(J_u / control_period,
                               -std::numeric_limits<double>::infinity(), 0, dq);
   }
   // tracking error cost

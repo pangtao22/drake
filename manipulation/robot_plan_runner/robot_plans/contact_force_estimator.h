@@ -44,7 +44,8 @@ class ContactForceEstimator {
 
   // Jacobian of contact point (c) relative to world frame
   // expressed in world frame, (3 * num_positions_).
-  mutable Eigen::MatrixXd Jv_WCc_;
+  // Contact kinematics. contact frame: L; C: contact point.
+  mutable Eigen::MatrixXd Jv_WLc_W_;
 
   // filtered contact force
   std::unique_ptr<LowPassFilter> lpf_;

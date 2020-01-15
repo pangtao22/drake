@@ -40,7 +40,7 @@ class TaskSpacePlan : public PlanBase {
   mutable Eigen::Quaterniond Q_TTr_;
   mutable std::unique_ptr<Eigen::Vector3d> p_WoQ_W_t0_;
   mutable Eigen::VectorXd x_dot_desired_;
-  mutable Eigen::MatrixXd Jv_WTq_;
+  mutable Eigen::MatrixXd Jv_WTq_W_;
 
   // gains
   const Eigen::Array3d kp_translation_;

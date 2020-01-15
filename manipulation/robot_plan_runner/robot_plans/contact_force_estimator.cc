@@ -23,7 +23,7 @@ ContactForceEstimator::ContactForceEstimator(double h, double w_cutoff)
   }
 
   // contact Jacobian.
-  Jv_WCc_.resize(6, num_positions_);
+  Jv_WLc_W_.resize(6, num_positions_);
 }
 
 /*
@@ -43,10 +43,10 @@ Eigen::Vector3d ContactForceEstimator::EstimateContactForce(
   plant_->CalcJacobianSpatialVelocity(
       *plant_context_, multibody::JacobianWrtVariable::kQDot,
       plant_->get_frame(robot_frames_idx_[contact_info.contact_link_idx[0]]),
-      pC_C, plant_->world_frame(), plant_->world_frame(), &Jv_WCc_);
+      pC_C, plant_->world_frame(), plant_->world_frame(), &Jv_WLc_W_);
 
   // least square solve Jv_WCc.T.dot(f) = tau_external.
-  auto svd = Jv_WCc_.bottomRows(3).transpose().bdcSvd(Eigen::ComputeThinU |
+  auto svd = Jv_WLc_W_.bottomRows(3).transpose().bdcSvd(Eigen::ComputeThinU |
                                                    Eigen::ComputeThinV);
 
   return svd.solve(tau_external);
@@ -72,7 +72,7 @@ Eigen::RowVectorXd ContactForceEstimator::CalcContactJacobian() {
   Eigen::Vector3d f = lpf_->get_current_x();
   auto f_norm = f.norm();
   Eigen::Vector3d contact_normal = f / f_norm;
-  return contact_normal.transpose() * Jv_WCc_.bottomRows(3);
+  return contact_normal.transpose() * Jv_WLc_W_.bottomRows(3);
 }
 
 }  // namespace robot_plans
