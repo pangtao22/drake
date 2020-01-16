@@ -19,10 +19,6 @@ JointSpacePlanContact::JointSpacePlanContact(int num_positions)
   joint_stiffness_.resize(num_positions_);
   joint_stiffness_ << 800, 600, 600, 600, 400, 200, 200;
 
-  dq_weight_.resize(num_positions_, num_positions_);
-  dq_weight_.setZero();
-  dq_weight_.diagonal() << 5, 4, 3, 3, 2, 2, 1;
-
   prog_result_ = std::make_unique<solvers::MathematicalProgramResult>();
 }
 

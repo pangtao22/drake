@@ -25,7 +25,10 @@ int run_plan() {
   t_knots0 << 0, 1;
 
   Eigen::MatrixXd q_knots(7, 2);
-  q_knots.col(0) << -0.4532, 1.1335, -0.0479, -1.3982, -0.3034, 1.3395, -0.3055;
+//    q_knots.col(0) << -0.4532, 1.1335, -0.0479, -1.3982, -0.3034, 1.3395,
+//    -0.3055;  // EE pushing against the table.
+  q_knots.col(0) << -0.965894, 1.41052, 0.548241, -1.46713, -0.973198, -1.49595,
+      -0.0991943;  // Link 6 making contact with table.
   q_knots.col(1) = q_knots.col(0);
 
   auto qtraj = trajectories::PiecewisePolynomial<double>::ZeroOrderHold(
@@ -45,14 +48,15 @@ int run_plan() {
 
   Eigen::MatrixXd xyz_knots(3, 3);
   xyz_knots.col(0) << 0, 0, 0;
-  xyz_knots.col(2) << 0, 0.22, -0.15;
+  xyz_knots.col(2) << 0, -0.22, -0.12;
   xyz_knots.col(1) = (xyz_knots.col(0) + xyz_knots.col(2)) / 2;
 
   ee_data.ee_xyz_traj = trajectories::PiecewisePolynomial<double>::Cubic(
       t_knots1, xyz_knots, Eigen::VectorXd::Zero(3), Eigen::VectorXd::Zero(3));
   ee_data.ee_xyz_dot_traj = ee_data.ee_xyz_traj.derivative(1);
 
-  auto Q_WT = math::RollPitchYawd(0, M_PI * 1.25, 0).ToQuaternion();
+//  auto Q_WT = math::RollPitchYawd(0, M_PI * 1.25, 0).ToQuaternion();
+  auto Q_WT = math::RollPitchYawd(0, M_PI / 3, 0).ToQuaternion();
 
   vector<double> t_knots_v{t_knots1[0], t_knots1[1], t_knots1[2]};
   vector<Eigen::Quaterniond> quaternions{Q_WT, Q_WT, Q_WT};

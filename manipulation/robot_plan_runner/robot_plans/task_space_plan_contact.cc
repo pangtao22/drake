@@ -76,11 +76,6 @@ void TaskSpacePlanContact::Step(
       plant_->get_frame(task_frame_idx_), p_ToQ_T,
       plant_->world_frame(), plant_->world_frame(), &Jv_WTq_W_);
 
-  // Update contact kinematics
-
-
-
-
   // Update errors.
   this->UpdatePositionError(t, plan_data, p_WoQ_W);
   this->UpdateOrientationError(t, plan_data, Q_WT);
@@ -125,6 +120,7 @@ void TaskSpacePlanContact::Step(
 
     prog->AddLinearConstraint(J_u / control_period,
                               -std::numeric_limits<double>::infinity(), 0, dq);
+//    prog->AddLinearEqualityConstraint(J_u / control_period, 0, dq);
   }
   // tracking error cost
   prog->AddL2NormCost(Jt / control_period, x_dot_desired_, dq);

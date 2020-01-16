@@ -26,7 +26,6 @@ class JointSpacePlanContact : public PlanBase {
 
  private:
   Eigen::ArrayXd joint_stiffness_;
-  Eigen::MatrixXd dq_weight_;
 
   std::unique_ptr<ContactForceEstimator> contact_force_estimator_;
   std::unique_ptr<solvers::MathematicalProgramResult> prog_result_;
