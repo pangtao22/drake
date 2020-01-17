@@ -45,7 +45,7 @@ void JointSpacePlanContact::Step(
   const Eigen::RowVectorXd J_u =
       contact_force_estimator_->CalcContactJacobian(q);
 
-  const double f_norm_threshold = 10;
+  const double f_norm_threshold = 1e6;
   const double f_norm = f_contact.norm();
   double f_desired = -1;
 

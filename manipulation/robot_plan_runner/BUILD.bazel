@@ -170,6 +170,16 @@ drake_cc_binary(
 )
 
 drake_cc_binary(
+    name = "run_joint_space_plan_contact_bin_reaching_hardware",
+    srcs = ["run_joint_space_plan_contact_bin_reaching_hardware.cc"],
+    deps = [
+        ":plan_runner_hardware_interface",
+        "//math",
+        "//multibody/inverse_kinematics",
+    ],
+)
+
+drake_cc_binary(
     name = "run_joint_step_response_hardware",
     srcs = ["run_joint_step_response_hardware.cc"],
     deps = [
