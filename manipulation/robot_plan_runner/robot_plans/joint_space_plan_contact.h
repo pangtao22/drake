@@ -32,8 +32,8 @@ class JointSpacePlanContact : public PlanBase {
   solvers::GurobiSolver solver_;
 
   mutable int positive_v_count_{0};
-
-  mutable std::unique_ptr<FirstOrderSystem<double>> desired_contact_force_;
+  mutable std::unique_ptr<FirstOrderSystem<double>>
+      desired_separation_contact_force_;
   mutable double t_separation_{0};
 };
 
