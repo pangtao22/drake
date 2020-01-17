@@ -108,7 +108,7 @@ void TaskSpacePlanContact::Step(
 
   if (f_norm > f_norm_threshold) {
     const Eigen::RowVectorXd J_u =
-        contact_force_estimator_->CalcContactJacobian();
+        contact_force_estimator_->CalcContactJacobian(q);
 
     const Eigen::VectorXd J_u_pinv =
         J_u.transpose() / std::pow(J_u.norm(), 2);

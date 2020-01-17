@@ -4,6 +4,7 @@
 
 #include <Eigen/Dense>
 
+#include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/plan_utilities.h"
 #include "drake/multibody/plant/multibody_plant.h"
 
@@ -11,13 +12,6 @@ namespace drake {
 namespace manipulation {
 namespace robot_plan_runner {
 namespace robot_plans {
-
-struct ContactInfo {
-  ContactInfo() = default;
-  int num_contacts{0};
-  std::vector<int> contact_link_idx{};
-  std::vector<Eigen::Vector3d> positions{};
-};
 
 class ContactForceEstimator {
  public:
@@ -28,7 +22,8 @@ class ContactForceEstimator {
       const Eigen::Ref<const Eigen::VectorXd>& q,
       const Eigen::Ref<const Eigen::VectorXd>& tau_external) const;
 
-  Eigen::RowVectorXd CalcContactJacobian();
+  Eigen::RowVectorXd CalcContactJacobian(
+      const Eigen::Ref<const Eigen::VectorXd>& q);
 
  private:
   Eigen::Vector3d EstimateContactForce(
@@ -49,6 +44,10 @@ class ContactForceEstimator {
 
   // filtered contact force
   std::unique_ptr<LowPassFilter> lpf_;
+
+//  mutable bool has_received_nonzero_contact_info_{false};
+//  mutable int last_active_contact_link_idx_{-1};
+//  mutable Eigen::Vector3d last_active_contact_point_;
 };
 
 }  // namespace robot_plans

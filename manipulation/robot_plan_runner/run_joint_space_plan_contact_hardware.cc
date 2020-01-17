@@ -104,8 +104,8 @@ int run_plan() {
 
   auto R_WL7 = math::RollPitchYawd(0, M_PI / 3, 0).ToRotationMatrix();
   const Eigen::Vector3d p_WQ_start(0.60, -0.38 + 0.10, 0.17);
-//  const Eigen::Vector3d delta_xyz(0, -0.22, -0.12);
-  const Eigen::Vector3d delta_xyz(0, 0.15, -0.08);
+  const Eigen::Vector3d delta_xyz(0, -0.22, -0.12);
+//  const Eigen::Vector3d delta_xyz(0, 0.15, -0.08);
   Eigen::VectorXd q_initial_guess(nq);
   q_initial_guess << -0.5095, 1.1356, -0.0800, -1.4893, -0.3389, 1.2274,
       -0.3360;

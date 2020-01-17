@@ -6,7 +6,6 @@
 
 #include "drake/common/trajectories/piecewise_polynomial.h"
 #include "drake/common/trajectories/piecewise_quaternion.h"
-#include "drake/manipulation/robot_plan_runner/robot_plans/contact_force_estimator.h"
 
 namespace drake {
 namespace manipulation {
@@ -87,6 +86,13 @@ struct PlanData {
 
   // Returns the duration of this plan.
   double get_duration() const;
+};
+
+struct ContactInfo {
+  ContactInfo() = default;
+  int num_contacts{0};
+  std::vector<int> contact_link_idx{};
+  std::vector<Eigen::Vector3d> positions{};
 };
 
 /*

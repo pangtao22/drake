@@ -60,18 +60,37 @@ Eigen::Vector3d ContactForceEstimator::UpdateContactForce(
   Eigen::Vector3d f_contact_new;
   if (contact_info.num_contacts == 1) {
     f_contact_new = this->EstimateContactForce(contact_info, q, tau_external);
+//    has_received_nonzero_contact_info_ = true;
+//    last_active_contact_link_idx_ = contact_info.contact_link_idx[0];
+//    last_active_contact_point_ = contact_info.positions[0];
   } else {
     f_contact_new.setZero();
+//    has_received_nonzero_contact_info_ = false;
   }
 
   lpf_->Update(f_contact_new);
   return lpf_->get_current_x();
 }
 
-Eigen::RowVectorXd ContactForceEstimator::CalcContactJacobian() {
+Eigen::RowVectorXd ContactForceEstimator::CalcContactJacobian(
+    const Eigen::Ref<const Eigen::VectorXd>&) {
   Eigen::Vector3d f = lpf_->get_current_x();
   auto f_norm = f.norm();
   Eigen::Vector3d contact_normal = f / f_norm;
+
+//  if (!has_received_nonzero_contact_info_) {
+//    // If no new contact info has been received, use the new joint angles and
+//    // the last active contact point to compute the contact Jacobian.
+//    plant_->SetPositions(plant_context_.get(), robot_model_, q);
+//    plant_->CalcJacobianSpatialVelocity(
+//        *plant_context_, multibody::JacobianWrtVariable::kQDot,
+//        plant_->get_frame(robot_frames_idx_[last_active_contact_link_idx_]),
+//        last_active_contact_point_,
+//        plant_->world_frame(), plant_->world_frame(), &Jv_WLc_W_);
+//    std::cout << "recompute jacobian" << std::endl;
+//  }
+
+
   return contact_normal.transpose() * Jv_WLc_W_.bottomRows(3);
 }
 

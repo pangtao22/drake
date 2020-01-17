@@ -56,7 +56,7 @@ void JointSpacePlanContact::Step(
 
   if (f_norm > f_norm_threshold) {
     const Eigen::RowVectorXd J_u =
-        contact_force_estimator_->CalcContactJacobian();
+        contact_force_estimator_->CalcContactJacobian(q);
     const double dx_along_f = (J_u * dq_ref)[0];
 
     // saturate the norm of dq_ref.

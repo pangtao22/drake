@@ -102,7 +102,7 @@ PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
   }
 
   diagram_ = builder.Build();
-};
+}
 
 void PlanRunnerHardwareInterface::SaveGraphvizStringToFile(
     const std::string& file_name) {

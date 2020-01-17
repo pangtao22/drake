@@ -1,6 +1,7 @@
 #pragma once
 
-#include "drake/manipulation/robot_plan_runner/robot_plans/contact_force_estimator.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/plan_utilities.h"
 #include "drake/systems/framework/leaf_system.h"
 #include "drake/systems/primitives/signal_logger.h"
 
