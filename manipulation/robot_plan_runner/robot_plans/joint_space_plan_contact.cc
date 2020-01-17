@@ -95,9 +95,12 @@ void JointSpacePlanContact::Step(
     Eigen::VectorXd J_nc_pinv = J_u.transpose() / std::pow(J_u.norm(), 2);
     SetSmallValuesToZero(&J_nc_pinv, 1e-13);
 
-    prog->AddLinearEqualityConstraint(
-        (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
-        dq);
+    //    prog->AddLinearEqualityConstraint(
+    //        (J_nc_pinv.array() * joint_stiffness_).matrix().transpose(),
+    //        -f_desired, dq);
+    prog->AddLinearConstraint(
+        -(J_nc_pinv.array() * joint_stiffness_).matrix().transpose(),
+        -std::numeric_limits<double>::infinity(), f_desired, dq);
     prog->AddLinearConstraint(J_u / control_period,
                               -std::numeric_limits<double>::infinity(), 0, dq);
   }
