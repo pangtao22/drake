@@ -114,13 +114,12 @@ void TaskSpacePlanContact::Step(
         J_u.transpose() / std::pow(J_u.norm(), 2);
 
     const double f_desired = f_norm_threshold * 1.5;
-    prog->AddLinearEqualityConstraint(
-        (J_u_pinv.array() * joint_stiffness_).matrix().transpose(), -f_desired,
-        dq);
+    prog->AddLinearConstraint(
+        -(J_u_pinv.array() * joint_stiffness_).matrix().transpose(),
+        -std::numeric_limits<double>::infinity(), f_desired, dq);
 
     prog->AddLinearConstraint(J_u / control_period,
                               -std::numeric_limits<double>::infinity(), 0, dq);
-//    prog->AddLinearEqualityConstraint(J_u / control_period, 0, dq);
   }
   // tracking error cost
   prog->AddL2NormCost(Jt / control_period, x_dot_desired_, dq);
