@@ -10,6 +10,7 @@
 #include "drake/systems/analysis/simulator.h"
 #include "drake/systems/lcm/lcm_interface_system.h"
 #include "drake/systems/lcm/lcm_publisher_system.h"
+#include "drake/systems/lcm/connect_lcm_scope.h"
 #include "drake/systems/primitives/zero_order_hold.h"
 
 namespace drake {
@@ -99,6 +100,17 @@ PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
     logger_contact_position_ = systems::LogOutput(
         contact_info_translator->GetOutputPort("contact_position"), &builder);
     logger_contact_position_->set_publish_period(0.005);
+
+
+    systems::lcm::ConnectLcmScope(
+        contact_info_translator->GetOutputPort("num_contacts"),
+        "NUM_CONTACTS", &builder, owned_lcm_.get());
+    systems::lcm::ConnectLcmScope(
+        contact_info_translator->GetOutputPort("contact_link"),
+        "CONTACT_LINK", &builder, owned_lcm_.get());
+    systems::lcm::ConnectLcmScope(
+        contact_info_translator->GetOutputPort("contact_position"),
+        "CONTACT_POSITION", &builder, owned_lcm_.get());
   }
 
   diagram_ = builder.Build();
