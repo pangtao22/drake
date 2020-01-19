@@ -88,7 +88,7 @@ PiecewisePolynomial<double> CalcIiwaTrajectory(
 
 int run_plan() {
   // Get a joint space trajecotry by solving IK.
-  auto plant = std::make_unique<multibody::MultibodyPlant<double>>();
+  auto plant = std::make_unique<multibody::MultibodyPlant<double>>(1e-3);
   manipulation::robot_plan_runner::robot_plans::SetupIiwaControllerPlant(
       plant.get());
   const int nq = plant->num_positions();

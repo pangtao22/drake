@@ -4,7 +4,12 @@
 #include "drake/common/trajectories/piecewise_polynomial.h"
 #include "drake/manipulation/robot_plan_runner/plan_runner_hardware_interface.h"
 #include "drake/manipulation/robot_plan_runner/robot_plans/plan_base.h"
+#include "drake/manipulation/robot_plan_runner/robot_plans/plan_utilities.h"
 #include "drake/math/roll_pitch_yaw.h"
+#include "drake/math/rotation_matrix.h"
+#include "drake/multibody/inverse_kinematics/inverse_kinematics.h"
+#include "drake/solvers/snopt_solver.h"
+#include "drake/solvers/solve.h"
 
 namespace drake {
 namespace {
@@ -15,6 +20,63 @@ using math::RollPitchYawd;
 using std::cout;
 using std::endl;
 using std::vector;
+using trajectories::PiecewisePolynomial;
+
+Eigen::VectorXd CalcInitialJointAngles() {
+  auto plant = std::make_unique<multibody::MultibodyPlant<double>>(1e-3);
+  manipulation::robot_plan_runner::robot_plans::SetupIiwaControllerPlant(
+      plant.get());
+
+  const int nq = 7;  // number of joints.
+  const double theta_bound = 0.001;
+  const double position_tolerance = 0.0001;
+
+  const Eigen::Vector3d p_WQ_start(0.30, -0.38 - 0.058, 0);
+  const double yaw_angle = -M_PI / 16;
+  const auto R_WL6 =
+      math::RollPitchYawd(0, -M_PI, yaw_angle).ToRotationMatrix();
+  Eigen::VectorXd q_initial_guess(nq);
+  q_initial_guess << -64.78, 84.36, 17.12, -69.87, -38.88, 33.77, -116.53;
+  q_initial_guess *= M_PI / 180;  // convert to radians.
+  const Eigen::Vector3d p_L7oQ_L7(0, 0, 0.1);
+
+  const auto& l6_frame = plant->GetFrameByName("iiwa_link_6");
+  const auto& l7_frame = plant->GetFrameByName("iiwa_link_7");
+
+  auto context = plant->CreateDefaultContext();
+  const auto X_WL6_0 =
+      plant->CalcRelativeTransform(*context, plant->world_frame(), l6_frame);
+  const auto X_L6W_0 = X_WL6_0.inverse();
+
+  Eigen::VectorXd q0(nq);
+
+  auto solver = std::make_unique<solvers::SnoptSolver>();
+  auto result = std::make_unique<solvers::MathematicalProgramResult>();
+
+  multibody::InverseKinematics ik(*plant);
+
+  ik.AddOrientationConstraint(plant->world_frame(), R_WL6, l6_frame,
+                              X_L6W_0.rotation(), theta_bound);
+
+  ik.AddPositionConstraint(
+      l7_frame, p_L7oQ_L7, plant->world_frame(),
+      p_WQ_start - Eigen::Vector3d::Ones() * position_tolerance,
+      p_WQ_start + Eigen::Vector3d::Ones() * position_tolerance);
+
+  ik.get_mutable_prog()->AddLinearConstraint(ik.q()[6] ==
+                                             -M_PI / 2 + yaw_angle);
+
+  ik.get_mutable_prog()->SetInitialGuess(ik.q(), q_initial_guess);
+
+  solver->Solve(ik.prog(), {}, {}, result.get());
+  DRAKE_THROW_UNLESS(result->is_success());
+
+  q0 = result->GetSolution(ik.q());
+
+  // Print q_knots1 to the screen and write it to a file.
+  cout << q0 << endl;
+  return q0;
+}
 
 int run_plan() {
   Eigen::VectorXd q0(7);
@@ -34,16 +96,16 @@ int run_plan() {
   //  xyz_knots.col(1) = (xyz_knots.col(0) + xyz_knots.col(2)) / 2;
 
   // reaching into bin
-  q0 << -1.48595109, 1.25825224, 0.7347296, -1.60280037, -1.15394412,
-      0.77650079, -1.76714587;
+  q0 << CalcInitialJointAngles();
   auto Q_WT = math::RollPitchYawd(M_PI, 0, -M_PI / 2).ToQuaternion();
 
   Eigen::VectorXd t_knots1(4);
-  t_knots1 << 0, 10, 13, 23;
+  const double one_way_time = 3;
+  t_knots1 << 0, one_way_time, one_way_time + 3, 2 * one_way_time + 3;
   Eigen::MatrixXd xyz_knots(3, 4);
   xyz_knots.col(0) << 0, 0, 0;
-  xyz_knots.col(1) << 0, 0, -0.25;
-  xyz_knots.col(2) << 0, 0, -0.25;
+  xyz_knots.col(1) << 0, 0, -0.22;
+  xyz_knots.col(2) << 0, 0, -0.22;
   xyz_knots.col(3) << 0, 0, 0;
 
   // create plan

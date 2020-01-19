@@ -25,7 +25,7 @@ TaskSpacePlanContact::TaskSpacePlanContact()
 
   dq_weight_.resize(num_positions_, num_positions_);
   dq_weight_.setZero();
-  dq_weight_.diagonal() << 5, 4, 3, 3, 2, 2, 1;
+  dq_weight_.diagonal() << 5, 5, 3, 3, 2, 2, 1;
 
   prog_result_ = std::make_unique<solvers::MathematicalProgramResult>();
 }
