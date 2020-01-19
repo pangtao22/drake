@@ -89,17 +89,17 @@ PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
     builder.Connect(contact_location_estimator->GetOutputPort("contact_info"),
                     contact_info_translator->GetInputPort("contact_info"));
 
-    logger_num_contacts_ = systems::LogOutput(
-        contact_info_translator->GetOutputPort("num_contacts"), &builder);
-    logger_num_contacts_->set_publish_period(0.005);
-
-    logger_contact_link_ = systems::LogOutput(
-        contact_info_translator->GetOutputPort("contact_link"), &builder);
-    logger_contact_link_->set_publish_period(0.005);
-
-    logger_contact_position_ = systems::LogOutput(
-        contact_info_translator->GetOutputPort("contact_position"), &builder);
-    logger_contact_position_->set_publish_period(0.005);
+//    logger_num_contacts_ = systems::LogOutput(
+//        contact_info_translator->GetOutputPort("num_contacts"), &builder);
+//    logger_num_contacts_->set_publish_period(0.005);
+//
+//    logger_contact_link_ = systems::LogOutput(
+//        contact_info_translator->GetOutputPort("contact_link"), &builder);
+//    logger_contact_link_->set_publish_period(0.005);
+//
+//    logger_contact_position_ = systems::LogOutput(
+//        contact_info_translator->GetOutputPort("contact_position"), &builder);
+//    logger_contact_position_->set_publish_period(0.005);
 
 
     systems::lcm::ConnectLcmScope(
@@ -180,12 +180,12 @@ void PlanRunnerHardwareInterface::Run(double realtime_rate) {
   simulator.AdvanceTo(t_total);
 //    simulator.AdvanceTo(10.0);
 
-  if (listen_to_contact_info_) {
-    // Save logs to disk.
-    SaveLogToFile(logger_num_contacts_, "num_contacts");
-    SaveLogToFile(logger_contact_link_, "contact_link");
-    SaveLogToFile(logger_contact_position_, "contact_position");
-  }
+//  if (listen_to_contact_info_) {
+//    // Save logs to disk.
+//    SaveLogToFile(logger_num_contacts_, "num_contacts");
+//    SaveLogToFile(logger_contact_link_, "contact_link");
+//    SaveLogToFile(logger_contact_position_, "contact_position");
+//  }
 }
 
 void WaitForNewMessage(drake::lcm::DrakeLcmInterface* const lcm_ptr,

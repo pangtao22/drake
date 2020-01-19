@@ -50,9 +50,9 @@ class PlanRunnerHardwareInterface {
   robot_plan_runner::RobotPlanRunner* plan_runner_{nullptr};
 
   // loggers for contact_info
-  systems::SignalLogger<double>* logger_num_contacts_{nullptr};
-  systems::SignalLogger<double>* logger_contact_link_{nullptr};
-  systems::SignalLogger<double>* logger_contact_position_{nullptr};
+//  systems::SignalLogger<double>* logger_num_contacts_{nullptr};
+//  systems::SignalLogger<double>* logger_contact_link_{nullptr};
+//  systems::SignalLogger<double>* logger_contact_position_{nullptr};
 
   const bool listen_to_contact_info_;
 };
