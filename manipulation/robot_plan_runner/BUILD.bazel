@@ -151,6 +151,16 @@ drake_cc_binary(
 )
 
 drake_cc_binary(
+    name = "run_task_space_plan_contact_plate_pickup_hardware",
+    srcs = ["run_task_space_plan_contact_plate_pickup_hardware.cc"],
+    deps = [
+        ":plan_runner_hardware_interface",
+        "//math",
+        "//multibody/inverse_kinematics",
+    ],
+)
+
+drake_cc_binary(
     name = "run_task_space_plan_contact_hardware",
     srcs = ["run_task_space_plan_contact_hardware.cc"],
     deps = [
