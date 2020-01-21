@@ -90,11 +90,11 @@ int run_plan() {
   vector<Eigen::Quaterniond> quaternions{
     math::RollPitchYawd(2.58, 0, -M_PI / 2).ToQuaternion(),
     math::RollPitchYawd(2.58, 0, -M_PI / 2).ToQuaternion(),
-    math::RollPitchYawd(2.12, 0, -M_PI / 2).ToQuaternion(),
-    math::RollPitchYawd(2.12, 0, -M_PI / 2).ToQuaternion(),
-    math::RollPitchYawd(2.09, 0, -M_PI / 2).ToQuaternion()};
+    math::RollPitchYawd(2.18, 0, -M_PI / 2).ToQuaternion(),
+    math::RollPitchYawd(2.18, 0, -M_PI / 2).ToQuaternion(),
+    math::RollPitchYawd(2.18, 0, -M_PI / 2).ToQuaternion()};
 
-  vector<double> t_knots1{0, 3, 8, 10, 16};
+  vector<double> t_knots1{0, 3, 8, 9, 15};
 
   Eigen::MatrixXd xyz_knots(3, 5);
   xyz_knots.col(0) << 0, 0, 0;
@@ -123,8 +123,8 @@ int run_plan() {
   // Construct plan runner hardware interface.
   vector<PlanData> plan_list{plan0, plan1};
   auto plan_runner =
-      manipulation::robot_plan_runner::PlanRunnerHardwareInterface(plan_list,
-                                                                   true);
+      manipulation::robot_plan_runner::PlanRunnerHardwareInterface(
+          plan_list, true, true);
   plan_runner.SaveGraphvizStringToFile();
 
   // Run simulation.

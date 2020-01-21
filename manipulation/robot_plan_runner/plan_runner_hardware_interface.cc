@@ -2,15 +2,17 @@
 
 #include "drake/lcmt_contact_info.hpp"
 #include "drake/lcmt_iiwa_command.hpp"
+#include "drake/lcmt_schunk_wsg_command.hpp"
 #include "drake/manipulation/kuka_iiwa/iiwa_command_sender.h"
 #include "drake/manipulation/kuka_iiwa/iiwa_status_receiver.h"
 #include "drake/manipulation/robot_plan_runner/contact_location_estimator.h"
 #include "drake/manipulation/robot_plan_runner/plan_runner_hardware_interface.h"
 #include "drake/manipulation/robot_plan_runner/robot_plan_runner.h"
+#include "drake/manipulation/robot_plan_runner/schunk_command_sender.h"
 #include "drake/systems/analysis/simulator.h"
+#include "drake/systems/lcm/connect_lcm_scope.h"
 #include "drake/systems/lcm/lcm_interface_system.h"
 #include "drake/systems/lcm/lcm_publisher_system.h"
-#include "drake/systems/lcm/connect_lcm_scope.h"
 #include "drake/systems/primitives/zero_order_hold.h"
 
 namespace drake {
@@ -22,9 +24,11 @@ using std::cout;
 using std::endl;
 
 PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
-    const std::vector<PlanData>& plan_list, bool listen_to_contact_info)
+    const std::vector<PlanData>& plan_list, bool listen_to_contact_info,
+    bool control_gripper)
     : owned_lcm_(new lcm::DrakeLcm()),
-      listen_to_contact_info_(listen_to_contact_info) {
+      listen_to_contact_info_(listen_to_contact_info),
+      control_gripper_(control_gripper) {
   // create diagram system.
   systems::DiagramBuilder<double> builder;
 
@@ -89,28 +93,28 @@ PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
     builder.Connect(contact_location_estimator->GetOutputPort("contact_info"),
                     contact_info_translator->GetInputPort("contact_info"));
 
-//    logger_num_contacts_ = systems::LogOutput(
-//        contact_info_translator->GetOutputPort("num_contacts"), &builder);
-//    logger_num_contacts_->set_publish_period(0.005);
-//
-//    logger_contact_link_ = systems::LogOutput(
-//        contact_info_translator->GetOutputPort("contact_link"), &builder);
-//    logger_contact_link_->set_publish_period(0.005);
-//
-//    logger_contact_position_ = systems::LogOutput(
-//        contact_info_translator->GetOutputPort("contact_position"), &builder);
-//    logger_contact_position_->set_publish_period(0.005);
-
-
+    // Log frequency is hardcoded in ConnectLcmScope.
     systems::lcm::ConnectLcmScope(
-        contact_info_translator->GetOutputPort("num_contacts"),
-        "NUM_CONTACTS", &builder, owned_lcm_.get());
+        contact_info_translator->GetOutputPort("num_contacts"), "NUM_CONTACTS",
+        &builder, owned_lcm_.get());
     systems::lcm::ConnectLcmScope(
-        contact_info_translator->GetOutputPort("contact_link"),
-        "CONTACT_LINK", &builder, owned_lcm_.get());
+        contact_info_translator->GetOutputPort("contact_link"), "CONTACT_LINK",
+        &builder, owned_lcm_.get());
     systems::lcm::ConnectLcmScope(
         contact_info_translator->GetOutputPort("contact_position"),
         "CONTACT_POSITION", &builder, owned_lcm_.get());
+  }
+
+  if (control_gripper) {
+    auto schunk_command_publisher = builder.template AddSystem(
+        systems::lcm::LcmPublisherSystem::Make<drake::lcmt_schunk_wsg_command>(
+            "SCHUNK_WSG_COMMAND", lcm, 0.05));
+    auto schunk_command_sender = builder.template
+        AddSystem<SchunkCommandSender>();
+
+    builder.Connect(
+        schunk_command_sender->GetOutputPort("schunk_command"),
+        schunk_command_publisher->get_input_port());
   }
 
   diagram_ = builder.Build();
@@ -178,14 +182,6 @@ void PlanRunnerHardwareInterface::Run(double realtime_rate) {
   double t_total = plan_sender_->get_all_plans_duration();
   cout << "All plans duration " << t_total << endl;
   simulator.AdvanceTo(t_total);
-//    simulator.AdvanceTo(10.0);
-
-//  if (listen_to_contact_info_) {
-//    // Save logs to disk.
-//    SaveLogToFile(logger_num_contacts_, "num_contacts");
-//    SaveLogToFile(logger_contact_link_, "contact_link");
-//    SaveLogToFile(logger_contact_position_, "contact_position");
-//  }
 }
 
 void WaitForNewMessage(drake::lcm::DrakeLcmInterface* const lcm_ptr,

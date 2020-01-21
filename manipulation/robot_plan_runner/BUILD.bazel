@@ -66,6 +66,7 @@ drake_cc_library(
         ":contact_location_estimator",
         ":plan_sender",
         ":robot_plan_runner",
+        ":schunk_command_sender",
         "//lcm",
         "//lcmtypes:lcmtypes_drake_cc",
         "//manipulation/kuka_iiwa",
@@ -88,6 +89,17 @@ drake_cc_library(
         "//manipulation/robot_plan_runner/robot_plans:plan_utilities",
         "//systems/framework",
         "//systems/primitives",
+    ],
+)
+
+drake_cc_library(
+    name = "schunk_command_sender",
+    srcs = ["schunk_command_sender.cc"],
+    hdrs = ["schunk_command_sender.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//lcmtypes:lcmtypes_drake_cc",
+        "//systems/framework",
     ],
 )
 
