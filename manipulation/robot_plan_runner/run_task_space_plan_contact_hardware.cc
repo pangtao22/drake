@@ -31,14 +31,14 @@ Eigen::VectorXd CalcInitialJointAngles() {
   const double theta_bound = 0.001;
   const double position_tolerance = 0.0001;
 
-  const Eigen::Vector3d p_WQ_start(0.30, -0.38 - 0.058, 0);
-  const double yaw_angle = -M_PI / 16;
+  const Eigen::Vector3d p_WQ_start(0.30, -0.38 - 0.1, -0.1);
+  const double yaw_angle = 0;
   const auto R_WL6 =
-      math::RollPitchYawd(0, -M_PI, yaw_angle).ToRotationMatrix();
+      math::RollPitchYawd(M_PI/18, -M_PI, yaw_angle).ToRotationMatrix();
   Eigen::VectorXd q_initial_guess(nq);
   q_initial_guess << -64.78, 84.36, 17.12, -69.87, -38.88, 33.77, -116.53;
   q_initial_guess *= M_PI / 180;  // convert to radians.
-  const Eigen::Vector3d p_L7oQ_L7(0, 0, 0.1);
+  const Eigen::Vector3d p_L7oQ_L7(0, 0, 0.2);
 
   const auto& l6_frame = plant->GetFrameByName("iiwa_link_6");
   const auto& l7_frame = plant->GetFrameByName("iiwa_link_7");
@@ -97,16 +97,19 @@ int run_plan() {
 
   // reaching into bin
   q0 << CalcInitialJointAngles();
-  auto Q_WT = math::RollPitchYawd(M_PI, 0, -M_PI / 2).ToQuaternion();
+  auto Q_WT = math::RollPitchYawd(M_PI, -M_PI/18, -M_PI / 2).ToQuaternion();
 
   Eigen::VectorXd t_knots1(4);
-  const double one_way_time = 3;
-  t_knots1 << 0, one_way_time, one_way_time + 3, 2 * one_way_time + 3;
+  const double one_way_time = 4;
+  t_knots1 << 0, one_way_time, one_way_time + 2, 2 * one_way_time + 2;
   Eigen::MatrixXd xyz_knots(3, 4);
   xyz_knots.col(0) << 0, 0, 0;
   xyz_knots.col(1) << 0, 0, -0.22;
   xyz_knots.col(2) << 0, 0, -0.22;
   xyz_knots.col(3) << 0, 0, 0;
+
+  Eigen::MatrixXd xyz_dot_knots(3, 4);
+  xyz_dot_knots.setZero();
 
   // create plan
   // plan0 goes to the starting pose of the contact-aware plan.
@@ -129,10 +132,10 @@ int run_plan() {
   plan1.plan_type = PlanType::kTaskSpacePlanContact;
 
   PlanData::EeData ee_data;
-  ee_data.p_ToQ_T << 0, 0, 0.10;
+  ee_data.p_ToQ_T << 0, 0, 0.2;
   ee_data.ee_xyz_traj =
-      trajectories::PiecewisePolynomial<double>::FirstOrderHold(t_knots1,
-                                                                xyz_knots);
+      trajectories::PiecewisePolynomial<double>::Cubic(t_knots1,
+          xyz_knots, xyz_dot_knots);
   ee_data.ee_xyz_dot_traj = ee_data.ee_xyz_traj.derivative(1);
 
   vector<double> t_knots_v{0, duration / 2, duration};
@@ -146,7 +149,7 @@ int run_plan() {
   // Construct plan runner hardware interface.
   auto plan_runner =
       manipulation::robot_plan_runner::PlanRunnerHardwareInterface(plan_list,
-                                                                   true);
+                                                                   true, true);
   plan_runner.SaveGraphvizStringToFile();
 
   // Run simulation.

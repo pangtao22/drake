@@ -33,7 +33,7 @@ Eigen::VectorXd CalcInitialJointAngles() {
   const double theta_bound = 0.001;
   const double position_tolerance = 0.0001;
 
-  const Eigen::Vector3d p_WQ_start(0.250, -0.542, 0.195);
+  const Eigen::Vector3d p_WQ_start(0.247, -0.542, 0.195);
   const auto R_WL7 =
       math::RollPitchYawd(2.58, 0, -M_PI / 2).ToRotationMatrix();
 

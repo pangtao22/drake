@@ -103,7 +103,7 @@ void TaskSpacePlanContact::Step(
       Eigen::VectorXd::Zero(num_positions_), dq);
 
   // Deal with contact.
-  const double f_norm_threshold = 10;
+  const double f_norm_threshold = 1e6;
   const double f_norm = f_contact.norm();
 
   if (f_norm > f_norm_threshold) {
