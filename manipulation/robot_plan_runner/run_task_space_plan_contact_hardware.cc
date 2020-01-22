@@ -87,7 +87,8 @@ int run_plan() {
   //  auto Q_WT = math::RollPitchYawd(0, M_PI * 1.25, 0).ToQuaternion();
 
   //  // Link 6 making contact with table, the one in the 1st draft of the
-  //  paper. q0 << -0.965894, 1.41052, 0.548241, -1.46713, -0.973198, -1.49595,
+  //  paper.
+  //  q0 << -0.965894, 1.41052, 0.548241, -1.46713, -0.973198, -1.49595,
   //  -0.0991943; auto Q_WT = math::RollPitchYawd(0, M_PI / 3,
   //  0).ToQuaternion(); Eigen::Vector3d t_knots1(0, duration / 2, duration);
   //  Eigen::MatrixXd xyz_knots(3, 3);
