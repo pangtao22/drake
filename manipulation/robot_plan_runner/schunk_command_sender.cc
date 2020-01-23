@@ -10,10 +10,10 @@ SchunkCommandSender::SchunkCommandSender() {
   this->DeclareAbstractOutputPort("schunk_command",
                                   &SchunkCommandSender::CalcOutput);
 
-//  t_knots_ = {0, 9 + 10, 1e6};
-//  gripper_setpoints_ = {30, 12};
-  t_knots_ = {0, 9 + 5, 1e6};
-  gripper_setpoints_ = {2, 20};
+  t_knots_ = {0, 9 + 8, 1e6};
+  gripper_setpoints_ = {25, 5};
+//  t_knots_ = {0, 9 + 5, 1e6};
+//  gripper_setpoints_ = {2, 20};
   current_setpoint_index_ = 0;
   DRAKE_THROW_UNLESS(t_knots_.size() == gripper_setpoints_.size() + 1);
 }

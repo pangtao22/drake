@@ -33,9 +33,9 @@ Eigen::VectorXd CalcInitialJointAngles() {
   const double theta_bound = 0.001;
   const double position_tolerance = 0.0001;
 
-  const Eigen::Vector3d p_WQ_start(0.247, -0.542, 0.195);
+  const Eigen::Vector3d p_WQ_start(0.20, -0.55, 0.22);
   const auto R_WL7 =
-      math::RollPitchYawd(2.58, 0, -M_PI / 2).ToRotationMatrix();
+      math::RollPitchYawd(0, -2.58, 0).ToRotationMatrix();
 
   Eigen::VectorXd q_initial_guess(nq);
   q_initial_guess << -1.43, 1.13, 0.79, -1.30, -1.17, 1.60, -2.05;
@@ -88,11 +88,11 @@ int run_plan() {
 
   // plan1 runs contact-aware plan.
   vector<Eigen::Quaterniond> quaternions{
-    math::RollPitchYawd(2.58, 0, -M_PI / 2).ToQuaternion(),
-    math::RollPitchYawd(2.58, 0, -M_PI / 2).ToQuaternion(),
-    math::RollPitchYawd(2.18, 0, -M_PI / 2).ToQuaternion(),
-    math::RollPitchYawd(2.18, 0, -M_PI / 2).ToQuaternion(),
-    math::RollPitchYawd(2.18, 0, -M_PI / 2).ToQuaternion()};
+    math::RollPitchYawd(0, -2.58, 0).ToQuaternion(),
+    math::RollPitchYawd(0, -2.58, 0).ToQuaternion(),
+    math::RollPitchYawd(0, -2.05, 0).ToQuaternion(),
+    math::RollPitchYawd(0, -2.05, 0).ToQuaternion(),
+    math::RollPitchYawd(0, -2.05, 0).ToQuaternion()};
 
   vector<double> t_knots1{0, 3, 8, 9, 15};
 
@@ -101,7 +101,7 @@ int run_plan() {
   xyz_knots.col(1) << 0, 0, -0.25;
   xyz_knots.col(2) << 0, 0, -0.25;
   xyz_knots.col(3) << 0, 0, -0.25;
-  xyz_knots.col(4) << 0, 0, 0;
+  xyz_knots.col(4) << 0.12, 0, 0;
 
   Eigen::MatrixXd xyz_dot_knots(3, 5);
   xyz_dot_knots.setZero();
