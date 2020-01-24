@@ -94,7 +94,7 @@ int run_plan() {
 
   Eigen::MatrixXd xyz_knots(3, 2);
   xyz_knots.col(0) << 0, 0, 0;
-  xyz_knots.col(1) << 0, 0.05, -0.08;
+  xyz_knots.col(1) << 0, 0.05, -0.25;
 
   Eigen::MatrixXd xyz_dot_knots(3, 2);
   xyz_dot_knots.setZero();
