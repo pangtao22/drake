@@ -27,8 +27,7 @@ PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
     const std::vector<PlanData>& plan_list, bool listen_to_contact_info,
     bool control_gripper)
     : owned_lcm_(new lcm::DrakeLcm()),
-      listen_to_contact_info_(listen_to_contact_info),
-      control_gripper_(control_gripper) {
+      listen_to_contact_info_(listen_to_contact_info) {
   // create diagram system.
   systems::DiagramBuilder<double> builder;
 

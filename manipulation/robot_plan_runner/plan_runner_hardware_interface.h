@@ -56,7 +56,6 @@ class PlanRunnerHardwareInterface {
 //  systems::SignalLogger<double>* logger_contact_position_{nullptr};
 
   const bool listen_to_contact_info_;
-  const bool control_gripper_;
 };
 
 /*
