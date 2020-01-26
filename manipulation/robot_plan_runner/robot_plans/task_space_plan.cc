@@ -37,20 +37,20 @@ void TaskSpacePlan::UpdatePositionError(
   err_xyz_ = p_WoQ_W_ref - p_WoQ_W;
 
   const double err_norm = err_xyz_.norm();
-  if (err_norm > 0.1) {
-    err_xyz_ *= 0.1 / err_norm;
+  if (err_norm > 0.08) {
+    err_xyz_ *= 0.08 / err_norm;
   }
 }
 
 void TaskSpacePlan::UpdateOrientationError(
     double t, const PlanData& plan_data, const Eigen::Quaterniond& Q_WT) const {
   const auto Q_WT_ref = plan_data.ee_data.value().ee_quat_traj.orientation(t);
-//  const AngleAxis<double> orientation_error =
-//      RotationMatrixd(Q_WT.inverse() * Q_WT_ref).ToAngleAxis();
-//  const double angle = std::min(orientation_error.angle(), 0.1);
-//  Q_TTr_ = Quaternion<double>(
-//      AngleAxis<double>(angle, orientation_error.axis()));
-  Q_TTr_ = RotationMatrixd(Q_WT.inverse() * Q_WT_ref).ToQuaternion();
+  const AngleAxis<double> orientation_error =
+      RotationMatrixd(Q_WT.inverse() * Q_WT_ref).ToAngleAxis();
+  const double angle = std::min(orientation_error.angle(), 0.1);
+  Q_TTr_ = Quaternion<double>(
+      AngleAxis<double>(angle, orientation_error.axis()));
+//  Q_TTr_ = RotationMatrixd(Q_WT.inverse() * Q_WT_ref).ToQuaternion();
 }
 
 void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
