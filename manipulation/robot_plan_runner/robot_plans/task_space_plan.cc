@@ -24,7 +24,7 @@ TaskSpacePlan::TaskSpacePlan()
   task_frame_idx_ = plant_->GetFrameByName("iiwa_link_7").index();
   Jv_WTq_W_.resize(6, num_positions_);
   x_dot_desired_.resize(6);
-};
+}
 
 void TaskSpacePlan::UpdatePositionError(
     double t, const PlanData& plan_data,
@@ -35,13 +35,23 @@ void TaskSpacePlan::UpdatePositionError(
   const auto p_WoQ_W_ref =
       plan_data.ee_data.value().ee_xyz_traj.value(t) + *p_WoQ_W_t0_;
   err_xyz_ = p_WoQ_W_ref - p_WoQ_W;
-};
+
+  const double err_norm = err_xyz_.norm();
+  if (err_norm > 0.1) {
+    err_xyz_ *= 0.1 / err_norm;
+  }
+}
 
 void TaskSpacePlan::UpdateOrientationError(
     double t, const PlanData& plan_data, const Eigen::Quaterniond& Q_WT) const {
   const auto Q_WT_ref = plan_data.ee_data.value().ee_quat_traj.orientation(t);
+//  const AngleAxis<double> orientation_error =
+//      RotationMatrixd(Q_WT.inverse() * Q_WT_ref).ToAngleAxis();
+//  const double angle = std::min(orientation_error.angle(), 0.1);
+//  Q_TTr_ = Quaternion<double>(
+//      AngleAxis<double>(angle, orientation_error.axis()));
   Q_TTr_ = RotationMatrixd(Q_WT.inverse() * Q_WT_ref).ToQuaternion();
-};
+}
 
 void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
                          const Eigen::Ref<const Eigen::VectorXd>& v,
@@ -86,7 +96,7 @@ void TaskSpacePlan::Step(const Eigen::Ref<const Eigen::VectorXd>& q,
   const Eigen::VectorXd q_dot_desired = svd.solve(x_dot_desired_);
   *q_cmd = q + q_dot_desired * control_period;
   *tau_cmd = Eigen::VectorXd::Zero(num_positions_);
-};
+}
 
 }  // namespace robot_plans
 }  // namespace robot_plan_runner
