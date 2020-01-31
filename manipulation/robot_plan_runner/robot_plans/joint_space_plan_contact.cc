@@ -54,7 +54,7 @@ void JointSpacePlanContact::Step(
     f_desired = desired_separation_contact_force_->value(t - t_separation_);
     cout << (t - t_separation_) << " " << f_desired << " ";
 
-    if (f_desired < 0.51 * f_norm_threshold) {
+    if (f_norm < 0.51 * f_norm_threshold) {
       cout << "reset separation force ";
       desired_separation_contact_force_.reset(nullptr);
     }
@@ -95,14 +95,12 @@ void JointSpacePlanContact::Step(
     Eigen::VectorXd J_u_pinv = J_u.transpose() / std::pow(J_u.norm(), 2);
     SetSmallValuesToZero(&J_u_pinv, 1e-13);
 
-    //    prog->AddLinearEqualityConstraint(
-    //        (J_u_pinv.array() * joint_stiffness_).matrix().transpose(),
-    //        -f_desired, dq);
-    prog->AddLinearConstraint(
-        -(J_u_pinv.array() * joint_stiffness_).matrix().transpose(),
-        -std::numeric_limits<double>::infinity(), f_desired, dq);
-    prog->AddLinearConstraint(J_u / control_period,
-                              -std::numeric_limits<double>::infinity(), 0, dq);
+    prog->AddLinearEqualityConstraint(
+        (J_u_pinv.array() * joint_stiffness_).matrix().transpose(),
+        -f_desired, dq);
+//    prog->AddLinearConstraint(
+//        -(J_u_pinv.array() * joint_stiffness_).matrix().transpose(),
+//        -std::numeric_limits<double>::infinity(), f_desired, dq);
   }
   cout << endl;
 

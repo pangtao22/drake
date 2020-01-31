@@ -101,7 +101,7 @@ int run_plan() {
   auto Q_WT = math::RollPitchYawd(M_PI, -M_PI/18, -M_PI / 2).ToQuaternion();
 
   Eigen::VectorXd t_knots1(4);
-  const double one_way_time = 4;
+  const double one_way_time = 2;
   t_knots1 << 0, one_way_time, one_way_time + 2, 2 * one_way_time + 2;
   Eigen::MatrixXd xyz_knots(3, 4);
   xyz_knots.col(0) << 0, 0, 0;
