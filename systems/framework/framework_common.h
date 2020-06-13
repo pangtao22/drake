@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "drake/common/drake_assert.h"
+#include "drake/common/identifier.h"
 #include "drake/common/type_safe_index.h"
 #include "drake/common/value.h"
 
@@ -111,6 +112,9 @@ class SystemBase;
 
 namespace internal {
 
+// Type used to match a Context to its System.
+using SystemId = drake::Identifier<class SystemIdTag>;
+
 // A utility to call the package-private constructor of some framework classes.
 class FrameworkFactory {
  public:
@@ -154,13 +158,9 @@ class SystemMessageInterface {
   // namespace-decorated human-readable name as returned by NiceTypeName.
   virtual std::string GetSystemType() const = 0;
 
-  // Throws an std::logic_error if the given Context is incompatible with
-  // this System. This is likely to be _very_ expensive and should generally be
-  // done only in Debug builds, like this:
-  // @code
-  //    DRAKE_ASSERT_VOID(ThrowIfContextNotCompatible(context));
-  // @endcode
-  virtual void ThrowIfContextNotCompatible(const ContextBase&) const = 0;
+  // Checks whether the given context was created for this system.
+  // See SystemBase::ValidateContext for full documentation.
+  virtual void ValidateContext(const ContextBase& context) const = 0;
 
   // Use this string as a stand-in name for an unnamed System. This is not
   // a default name, just an indicator that there is no name. This is a policy
@@ -270,19 +270,20 @@ enum BuiltInTicketNumbers {
   kPnTicket             = 10,  // All numeric parameters.
   kPaTicket             = 11,  // All abstract parameters.
   kAllParametersTicket  = 12,  // All parameters p = {pn, pa}.
-  kAllInputPortsTicket  = 13,  // All input ports u.
-  kAllSourcesTicket     = 14,  // All of the above.
-  kConfigurationTicket  = 15,  // All values that may affect configuration.
-  kKinematicsTicket     = 16,  // Configuration plus velocity-affecting values.
+  kAllSourcesExceptInputPortsTicket = 13,  // Everything except input ports.
+  kAllInputPortsTicket  = 14,  // All input ports u.
+  kAllSourcesTicket     = 15,  // All of the above.
+  kConfigurationTicket  = 16,  // All values that may affect configuration.
+  kKinematicsTicket     = 17,  // Configuration plus velocity-affecting values.
   kLastSourceTicket     = kKinematicsTicket,  // (Used in testing.)
 
   // The rest of these are pre-defined computations with associated cache
   // entries.
-  kXcdotTicket          = 17,  // d/dt xc = {qdot, vdot, zdot}.
-  kPeTicket             = 18,  // Potential energy.
-  kKeTicket             = 19,  // Kinetic energy.
-  kPcTicket             = 20,  // Conservative power.
-  kPncTicket            = 21,  // Non-conservative power.
+  kXcdotTicket          = 18,  // d/dt xc = {qdot, vdot, zdot}.
+  kPeTicket             = 19,  // Potential energy.
+  kKeTicket             = 20,  // Kinetic energy.
+  kPcTicket             = 21,  // Conservative power.
+  kPncTicket            = 22,  // Non-conservative power.
 
   kNextAvailableTicket  = kPncTicket+1
 };

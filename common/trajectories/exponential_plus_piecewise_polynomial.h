@@ -15,6 +15,8 @@ namespace trajectories {
 
 /**
  * y(t) = K * exp(A * (t - t_j)) * alpha.col(j) + piecewise_polynomial_part(t)
+ *
+ * @tparam_double_only
  */
 template <typename T>
 class ExponentialPlusPiecewisePolynomial final
@@ -54,14 +56,9 @@ class ExponentialPlusPiecewisePolynomial final
 
   std::unique_ptr<Trajectory<T>> Clone() const override;
 
-  MatrixX<T> value(double t) const override;
+  MatrixX<T> value(const T& t) const override;
 
   ExponentialPlusPiecewisePolynomial derivative(int derivative_order = 1) const;
-
-  std::unique_ptr<Trajectory<T>> MakeDerivative(
-      int derivative_order = 1) const override {
-    return derivative(derivative_order).Clone();
-  };
 
   Eigen::Index rows() const override;
 
@@ -70,6 +67,11 @@ class ExponentialPlusPiecewisePolynomial final
   void shiftRight(double offset);
 
  private:
+  std::unique_ptr<Trajectory<T>> DoMakeDerivative(
+      int derivative_order = 1) const override {
+    return derivative(derivative_order).Clone();
+  };
+
   MatrixX<T> K_;
   MatrixX<T> A_;
   MatrixX<T> alpha_;

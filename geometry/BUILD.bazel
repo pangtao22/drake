@@ -23,11 +23,11 @@ drake_cc_package_library(
         ":geometry_set",
         ":geometry_state",
         ":geometry_visualization",
-        ":identifier",
         ":internal_frame",
         ":internal_geometry",
         ":proximity_engine",
         ":proximity_properties",
+        ":rgba",
         ":scene_graph",
         ":scene_graph_inspector",
         ":shape_specification",
@@ -93,7 +93,7 @@ drake_cc_library(
     name = "geometry_ids",
     srcs = [],
     hdrs = ["geometry_ids.h"],
-    deps = [":identifier"],
+    deps = ["//common:identifier"],
 )
 
 drake_cc_library(
@@ -122,6 +122,7 @@ drake_cc_library(
     srcs = ["geometry_properties.cc"],
     hdrs = ["geometry_properties.h"],
     deps = [
+        ":rgba",
         "//common:essential",
         "//common:value",
         "@fmt",
@@ -169,6 +170,7 @@ drake_cc_library(
     hdrs = ["proximity_properties.h"],
     deps = [
         ":geometry_roles",
+        "//multibody/plant:coulomb_friction",
     ],
 )
 
@@ -197,6 +199,7 @@ drake_cc_library(
 
 drake_cc_library(
     name = "scene_graph_inspector",
+    srcs = ["scene_graph_inspector.cc"],
     hdrs = ["scene_graph_inspector.h"],
     deps = [":geometry_state"],
 )
@@ -245,16 +248,6 @@ drake_cc_library(
 )
 
 drake_cc_library(
-    name = "identifier",
-    srcs = [],
-    hdrs = ["identifier.h"],
-    deps = [
-        "//common:essential",
-        "//common:hash",
-    ],
-)
-
-drake_cc_library(
     name = "shape_specification",
     srcs = ["shape_specification.cc"],
     hdrs = ["shape_specification.h"],
@@ -284,6 +277,15 @@ drake_cc_library(
     ],
 )
 
+drake_cc_library(
+    name = "rgba",
+    srcs = ["rgba.cc"],
+    hdrs = ["rgba.h"],
+    deps = [
+        "//common",
+    ],
+)
+
 # -----------------------------------------------------
 
 filegroup(
@@ -304,6 +306,7 @@ drake_cc_googletest(
         ":proximity_engine",
         ":shape_specification",
         "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_no_throw",
         "//common/test_utilities:expect_throws_message",
         "//math",
     ],
@@ -368,6 +371,7 @@ drake_cc_googletest(
     deps = [
         ":geometry_roles",
         ":proximity_properties",
+        "//common/test_utilities:expect_throws_message",
     ],
 )
 
@@ -395,17 +399,6 @@ drake_cc_googletest(
     name = "geometry_visualization_test",
     deps = [
         ":geometry_visualization",
-        "//common/test_utilities:expect_throws_message",
-    ],
-)
-
-drake_cc_googletest(
-    name = "identifier_test",
-    deps = [
-        ":identifier",
-        "//common:sorted_pair",
-        "//common:unused",
-        "//common/test_utilities:expect_no_throw",
         "//common/test_utilities:expect_throws_message",
     ],
 )
@@ -447,6 +440,14 @@ drake_cc_googletest(
     name = "utilities_test",
     deps = [
         "utilities",
+        "//common/test_utilities",
+    ],
+)
+
+drake_cc_googletest(
+    name = "rgba_test",
+    deps = [
+        ":rgba",
         "//common/test_utilities",
     ],
 )

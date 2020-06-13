@@ -25,7 +25,7 @@ using std::unique_ptr;
 // content of the output VTK files.
 
 // TODO(DamrongGuoy): Use VTK library to read the files for verification.
-//  Rigth now we manually load the files into ParaView for verification.
+//  Right now we manually load the files into ParaView for verification.
 
 GTEST_TEST(MeshToVtkTest, BoxTetrahedra) {
   const Box box(4.0, 4.0, 2.0);
@@ -74,7 +74,7 @@ unique_ptr<ContactSurface<double>> BoxContactSurface() {
   // (2.0, 2.0, 1.0).
   RigidTransformd X_WR(Vector3d{3., 3., 1.});
 
-  return mesh_intersection::ComputeContactSurfaceFromSoftVolumeRigidSurface(
+  return ComputeContactSurfaceFromSoftVolumeRigidSurface(
       GeometryId::get_new_id(), soft_pressure, X_WS,
       GeometryId::get_new_id(), rigid_mesh, X_WR);
 }

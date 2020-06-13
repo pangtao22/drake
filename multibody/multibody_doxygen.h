@@ -1,3 +1,7 @@
+/** @file
+ Doxygen-only documentation for @ref multibody_notation, 
+ @ref multibody_spatial_inertia.  */
+
 // Developers: the subsections here can be linkably referenced from your Doxygen
 // comments using
 //    @ref group_name.
@@ -537,7 +541,7 @@ as follows: <pre>
 There is a rotation matrix in the upper left 3×3 block (see above), and a
 position vector in the first 3×1 elements of the rightmost column. Then the
 bottom row is `[0 0 0 1]`. The rightmost column can also be viewed as the
-homogenous form of the position vector, `[x y z 1]ᵀ`. See Drake's documentation
+homogeneous form of the position vector, `[x y z 1]ᵀ`. See Drake's documentation
 for RigidTransform for a detailed discussion.
 
 A transform may be applied to position vectors to translate the measured-from

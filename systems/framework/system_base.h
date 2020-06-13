@@ -3,9 +3,11 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "drake/common/drake_throw.h"
@@ -72,14 +74,6 @@ class SystemBase : public internal::SystemMessageInterface {
   @see NiceTypeName for more specifics. */
   std::string GetSystemType() const final { return NiceTypeName::Get(*this); }
 
-  /** Throws an exception with an appropriate message if the given `context` is
-  not compatible with this System. Restrictions may vary for different systems;
-  the error message should explain. This can be an expensive check so you may
-  want to limit it to Debug builds. */
-  void ThrowIfContextNotCompatible(const ContextBase& context) const final {
-    CheckValidContext(context);
-  }
-
   /** Returns a Context suitable for use with this System. Context resources
   are allocated based on resource requests that were made during System
   construction. */
@@ -129,6 +123,7 @@ class SystemBase : public internal::SystemMessageInterface {
        System::EvalEigenVectorInput() */
   const AbstractValue* EvalAbstractInput(const ContextBase& context,
                                          int port_index) const {
+    ValidateContext(context);
     if (port_index < 0)
       ThrowNegativePortIndex(__func__, port_index);
     const InputPortIndex port(port_index);
@@ -151,6 +146,7 @@ class SystemBase : public internal::SystemMessageInterface {
   @tparam V The type of data expected. */
   template <typename V>
   const V* EvalInputValue(const ContextBase& context, int port_index) const {
+    ValidateContext(context);
     if (port_index < 0)
       ThrowNegativePortIndex(__func__, port_index);
     const InputPortIndex port(port_index);
@@ -299,8 +295,13 @@ class SystemBase : public internal::SystemMessageInterface {
   @ref drake::systems::ContextBase::DisableCaching "DisableCaching()"
   method, which causes cache values to be recalculated unconditionally. You
   should get identical results with caching enabled or disabled, with speed
-  being the only difference.
-  @see drake::systems::ContextBase::DisableCaching()
+  being the only difference. You can also disable caching for individual
+  cache entries in a Context, or specify that individual cache entries should
+  be disabled by default when they are first allocated.
+  @see ContextBase::DisableCaching()
+  @see CacheEntry::disable_caching()
+  @see CacheEntry::disable_caching_by_default()
+  @see LeafOutputPort::disable_caching_by_default()
 
   <h4>Which signature to use?</h4>
 
@@ -353,12 +354,12 @@ class SystemBase : public internal::SystemMessageInterface {
     Defaults to `{all_sources_ticket()}` if unspecified. If the cache value
     is truly independent of the Context (rare!) say so explicitly by providing
     the list `{nothing_ticket()}`; an explicitly empty list `{}` is forbidden.
-  @returns a const reference to the newly-created %CacheEntry.
+  @returns a reference to the newly-created %CacheEntry.
   @throws std::logic_error if given an explicitly empty prerequisite list. */
   // Arguments to these methods are moved from internally. Taking them by value
   // rather than reference avoids a copy when the original argument is
   // an rvalue.
-  const CacheEntry& DeclareCacheEntry(
+  CacheEntry& DeclareCacheEntry(
       std::string description, CacheEntry::AllocCallback alloc_function,
       CacheEntry::CalcCallback calc_function,
       std::set<DependencyTicket> prerequisites_of_calc = {
@@ -377,7 +378,7 @@ class SystemBase : public internal::SystemMessageInterface {
   for more information about the parameters and behavior.
   @see drake::Value */
   template <class MySystem, class MyContext, typename ValueType>
-  const CacheEntry& DeclareCacheEntry(
+  CacheEntry& DeclareCacheEntry(
       std::string description,
       ValueType (MySystem::*make)() const,
       void (MySystem::*calc)(const MyContext&, ValueType*) const,
@@ -398,7 +399,7 @@ class SystemBase : public internal::SystemMessageInterface {
   above for more information about the parameters and behavior.
   @see drake::Value */
   template <class MySystem, class MyContext, typename ValueType>
-  const CacheEntry& DeclareCacheEntry(
+  CacheEntry& DeclareCacheEntry(
       std::string description, const ValueType& model_value,
       void (MySystem::*calc)(const MyContext&, ValueType*) const,
       std::set<DependencyTicket> prerequisites_of_calc = {
@@ -413,7 +414,7 @@ class SystemBase : public internal::SystemMessageInterface {
   @ref DeclareCacheEntry_model_and_calc "model and calculator signature",
   please look there for more information. */
   template <class MySystem, class MyContext, typename ValueType>
-  const CacheEntry& DeclareCacheEntry(
+  CacheEntry& DeclareCacheEntry(
       std::string description, const ValueType& model_value,
       ValueType (MySystem::*calc)(const MyContext&) const,
       std::set<DependencyTicket> prerequisites_of_calc = {
@@ -442,7 +443,7 @@ class SystemBase : public internal::SystemMessageInterface {
   the `ValueType` default constructor each time it is called.
   @see drake::Value */
   template <class MySystem, class MyContext, typename ValueType>
-  const CacheEntry& DeclareCacheEntry(
+  CacheEntry& DeclareCacheEntry(
       std::string description,
       void (MySystem::*calc)(const MyContext&, ValueType*) const,
       std::set<DependencyTicket> prerequisites_of_calc = {
@@ -457,25 +458,12 @@ class SystemBase : public internal::SystemMessageInterface {
   @ref DeclareCacheEntry_calc_only "calculator-only signature";
   please look there for more information. */
   template <class MySystem, class MyContext, typename ValueType>
-  const CacheEntry& DeclareCacheEntry(
+  CacheEntry& DeclareCacheEntry(
       std::string description,
       ValueType (MySystem::*calc)(const MyContext&) const,
       std::set<DependencyTicket> prerequisites_of_calc = {
           all_sources_ticket()});
   //@}
-
-  /** Checks whether the given context is valid for this System and throws
-  an exception with a helpful message if not. This is *very* expensive and
-  should generally be done only in Debug builds, like this:
-  @code
-     DRAKE_ASSERT_VOID(CheckValidContext(context));
-  @endcode */
-  void CheckValidContext(const ContextBase& context) const {
-    // TODO(sherm1) Add base class checks.
-
-    // Let derived classes have their say.
-    DoCheckValidContext(context);
-  }
 
   //============================================================================
   /** @name                     Dependency tickets
@@ -649,9 +637,31 @@ class SystemBase : public internal::SystemMessageInterface {
   }
 
   /** Returns a ticket indicating dependence on every possible independent
+  source value _except_ input ports. This can be helpful in avoiding the
+  incorrect appearance of algebraic loops in a Diagram (those always involve
+  apparent input port dependencies). For an output port, use this ticket plus
+  tickets for just the input ports on which the output computation _actually_
+  depends. The sources included in this ticket are: time, accuracy, state,
+  and parameters. Note that dependencies on cache entries are _not_ included
+  here. Usually that won't matter since cache entries typically depend on at
+  least one of time, accuracy, state, or parameters so will be invalidated for
+  the same reason the current computation is. However, for a computation that
+  depends on a cache entry that depends only on input ports, be sure that
+  you have included those input ports in the dependency list, or include a
+  direct dependency on the cache entry.
+
+  @see input_port_ticket() to obtain a ticket for an input port.
+  @see cache_entry_ticket() to obtain a ticket for a cache entry.
+  @see all_sources_ticket() to also include all input ports as dependencies. */
+  static DependencyTicket all_sources_except_input_ports_ticket() {
+    return DependencyTicket(internal::kAllSourcesExceptInputPortsTicket);
+  }
+
+  /** Returns a ticket indicating dependence on every possible independent
   source value, including time, accuracy, state, input ports, and parameters
   (but not cache entries). This is the default dependency for computations that
-  have not specified anything more refined.
+  have not specified anything more refined. It is equivalent to the set
+  `{all_sources_except_input_ports_ticket(), all_input_ports_ticket()}`.
   @see cache_entry_ticket() to obtain a ticket for a cache entry. */
   static DependencyTicket all_sources_ticket() {
     return DependencyTicket(internal::kAllSourcesTicket);
@@ -745,32 +755,68 @@ class SystemBase : public internal::SystemMessageInterface {
     DRAKE_DEMAND(0 <= index && index < num_output_ports());
     return output_ports_[index]->ticket();
   }
+  //@}
+
+  /** Returns the number of declared continuous state variables. */
+  int num_continuous_states() const {
+    return context_sizes_.num_generalized_positions +
+           context_sizes_.num_generalized_velocities +
+           context_sizes_.num_misc_continuous_states;
+  }
 
   /** Returns the number of declared discrete state groups (each group is
   a vector-valued discrete state variable). */
   int num_discrete_state_groups() const {
-    return static_cast<int>(discrete_state_tickets_.size());
+    return context_sizes_.num_discrete_state_groups;
   }
 
   /** Returns the number of declared abstract state variables. */
   int num_abstract_states() const {
-    return static_cast<int>(abstract_state_tickets_.size());
+    return context_sizes_.num_abstract_states;
   }
 
   /** Returns the number of declared numeric parameters (each of these is
   a vector-valued parameter). */
   int num_numeric_parameter_groups() const {
-    return static_cast<int>(numeric_parameter_tickets_.size());
+    return context_sizes_.num_numeric_parameter_groups;
   }
 
   /** Returns the number of declared abstract parameters. */
   int num_abstract_parameters() const {
-    return static_cast<int>(abstract_parameter_tickets_.size());
+    return context_sizes_.num_abstract_parameters;
   }
-  //@}
+
+  /** Returns the size of the implicit time derivatives residual vector.
+  By default this is the same as num_continuous_states() but a LeafSystem
+  can change it during construction via
+  LeafSystem::DeclareImplicitTimeDerivativesResidualSize(). */
+  int implicit_time_derivatives_residual_size() const {
+    return implicit_time_derivatives_residual_size_.has_value()
+               ? *implicit_time_derivatives_residual_size_
+               : num_continuous_states();
+  }
+
+  /** Checks whether the given context was created for this system.
+  @note This method is sufficiently fast for performance sensitive code. */
+  void ValidateContext(const ContextBase& context) const final {
+    if (context.get_system_id() != system_id_) {
+      throw std::logic_error(
+          fmt::format("Context was not created for {} system {}; it was "
+                      "created for system {}",
+                      this->GetSystemType(), this->GetSystemPathname(),
+                      context.GetSystemPathname()));
+    }
+  }
+
+  /** Checks whether the given context was created for this system.
+  @note This method is sufficiently fast for performance sensitive code. */
+  void ValidateContext(ContextBase* context) const {
+    DRAKE_THROW_UNLESS(context != nullptr);
+    ValidateContext(*context);
+  }
 
  protected:
-  /** (Internal use only) Default constructor. */
+  /** (Internal use only). */
   SystemBase() = default;
 
   /** (Internal use only) Adds an already-constructed input port to this System.
@@ -782,7 +828,7 @@ class SystemBase : public internal::SystemMessageInterface {
   // data type.
   void AddInputPort(std::unique_ptr<InputPortBase> port) {
     DRAKE_DEMAND(port != nullptr);
-    DRAKE_DEMAND(&port->get_system_base() == this);
+    DRAKE_DEMAND(&port->get_system_interface() == this);
     DRAKE_DEMAND(port->get_index() == num_input_ports());
     DRAKE_DEMAND(!port->get_name().empty());
 
@@ -807,7 +853,7 @@ class SystemBase : public internal::SystemMessageInterface {
   // data type.
   void AddOutputPort(std::unique_ptr<OutputPortBase> port) {
     DRAKE_DEMAND(port != nullptr);
-    DRAKE_DEMAND(&port->get_system_base() == this);
+    DRAKE_DEMAND(&port->get_system_interface() == this);
     DRAKE_DEMAND(port->get_index() == num_output_ports());
     DRAKE_DEMAND(!port->get_name().empty());
 
@@ -856,10 +902,12 @@ class SystemBase : public internal::SystemMessageInterface {
   @pre The supplied index must be the next available one; that is, indexes
        must be assigned sequentially. */
   void AddDiscreteStateGroup(DiscreteStateIndex index) {
-    DRAKE_DEMAND(index == num_discrete_state_groups());
+    DRAKE_DEMAND(index == discrete_state_tickets_.size());
+    DRAKE_DEMAND(index == context_sizes_.num_discrete_state_groups);
     const DependencyTicket ticket(assign_next_dependency_ticket());
     discrete_state_tickets_.push_back(
         {ticket, "discrete state group " + std::to_string(index)});
+    ++context_sizes_.num_discrete_state_groups;
   }
 
   /** (Internal use only) Assigns a ticket to a new abstract state variable with
@@ -868,9 +916,11 @@ class SystemBase : public internal::SystemMessageInterface {
        must be assigned sequentially. */
   void AddAbstractState(AbstractStateIndex index) {
     const DependencyTicket ticket(assign_next_dependency_ticket());
-    DRAKE_DEMAND(index == num_abstract_states());
+    DRAKE_DEMAND(index == abstract_state_tickets_.size());
+    DRAKE_DEMAND(index == context_sizes_.num_abstract_states);
     abstract_state_tickets_.push_back(
         {ticket, "abstract state " + std::to_string(index)});
+    ++context_sizes_.num_abstract_states;
   }
 
   /** (Internal use only) Assigns a ticket to a new numeric parameter with
@@ -878,10 +928,12 @@ class SystemBase : public internal::SystemMessageInterface {
   @pre The supplied index must be the next available one; that is, indexes
        must be assigned sequentially. */
   void AddNumericParameter(NumericParameterIndex index) {
-    DRAKE_DEMAND(index == num_numeric_parameter_groups());
+    DRAKE_DEMAND(index == numeric_parameter_tickets_.size());
+    DRAKE_DEMAND(index == context_sizes_.num_numeric_parameter_groups);
     const DependencyTicket ticket(assign_next_dependency_ticket());
     numeric_parameter_tickets_.push_back(
         {ticket, "numeric parameter " + std::to_string(index)});
+    ++context_sizes_.num_numeric_parameter_groups;
   }
 
   /** (Internal use only) Assigns a ticket to a new abstract parameter with
@@ -890,16 +942,18 @@ class SystemBase : public internal::SystemMessageInterface {
        must be assigned sequentially. */
   void AddAbstractParameter(AbstractParameterIndex index) {
     const DependencyTicket ticket(assign_next_dependency_ticket());
-    DRAKE_DEMAND(index == num_abstract_parameters());
+    DRAKE_DEMAND(index == abstract_parameter_tickets_.size());
+    DRAKE_DEMAND(index == context_sizes_.num_abstract_parameters);
     abstract_parameter_tickets_.push_back(
         {ticket, "abstract parameter " + std::to_string(index)});
+    ++context_sizes_.num_abstract_parameters;
   }
 
   /** (Internal use only) This is for cache entries associated with pre-defined
   tickets, for example the cache entry for time derivatives. See the public API
   for the most-general DeclareCacheEntry() signature for the meanings of the
   other parameters here. */
-  const CacheEntry& DeclareCacheEntryWithKnownTicket(
+  CacheEntry& DeclareCacheEntryWithKnownTicket(
       DependencyTicket known_ticket,
       std::string description, CacheEntry::AllocCallback alloc_function,
       CacheEntry::CalcCallback calc_function,
@@ -1038,14 +1092,68 @@ class SystemBase : public internal::SystemMessageInterface {
   parameters and state should be allocated. */
   virtual std::unique_ptr<ContextBase> DoAllocateContext() const = 0;
 
-  /** Derived classes must implement this to verify that the supplied
-  Context is suitable, and throw an exception if not. This is a runtime check
-  but may be expensive so is not guaranteed to be invoked except in Debug
-  builds. */
-  virtual void DoCheckValidContext(const ContextBase&) const = 0;
+  /** Return type for get_context_sizes(). Initialized to zero
+  and equipped with a += operator for Diagram use in aggregation. */
+  struct ContextSizes {
+    int num_generalized_positions{0};     // q }
+    int num_generalized_velocities{0};    // v | Sum is num continuous states x.
+    int num_misc_continuous_states{0};    // z }
+    int num_discrete_state_groups{0};     // Each "group" is a vector.
+    int num_abstract_states{0};
+    int num_numeric_parameter_groups{0};  // Each "group" is a vector.
+    int num_abstract_parameters{0};
+
+    ContextSizes& operator+=(const ContextSizes& other) {
+      num_generalized_positions += other.num_generalized_positions;
+      num_generalized_velocities += other.num_generalized_velocities;
+      num_misc_continuous_states += other.num_misc_continuous_states;
+      num_discrete_state_groups += other.num_discrete_state_groups;
+      num_abstract_states += other.num_abstract_states;
+      num_numeric_parameter_groups += other.num_numeric_parameter_groups;
+      num_abstract_parameters += other.num_abstract_parameters;
+      return *this;
+    }
+  };
+
+  /** Obtains access to the declared Context partition sizes as accumulated
+  during LeafSystem or Diagram construction .*/
+  const ContextSizes& get_context_sizes() const { return context_sizes_; }
+
+  /** Obtains mutable access to the Context sizes struct. Should be used only
+  during LeafSystem or Diagram construction. */
+  ContextSizes& get_mutable_context_sizes() { return context_sizes_; }
+
+  /** Allows Diagram to access protected get_context_sizes() recursively on its
+  subsystems. */
+  static const ContextSizes& get_context_sizes(const SystemBase& system) {
+    return system.get_context_sizes();
+  }
+
+  /** Allows a LeafSystem to override the default size for the implicit time
+  derivatives residual and a Diagram to sum up the total size. If no value
+  is set, the default size is n=num_continuous_states().
+
+  @param[in] n The size of the residual vector output argument of
+               System::CalcImplicitTimeDerivativesResidual(). If n <= 0
+               restore to the default, num_continuous_states().
+
+  @see implicit_time_derivatives_residual_size()
+  @see LeafSystem::DeclareImplicitTimeDerivativesResidualSize()
+  @see System::CalcImplicitTimeDerivativesResidual() */
+  void set_implicit_time_derivatives_residual_size(int n) {
+    implicit_time_derivatives_residual_size_.reset();
+    if (n > 0)
+      implicit_time_derivatives_residual_size_ = n;
+  }
+
+  /** (Internal) Gets the id used to tag context data as being created by this
+  system. */
+  internal::SystemId get_system_id() const { return system_id_; }
 
  private:
   void CreateSourceTrackers(ContextBase*) const;
+
+  static internal::SystemId get_next_id();
 
   // Used to create trackers for variable-number System-allocated objects.
   struct TrackerInfo {
@@ -1055,25 +1163,25 @@ class SystemBase : public internal::SystemMessageInterface {
 
   const TrackerInfo& discrete_state_tracker_info(
       DiscreteStateIndex index) const {
-    DRAKE_DEMAND(0 <= index && index < num_discrete_state_groups());
+    DRAKE_DEMAND(0 <= index && index < discrete_state_tickets_.size());
     return discrete_state_tickets_[index];
   }
 
   const TrackerInfo& abstract_state_tracker_info(
       AbstractStateIndex index) const {
-    DRAKE_DEMAND(0 <= index && index < num_abstract_states());
+    DRAKE_DEMAND(0 <= index && index < abstract_state_tickets_.size());
     return abstract_state_tickets_[index];
   }
 
   const TrackerInfo& numeric_parameter_tracker_info(
       NumericParameterIndex index) const {
-    DRAKE_DEMAND(0 <= index && index < num_numeric_parameter_groups());
+    DRAKE_DEMAND(0 <= index && index < numeric_parameter_tickets_.size());
     return numeric_parameter_tickets_[index];
   }
 
   const TrackerInfo& abstract_parameter_tracker_info(
       AbstractParameterIndex index) const {
-    DRAKE_DEMAND(0 <= index && index < num_abstract_parameters());
+    DRAKE_DEMAND(0 <= index && index < abstract_parameter_tickets_.size());
     return abstract_parameter_tickets_[index];
   }
 
@@ -1108,13 +1216,26 @@ class SystemBase : public internal::SystemMessageInterface {
 
   // Name of this system.
   std::string name_;
+
+  // Unique id of this system.
+  const internal::SystemId system_id_{get_next_id()};
+
+  // Records the total sizes of Context resources as they will appear
+  // in a Context allocated by this System. Starts at zero, counts up during
+  // declaration for LeafSystem construction; computed recursively during
+  // Diagram construction.
+  ContextSizes context_sizes_;
+
+  // Defaults to num_continuous_states() if no value here. Diagrams always
+  // fill this in by summing the value from their immediate subsystems.
+  std::optional<int> implicit_time_derivatives_residual_size_;
 };
 
 // Implementations of templatized DeclareCacheEntry() methods.
 
 // Takes make() and calc() member functions.
 template <class MySystem, class MyContext, typename ValueType>
-const CacheEntry& SystemBase::DeclareCacheEntry(
+CacheEntry& SystemBase::DeclareCacheEntry(
     std::string description,
     ValueType (MySystem::*make)() const,
     void (MySystem::*calc)(const MyContext&, ValueType*) const,
@@ -1144,7 +1265,7 @@ const CacheEntry& SystemBase::DeclareCacheEntry(
 // Takes an initial value and calc() member function that has an output
 // argument.
 template <class MySystem, class MyContext, typename ValueType>
-const CacheEntry& SystemBase::DeclareCacheEntry(
+CacheEntry& SystemBase::DeclareCacheEntry(
     std::string description, const ValueType& model_value,
     void (MySystem::*calc)(const MyContext&, ValueType*) const,
     std::set<DependencyTicket> prerequisites_of_calc) {
@@ -1182,7 +1303,7 @@ const CacheEntry& SystemBase::DeclareCacheEntry(
 // TODO(sherm1) Consider whether common code in this and the previous method
 // can be factored out and shared rather than repeated.
 template <class MySystem, class MyContext, typename ValueType>
-const CacheEntry& SystemBase::DeclareCacheEntry(
+CacheEntry& SystemBase::DeclareCacheEntry(
     std::string description, const ValueType& model_value,
     ValueType (MySystem::*calc)(const MyContext&) const,
     std::set<DependencyTicket> prerequisites_of_calc) {
@@ -1212,7 +1333,7 @@ const CacheEntry& SystemBase::DeclareCacheEntry(
 // Takes just a calc() member function with an output argument, and
 // value-initializes the entry.
 template <class MySystem, class MyContext, typename ValueType>
-const CacheEntry& SystemBase::DeclareCacheEntry(
+CacheEntry& SystemBase::DeclareCacheEntry(
     std::string description,
     void (MySystem::*calc)(const MyContext&, ValueType*) const,
     std::set<DependencyTicket> prerequisites_of_calc) {
@@ -1229,7 +1350,7 @@ const CacheEntry& SystemBase::DeclareCacheEntry(
 // Takes just a value-returning calc() member function, and
 // value-initializes the entry. See previous method for more information.
 template <class MySystem, class MyContext, typename ValueType>
-const CacheEntry& SystemBase::DeclareCacheEntry(
+CacheEntry& SystemBase::DeclareCacheEntry(
     std::string description,
     ValueType (MySystem::*calc)(const MyContext&) const,
     std::set<DependencyTicket> prerequisites_of_calc) {

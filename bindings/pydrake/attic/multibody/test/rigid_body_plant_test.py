@@ -5,7 +5,7 @@ import unittest
 import pydrake.attic.multibody.rigid_body_plant as mut
 
 from pydrake.common import FindResourceOrThrow
-from pydrake.lcm import DrakeMockLcm
+from pydrake.lcm import DrakeLcm
 from pydrake.systems.framework import BasicVector
 from pydrake.attic.multibody.rigid_body_tree import (
     RigidBodyTree, FloatingBaseType
@@ -218,14 +218,14 @@ class TestRigidBodyPlant(unittest.TestCase):
 
     def test_drake_visualizer_api(self):
         tree = self._make_tree()
-        lcm = DrakeMockLcm()
+        lcm = DrakeLcm()
         # Test for existence.
         viz = mut.DrakeVisualizer(tree=tree, lcm=lcm, enable_playback=True)
         viz.set_publish_period(period=0.01)
         # - Force publish to ensure we have enough knot points.
         context = viz.CreateDefaultContext()
         x0 = np.zeros(tree.get_num_positions() + tree.get_num_velocities())
-        context.FixInputPort(0, BasicVector(x0))
+        viz.get_input_port(0).FixValue(context, x0)
         context.SetTime(0.)
         viz.Publish(context)
         # Use a small time period, since it uses realtime playback.

@@ -8,6 +8,7 @@
 
 #include <Eigen/Geometry>
 
+#include "drake/attic_warning.h"
 #include "drake/common/drake_copyable.h"
 #include "drake/multibody/constraint/constraint_solver.h"
 #include "drake/multibody/rigid_body_plant/compliant_contact_model.h"
@@ -408,11 +409,6 @@ class RigidBodyPlant : public LeafSystem<T> {
   // Evaluates the actuator command input ports and throws a std::runtime_error
   // exception if at least one of the ports is not connected.
   VectorX<T> EvaluateActuatorInputs(const Context<T>& context) const;
-
-  // LeafSystem<T> overrides.
-
-  std::unique_ptr<ContinuousState<T>> AllocateContinuousState() const override;
-  std::unique_ptr<DiscreteValues<T>> AllocateDiscreteState() const override;
 
   // System<T> overrides.
 

@@ -46,25 +46,6 @@ class DeleteListenerVector : public BasicVector<T> {
   std::function<void()> delete_callback_;
 };
 
-class MoveOnlyType {
- public:
-  explicit MoveOnlyType(int x) : x_(x) {}
-  MoveOnlyType(MoveOnlyType&&) = default;
-  MoveOnlyType& operator=(MoveOnlyType&&) = default;
-  MoveOnlyType(const MoveOnlyType&) = delete;
-  MoveOnlyType& operator=(const MoveOnlyType&) = delete;
-  int x() const { return x_; }
-  void set_x(int x) { x_ = x; }
-  std::unique_ptr<MoveOnlyType> Clone() const {
-    return std::make_unique<MoveOnlyType>(x_);
-  }
-
- private:
-  int x_{};
-};
-
-struct UnknownType {};
-
 // A simple 2-dimensional subclass of BasicVector for testing.
 template <typename T>
 class MyVector2 : public BasicVector<T> {
@@ -94,19 +75,9 @@ PYBIND11_MODULE(test_util, m) {
   py::class_<DeleteListenerVector, BasicVector<T>>(m, "DeleteListenerVector")
       .def(py::init<std::function<void()>>());
 
-  py::class_<MoveOnlyType>(m, "MoveOnlyType")
-      .def(py::init<int>())
-      .def("x", &MoveOnlyType::x)
-      .def("set_x", &MoveOnlyType::set_x);
-  // Define `Value` instantiation.
-  AddValueInstantiation<MoveOnlyType>(m);
-
   // A 2-dimensional subclass of BasicVector.
   py::class_<MyVector2<T>, BasicVector<T>>(m, "MyVector2")
       .def(py::init<const Eigen::Vector2d&>(), py::arg("data"));
-
-  m.def("make_unknown_abstract_value",
-      []() { return AbstractValue::Make(UnknownType{}); });
 
   // Call overrides to ensure a custom Python class can override these methods.
 
@@ -141,9 +112,8 @@ PYBIND11_MODULE(test_util, m) {
     }
     {
       // Call `CalcTimeDerivatives` to test `DoCalcTimeDerivatives`
-      auto& state = context->get_mutable_continuous_state();
-      ContinuousState<T> state_copy(clone_vector(state.get_vector()));
-      system.CalcTimeDerivatives(*context, &state_copy);
+      auto state_dot = system.AllocateTimeDerivatives();
+      system.CalcTimeDerivatives(*context, state_dot.get());
     }
     {
       // Call `CalcDiscreteVariableUpdates` to test
@@ -174,13 +144,10 @@ PYBIND11_MODULE(test_util, m) {
           state.SetFrom(state_copy);
         } else {
           auto& state = context->get_mutable_continuous_state();
-          ContinuousState<T> state_dot(clone_vector(state.get_vector()),
-              state.get_generalized_position().size(),
-              state.get_generalized_velocity().size(),
-              state.get_misc_continuous_state().size());
-          system.CalcTimeDerivatives(*context, &state_dot);
+          auto state_dot = system.AllocateTimeDerivatives();
+          system.CalcTimeDerivatives(*context, state_dot.get());
           state.SetFromVector(
-              state.CopyToVector() + dt * state_dot.CopyToVector());
+              state.CopyToVector() + dt * state_dot->CopyToVector());
         }
         // Calculate output.
         auto output = system.AllocateOutput();

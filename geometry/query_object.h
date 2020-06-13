@@ -60,15 +60,8 @@ class SceneGraph;
  restrictions. If a query has restricted scalar support, it is included in
  the query's documentation.
 
- @tparam T The scalar type. Must be a valid Eigen scalar.
-
- Instantiated templates for the following kinds of T's are provided:
-
- - double
- - AutoDiffXd
-
- They are already available to link against in the containing library.
- No other values for T are currently supported.  */
+ @tparam_nonsymbolic_scalar
+*/
 template <typename T>
 class QueryObject {
  public:
@@ -169,7 +162,7 @@ class QueryObject {
    This method only provides double-valued penetration results.
 
    <!--
-   TODO (SeanCurtis-TRI): This can/should be changed to offer at least partial
+   TODO(SeanCurtis-TRI): This can/should be changed to offer at least partial
    AutoDiffXd support. At the very least, it should be declared on T and throw
    for AutoDiffXd. This is related to PR 11143
    https://github.com/RobotLocomotion/drake/pull/11143. In that PR, MBP is
@@ -181,7 +174,8 @@ class QueryObject {
 
    @returns A vector populated with all detected penetrations characterized as
             point pairs.
-   @note    Silently ignore Mesh geometries. */
+   @warning This silently ignores Mesh geometries (but Convex mesh geometries
+            are included). */
   std::vector<PenetrationAsPointPair<double>> ComputePointPairPenetration()
       const;
 
@@ -210,19 +204,52 @@ class QueryObject {
        | Convex    |  no   |  no   |
 
      - One geometry must be soft, and the other must be rigid. There is no
-       support for soft-soft collision or rigid-rigid collision.
+       support for soft-soft collision or rigid-rigid collision. If such
+       pairs collide, an exception will be thrown. More particularly, if such
+       a pair *cannot be culled* an exception will be thrown. No exception
+       is thrown if the pair has been filtered.
      - The elasticity modulus E (N/m^2) of each geometry is set in
-       ProximityProperties (see proximity_properties.cc). A rigid geometry must
-       have E = ∞.
+       ProximityProperties (see AddContactMaterial()).
      - The tessellation of the corresponding meshes is controlled by the
        resolution hint, as defined by AddSoftHydroelasticProperties() and
        AddRigidHydroelasticProperties().
-     - Attempting to invoke this method with T = AutoDiffXd will throw an
-       exception if there are *any* geometry pairs that couldn't be culled.
+
+   <h3>Scalar support</h3>
+
+   This method provides support only for double. Attempting to invoke this
+   method with T = AutoDiffXd will throw an exception if there are *any*
+   geometry pairs that couldn't be culled.
 
    @returns A vector populated with all detected intersections characterized as
             contact surfaces.  */
   std::vector<ContactSurface<T>> ComputeContactSurfaces() const;
+
+  /** Reports pair-wise intersections and characterizes each non-empty
+   intersection as a ContactSurface _where possible_ and as a
+   PenetrationAsPointPair where not.
+
+   This is a hybrid contact algorithm. It allows for the contact surface
+   penetration result where possible, but automatically provides a fallback for
+   where a ContactSurface cannot be defined.
+
+   The fallback cannot guarantee success in all cases. Meshes have limited
+   support in the proximity role; they are supported in the contact surface
+   computation but _ignored_ in the point pair collision query. If a mesh is
+   in contact with another shape that _cannot_ be resolved as a contact surface
+   (e.g., rigid mesh vs another rigid shape), this computation will throw as
+   there is no fallback functionality for mesh-shape.
+
+   Because point pairs can only be computed for double-valued systems, this can
+   also only support double-valued ContactSurface instances.
+
+   @param[out] surfaces     The vector that contact surfaces will be added to.
+                            The vector will _not_ be cleared.
+   @param[out] point_pairs  The vector that fall back point pair data will be
+                            added to. The vector will _not_ be cleared.
+   @pre Neither `surfaces` nor `point_pairs` is nullptr.  */
+  void ComputeContactSurfacesWithFallback(
+      std::vector<ContactSurface<T>>* surfaces,
+      std::vector<PenetrationAsPointPair<double>>* point_pairs) const;
 
   /** Applies a conservative culling mechanism to create a subset of all
    possible geometry pairs based on non-zero intersections. A geometry pair
@@ -231,12 +258,14 @@ class QueryObject {
    the remaining, unculled geometry pairs are *actually* in collision.
 
    @returns A vector populated with collision pair candidates.
-   @note    Silently ignore Mesh geometries. */
+   @warning This silently ignores Mesh geometries (but Convex mesh geometries
+            are included). */
   std::vector<SortedPair<GeometryId>> FindCollisionCandidates() const;
 
   /** Reports true if there are _any_ collisions between unfiltered pairs in the
    world.
-   @note Silently ignore Mesh geometries. */
+   @warning This silently ignores Mesh geometries (but Convex mesh geometries
+            are included). */
   bool HasCollisions() const;
 
   //@}
@@ -481,13 +510,19 @@ class QueryObject {
                         bool show_window,
                         systems::sensors::ImageLabel16I* label_image_out) const;
 
+
+  /** Returns the named render engine, if it exists. The RenderEngine is
+   guaranteed to be up to date w.r.t. the poses and data in the context. */
+  const render::RenderEngine* GetRenderEngineByName(
+      const std::string& name) const;
+
   //@}
 
  private:
   // SceneGraph is the only class that may call set().
   friend class SceneGraph<T>;
   // Convenience class for testing.
-  friend class QueryObjectTester;
+  friend class QueryObjectTest;
 
   // Access the GeometryState associated with this QueryObject.
   // @pre ThrowIfNotCallable() has been invoked prior to this.

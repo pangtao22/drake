@@ -3,6 +3,7 @@
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 
+#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/polynomial_types_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
@@ -13,12 +14,14 @@ namespace pydrake {
 
 PYBIND11_MODULE(polynomial, m) {
   {
-    using CoefficientType = double;
-    using Class = Polynomial<CoefficientType>;
-    constexpr auto& cls_doc = pydrake_doc.Polynomial;
+    py::module::import("pydrake.common");
+
+    using T = double;
+    using Class = Polynomial<T>;
+    constexpr auto& cls_doc = pydrake_doc.drake.Polynomial;
     py::class_<Class>(m, "Polynomial", cls_doc.doc)
         .def(py::init<>(), cls_doc.ctor.doc_0args)
-        .def(py::init<const CoefficientType&>(), cls_doc.ctor.doc_1args_scalar)
+        .def(py::init<const T&>(), cls_doc.ctor.doc_1args_scalar)
         .def(py::init<const Eigen::Ref<const Eigen::VectorXd>&>(),
             cls_doc.ctor.doc_1args_constEigenMatrixBase)
         .def("GetNumberOfCoefficients", &Class::GetNumberOfCoefficients,
@@ -31,8 +34,21 @@ PYBIND11_MODULE(polynomial, m) {
             cls_doc.Derivative.doc)
         .def("Integral", &Class::Integral,
             py::arg("integration_constant") = 0.0, cls_doc.Integral.doc)
-        .def("IsApprox", &Class::IsApprox, py::arg("other"), py::arg("tol"),
-            cls_doc.IsApprox.doc)
+        .def("CoefficientsAlmostEqual", &Class::CoefficientsAlmostEqual,
+            py::arg("other"), py::arg("tol") = 0.0,
+            py::arg("tol_type") = ToleranceType::kAbsolute,
+            cls_doc.CoefficientsAlmostEqual.doc)
+        .def(
+            "IsApprox",
+            [](Polynomial<T>* self, const Polynomial<T>& other,
+                const Polynomial<T>::RealScalar& tol) {
+              WarnDeprecated(
+                  "Use CoefficientAlmostEqual with tol_type=kRelative instead "
+                  "of IsApprox.  Support will be removed after 2020-08-01.");
+              return self->CoefficientsAlmostEqual(
+                  other, tol, ToleranceType::kRelative);
+            },
+            py::arg("other"), py::arg("tol"))
         // Arithmetic
         .def(-py::self)
         .def(py::self + py::self)

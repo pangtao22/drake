@@ -15,6 +15,7 @@ drake_cc_package_library(
     name = "yaml",
     deps = [
         ":yaml_read_archive",
+        ":yaml_write_archive",
     ],
 )
 
@@ -30,14 +31,46 @@ drake_cc_library(
     ],
 )
 
+drake_cc_library(
+    name = "yaml_write_archive",
+    srcs = ["yaml_write_archive.cc"],
+    hdrs = ["yaml_write_archive.h"],
+    deps = [
+        "//common:essential",
+        "//common:name_value",
+        "//third_party/com_github_jbeder_yaml_cpp:emitfromevents",
+        "@yaml_cpp",
+    ],
+)
+
 # === test/ ===
+
+drake_cc_googletest(
+    name = "yaml_performance_test",
+    deps = [
+        ":yaml_read_archive",
+        ":yaml_write_archive",
+        "//common:autodiff",
+        "//common:name_value",
+        "//common/test_utilities:limit_malloc",
+    ],
+)
 
 drake_cc_googletest(
     name = "yaml_read_archive_test",
     deps = [
         ":yaml_read_archive",
         "//common:name_value",
-        "//common/test_utilities",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
+    ],
+)
+
+drake_cc_googletest(
+    name = "yaml_write_archive_test",
+    deps = [
+        ":yaml_write_archive",
+        "//common:name_value",
     ],
 )
 

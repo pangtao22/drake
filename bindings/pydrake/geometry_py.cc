@@ -8,7 +8,6 @@
 
 #include "drake/bindings/pydrake/common/cpp_template_pybind.h"
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
-#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/common/type_pack.h"
 #include "drake/bindings/pydrake/common/value_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
@@ -22,6 +21,7 @@
 #include "drake/geometry/proximity/obj_to_surface_mesh.h"
 #include "drake/geometry/proximity/surface_mesh.h"
 #include "drake/geometry/query_results/penetration_as_point_pair.h"
+#include "drake/geometry/render/gl_renderer/render_engine_gl_factory.h"
 #include "drake/geometry/render/render_engine.h"
 #include "drake/geometry/render/render_engine_vtk_factory.h"
 #include "drake/geometry/render/render_label.h"
@@ -36,25 +36,21 @@ using systems::LeafSystem;
 
 template <typename Class>
 void BindIdentifier(py::module m, const std::string& name, const char* id_doc) {
-  auto& cls_doc = pydrake_doc.drake.geometry.Identifier;
+  constexpr auto& cls_doc = pydrake_doc.drake.Identifier;
 
-  py::class_<Class> cls(m, name.c_str(), id_doc);
-  py::handle cls_handle = cls;
-  cls  // BR
-      .def(py::init([cls_handle]() {
-        WarnDeprecated(
-            py::str("The constructor for {} in Python is deprecated. "
-                    "Use `get_new_id()` if necessary.")
-                .format(cls_handle));
-        return Class{};
-      }),
-          cls_doc.ctor.doc)
+  py::class_<Class>(m, name.c_str(), id_doc)
       .def("get_value", &Class::get_value, cls_doc.get_value.doc)
       .def("is_valid", &Class::is_valid, cls_doc.is_valid.doc)
       .def(py::self == py::self)
       .def(py::self != py::self)
       .def(py::self < py::self)
-      .def_static("get_new_id", &Class::get_new_id, cls_doc.get_new_id.doc);
+      // TODO(eric.cousineau): Use `py::hash()` instead of `py::detail::hash()`
+      // pending merge of: https://github.com/pybind/pybind11/pull/2217
+      .def(py::detail::hash(py::self))
+      .def_static("get_new_id", &Class::get_new_id, cls_doc.get_new_id.doc)
+      .def("__repr__", [name](const Class& self) {
+        return py::str("<{} value={}>").format(name, self.get_value());
+      });
 }
 
 void def_geometry_render(py::module m) {
@@ -108,6 +104,8 @@ void def_geometry_render(py::module m) {
           doc.RenderEngineVtkParams.default_label.doc)
       .def_readwrite("default_diffuse", &RenderEngineVtkParams::default_diffuse,
           doc.RenderEngineVtkParams.default_diffuse.doc);
+
+  m.def("MakeRenderEngineGl", &MakeRenderEngineGl, doc.MakeRenderEngineGl.doc);
 
   m.def("MakeRenderEngineVtk", &MakeRenderEngineVtk, py::arg("params"),
       doc.MakeRenderEngineVtk.doc);
@@ -185,7 +183,9 @@ void DoScalarDependentDefinitions(py::module m, T) {
             cls_doc.GetIllustrationProperties.doc)
         .def("GetPerceptionProperties", &Class::GetPerceptionProperties,
             py_reference_internal, py::arg("geometry_id"),
-            cls_doc.GetPerceptionProperties.doc);
+            cls_doc.GetPerceptionProperties.doc)
+        .def("CloneGeometryInstance", &Class::CloneGeometryInstance,
+            py::arg("geometry_id"), cls_doc.CloneGeometryInstance.doc);
   }
 
   //  SceneGraph
@@ -198,7 +198,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
         .def(py::init<>(), cls_doc.ctor.doc)
         .def("get_source_pose_port", &Class::get_source_pose_port,
             py_reference_internal, cls_doc.get_source_pose_port.doc)
-        .def("get_pose_bundle_output_port",
+        .def(
+            "get_pose_bundle_output_port",
             [](Class* self) -> const systems::OutputPort<T>& {
               return self->get_pose_bundle_output_port();
             },
@@ -236,17 +237,35 @@ void DoScalarDependentDefinitions(py::module m, T) {
                 &Class::RegisterAnchoredGeometry),
             py::arg("source_id"), py::arg("geometry"),
             cls_doc.RegisterAnchoredGeometry.doc)
+        .def("ExcludeCollisionsBetween",
+            py::overload_cast<const GeometrySet&, const GeometrySet&>(
+                &Class::ExcludeCollisionsBetween),
+            py_reference_internal, py::arg("setA"), py::arg("setB"),
+            cls_doc.ExcludeCollisionsBetween.doc_2args)
+        .def("ExcludeCollisionsBetween",
+            overload_cast_explicit<void, Context<T>*, const GeometrySet&,
+                const GeometrySet&>(&Class::ExcludeCollisionsBetween),
+            py_reference_internal, py::arg("context"), py::arg("setA"),
+            py::arg("setB"), cls_doc.ExcludeCollisionsBetween.doc_3args)
+        .def("ExcludeCollisionsWithin",
+            py::overload_cast<const GeometrySet&>(
+                &Class::ExcludeCollisionsWithin),
+            py_reference_internal, py::arg("set"),
+            cls_doc.ExcludeCollisionsWithin.doc_1args)
+        .def("ExcludeCollisionsWithin",
+            overload_cast_explicit<void, Context<T>*, const GeometrySet&>(
+                &Class::ExcludeCollisionsWithin),
+            py_reference_internal, py::arg("context"), py::arg("set"),
+            cls_doc.ExcludeCollisionsWithin.doc_2args)
         .def("AddRenderer", &Class::AddRenderer, py::arg("name"),
             py::arg("renderer"), cls_doc.AddRenderer.doc)
-        .def("AddRenderer", WrapDeprecated("Deprecated", &Class::AddRenderer),
-            py::arg("renderer_name"), py::arg("renderer"),
-            cls_doc.AddRenderer.doc)
         .def("HasRenderer", &Class::HasRenderer, py::arg("name"),
             cls_doc.HasRenderer.doc)
         .def("RendererCount", &Class::RendererCount, cls_doc.RendererCount.doc)
         // - Begin: AssignRole Overloads.
         // - - Proximity.
-        .def("AssignRole",
+        .def(
+            "AssignRole",
             [](Class& self, SourceId source_id, GeometryId geometry_id,
                 ProximityProperties properties, RoleAssign assign) {
               self.AssignRole(source_id, geometry_id, properties, assign);
@@ -254,7 +273,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
             py::arg("source_id"), py::arg("geometry_id"), py::arg("properties"),
             py::arg("assign") = RoleAssign::kNew,
             cls_doc.AssignRole.doc_proximity_direct)
-        .def("AssignRole",
+        .def(
+            "AssignRole",
             [](Class& self, Context<T>* context, SourceId source_id,
                 GeometryId geometry_id, ProximityProperties properties,
                 RoleAssign assign) {
@@ -265,7 +285,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
             py::arg("properties"), py::arg("assign") = RoleAssign::kNew,
             cls_doc.AssignRole.doc_proximity_context)
         // - - Perception.
-        .def("AssignRole",
+        .def(
+            "AssignRole",
             [](Class& self, SourceId source_id, GeometryId geometry_id,
                 PerceptionProperties properties, RoleAssign assign) {
               self.AssignRole(source_id, geometry_id, properties, assign);
@@ -273,7 +294,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
             py::arg("source_id"), py::arg("geometry_id"), py::arg("properties"),
             py::arg("assign") = RoleAssign::kNew,
             cls_doc.AssignRole.doc_perception_direct)
-        .def("AssignRole",
+        .def(
+            "AssignRole",
             [](Class& self, Context<T>* context, SourceId source_id,
                 GeometryId geometry_id, PerceptionProperties properties,
                 RoleAssign assign) {
@@ -284,7 +306,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
             py::arg("properties"), py::arg("assign") = RoleAssign::kNew,
             cls_doc.AssignRole.doc_perception_context)
         // - - Illustration.
-        .def("AssignRole",
+        .def(
+            "AssignRole",
             [](Class& self, SourceId source_id, GeometryId geometry_id,
                 IllustrationProperties properties, RoleAssign assign) {
               self.AssignRole(source_id, geometry_id, properties, assign);
@@ -292,7 +315,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
             py::arg("source_id"), py::arg("geometry_id"), py::arg("properties"),
             py::arg("assign") = RoleAssign::kNew,
             cls_doc.AssignRole.doc_illustration_direct)
-        .def("AssignRole",
+        .def(
+            "AssignRole",
             [](Class& self, Context<T>* context, SourceId source_id,
                 GeometryId geometry_id, IllustrationProperties properties,
                 RoleAssign assign) {
@@ -316,7 +340,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
         .def(py::init<>(), doc.FrameKinematicsVector.ctor.doc_0args)
         .def("clear", &FramePoseVector<T>::clear,
             doc.FrameKinematicsVector.clear.doc)
-        .def("set_value",
+        .def(
+            "set_value",
             [](Class* self, FrameId id, const math::RigidTransform<T>& value) {
               self->set_value(id, value);
             },
@@ -341,6 +366,7 @@ void DoScalarDependentDefinitions(py::module m, T) {
     auto cls = DefineTemplateClassWithDefault<Class>(
         m, "QueryObject", param, doc.QueryObject.doc);
     cls  // BR
+        .def(py::init(), doc.QueryObject.ctor.doc)
         .def("inspector", &QueryObject<T>::inspector, py_reference_internal,
             doc.QueryObject.inspector.doc)
         .def("ComputeSignedDistancePairwiseClosestPoints",
@@ -361,7 +387,10 @@ void DoScalarDependentDefinitions(py::module m, T) {
         .def("FindCollisionCandidates",
             &QueryObject<T>::FindCollisionCandidates,
             doc.QueryObject.FindCollisionCandidates.doc)
-        .def("RenderColorImage",
+        .def("HasCollisions", &QueryObject<T>::HasCollisions,
+            doc.QueryObject.HasCollisions.doc)
+        .def(
+            "RenderColorImage",
             [](const Class* self, const render::CameraProperties& camera,
                 FrameId parent_frame, const math::RigidTransformd& X_PC,
                 bool show_window) {
@@ -373,7 +402,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
             py::arg("camera"), py::arg("parent_frame"), py::arg("X_PC"),
             py::arg("show_window") = false,
             doc.QueryObject.RenderColorImage.doc)
-        .def("RenderDepthImage",
+        .def(
+            "RenderDepthImage",
             [](const Class* self, const render::DepthCameraProperties& camera,
                 FrameId parent_frame, const math::RigidTransformd& X_PC) {
               systems::sensors::ImageDepth32F img(camera.width, camera.height);
@@ -382,7 +412,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
             },
             py::arg("camera"), py::arg("parent_frame"), py::arg("X_PC"),
             doc.QueryObject.RenderDepthImage.doc)
-        .def("RenderLabelImage",
+        .def(
+            "RenderLabelImage",
             [](const Class* self, const render::CameraProperties& camera,
                 FrameId parent_frame, const math::RigidTransformd& X_PC,
                 bool show_window = false) {
@@ -493,8 +524,29 @@ void DoScalarDependentDefinitions(py::module m, T) {
 void DoScalarIndependentDefinitions(py::module m) {
   // NOLINTNEXTLINE(build/namespaces): Emulate placement in namespace.
   using namespace drake::geometry;
-
   constexpr auto& doc = pydrake_doc.drake.geometry;
+
+  {
+    using Class = Rgba;
+    constexpr auto& cls_doc = doc.Rgba;
+    py::class_<Class>(m, "Rgba", cls_doc.doc)
+        .def(py::init<double, double, double, double>(), py::arg("r"),
+            py::arg("g"), py::arg("b"), py::arg("a") = 1., cls_doc.ctor.doc)
+        .def("r", &Class::r, cls_doc.r.doc)
+        .def("g", &Class::g, cls_doc.g.doc)
+        .def("b", &Class::b, cls_doc.b.doc)
+        .def("a", &Class::a, cls_doc.a.doc)
+        .def("set", &Class::set, py::arg("r"), py::arg("g"), py::arg("b"),
+            py::arg("a") = 1., cls_doc.set.doc)
+        .def(py::self == py::self)
+        .def(py::self != py::self)
+        .def("__repr__", [](const Class& self) {
+          return py::str("Rgba(r={}, g={}, b={}, a={})")
+              .format(self.r(), self.g(), self.b(), self.a());
+        });
+    AddValueInstantiation<Rgba>(m);
+  }
+
   BindIdentifier<SourceId>(m, "SourceId", doc.SourceId.doc);
   BindIdentifier<FrameId>(m, "FrameId", doc.FrameId.doc);
   BindIdentifier<GeometryId>(m, "GeometryId", doc.GeometryId.doc);
@@ -543,34 +595,14 @@ void DoScalarIndependentDefinitions(py::module m) {
 
   // Shape constructors
   {
-    py::class_<Shape>(m, "Shape", doc.Shape.doc);
+    py::class_<Shape> shape_cls(m, "Shape", doc.Shape.doc);
+    DefClone(&shape_cls);
     py::class_<Sphere, Shape>(m, "Sphere", doc.Sphere.doc)
         .def(py::init<double>(), py::arg("radius"), doc.Sphere.ctor.doc)
-        .def("get_radius",
-            [](Sphere* self) {
-              WarnDeprecated(
-                  "Deprecated and will be removed on or around 2020-03-01. Use "
-                  "radius() instead.");
-              return self->radius();
-            })
         .def("radius", &Sphere::radius, doc.Sphere.radius.doc);
     py::class_<Cylinder, Shape>(m, "Cylinder", doc.Cylinder.doc)
         .def(py::init<double, double>(), py::arg("radius"), py::arg("length"),
             doc.Cylinder.ctor.doc)
-        .def("get_radius",
-            [](Cylinder* self) {
-              WarnDeprecated(
-                  "Deprecated and will be removed on or around 2020-03-01. Use "
-                  "radius() instead.");
-              return self->radius();
-            })
-        .def("get_length",
-            [](Cylinder* self) {
-              WarnDeprecated(
-                  "Deprecated and will be removed on or around 2020-03-01. Use "
-                  "length() instead.");
-              return self->length();
-            })
         .def("radius", &Cylinder::radius, doc.Cylinder.radius.doc)
         .def("length", &Cylinder::length, doc.Cylinder.length.doc);
     py::class_<Box, Shape>(m, "Box", doc.Box.doc)
@@ -581,13 +613,19 @@ void DoScalarIndependentDefinitions(py::module m) {
         .def("height", &Box::height, doc.Box.height.doc)
         .def("size", &Box::size, py_reference_internal, doc.Box.size.doc);
     py::class_<HalfSpace, Shape>(m, "HalfSpace", doc.HalfSpace.doc)
-        .def(py::init<>(), doc.HalfSpace.ctor.doc);
+        .def(py::init<>(), doc.HalfSpace.ctor.doc)
+        .def_static("MakePose", &HalfSpace::MakePose, py::arg("Hz_dir_F"),
+            py::arg("p_FB"), doc.HalfSpace.MakePose.doc);
     py::class_<Mesh, Shape>(m, "Mesh", doc.Mesh.doc)
         .def(py::init<std::string, double>(), py::arg("absolute_filename"),
-            py::arg("scale") = 1.0, doc.Mesh.ctor.doc);
+            py::arg("scale") = 1.0, doc.Mesh.ctor.doc)
+        .def("filename", &Mesh::filename, doc.Mesh.filename.doc)
+        .def("scale", &Mesh::scale, doc.Mesh.scale.doc);
     py::class_<Convex, Shape>(m, "Convex", doc.Convex.doc)
         .def(py::init<std::string, double>(), py::arg("absolute_filename"),
-            py::arg("scale") = 1.0, doc.Convex.ctor.doc);
+            py::arg("scale") = 1.0, doc.Convex.ctor.doc)
+        .def("filename", &Convex::filename, doc.Convex.filename.doc)
+        .def("scale", &Convex::scale, doc.Convex.scale.doc);
   }
 
   // GeometryFrame
@@ -618,6 +656,7 @@ void DoScalarIndependentDefinitions(py::module m) {
         .def("shape", &Class::shape, py_reference_internal, cls_doc.shape.doc)
         .def("release_shape", &Class::release_shape, cls_doc.release_shape.doc)
         .def("name", &Class::name, cls_doc.name.doc)
+        .def("set_name", &Class::set_name, cls_doc.set_name.doc)
         .def("set_proximity_properties", &Class::set_proximity_properties,
             py::arg("properties"), cls_doc.set_proximity_properties.doc)
         .def("set_illustration_properties", &Class::set_illustration_properties,
@@ -645,12 +684,13 @@ void DoScalarIndependentDefinitions(py::module m) {
     using Class = GeometryProperties;
     constexpr auto& cls_doc = doc.GeometryProperties;
     py::handle abstract_value_cls =
-        py::module::import("pydrake.systems.framework").attr("AbstractValue");
+        py::module::import("pydrake.common.value").attr("AbstractValue");
     py::class_<Class>(m, "GeometryProperties", cls_doc.doc)
         .def("HasGroup", &Class::HasGroup, py::arg("group_name"),
             cls_doc.HasGroup.doc)
         .def("num_groups", &Class::num_groups, cls_doc.num_groups.doc)
-        .def("GetPropertiesInGroup",
+        .def(
+            "GetPropertiesInGroup",
             [](const Class& self, const std::string& group_name) {
               py::dict out;
               py::object py_self = py::cast(&self, py_reference);
@@ -663,7 +703,8 @@ void DoScalarIndependentDefinitions(py::module m) {
             },
             py::arg("group_name"), cls_doc.GetPropertiesInGroup.doc)
         .def("GetGroupNames", &Class::GetGroupNames, cls_doc.GetGroupNames.doc)
-        .def("AddProperty",
+        .def(
+            "AddProperty",
             [abstract_value_cls](Class& self, const std::string& group_name,
                 const std::string& name, py::object value) {
               py::object abstract = abstract_value_cls.attr("Make")(value);
@@ -674,7 +715,8 @@ void DoScalarIndependentDefinitions(py::module m) {
             cls_doc.AddProperty.doc)
         .def("HasProperty", &Class::HasProperty, py::arg("group_name"),
             py::arg("name"), cls_doc.HasProperty.doc)
-        .def("GetProperty",
+        .def(
+            "GetProperty",
             [](const Class& self, const std::string& group_name,
                 const std::string& name) {
               py::object abstract = py::cast(
@@ -682,7 +724,8 @@ void DoScalarIndependentDefinitions(py::module m) {
               return abstract.attr("get_value")();
             },
             py::arg("group_name"), py::arg("name"), cls_doc.GetProperty.doc)
-        .def("GetPropertyOrDefault",
+        .def(
+            "GetPropertyOrDefault",
             [](const Class& self, const std::string& group_name,
                 const std::string& name, py::object default_value) {
               // For now, ignore typing. This is less efficient, but eh, it's
@@ -698,13 +741,22 @@ void DoScalarIndependentDefinitions(py::module m) {
             cls_doc.GetPropertyOrDefault.doc)
         .def_static("default_group_name", &Class::default_group_name,
             cls_doc.default_group_name.doc)
-        .def("__str__",
+        .def(
+            "__str__",
             [](const Class& self) {
               std::stringstream ss;
               ss << self;
               return ss.str();
             },
             "Returns formatted string.");
+  }
+
+  // GeometrySet
+  {
+    using Class = GeometrySet;
+    constexpr auto& cls_doc = doc.GeometrySet;
+    py::class_<Class>(m, "GeometrySet", cls_doc.doc)
+        .def(py::init(), doc.GeometrySet.ctor.doc);
   }
 
   py::class_<ProximityProperties, GeometryProperties>(
@@ -733,6 +785,17 @@ void def_geometry(py::module m) {
       NonSymbolicScalarPack{});
 }
 
+void def_geometry_testing(py::module m) {
+  class FakeTag;
+  using FakeId = Identifier<FakeTag>;
+
+  BindIdentifier<FakeId>(m, "FakeId", "Fake documentation.");
+  // Get a valid, constant FakeId to test hashing with new instances returned.
+  FakeId fake_id_constant{FakeId::get_new_id()};
+  m.def("get_fake_id_constant",
+      [fake_id_constant]() { return fake_id_constant; });
+}
+
 void def_geometry_all(py::module m) {
   py::dict vars = m.attr("__dict__");
   py::exec(
@@ -748,6 +811,7 @@ PYBIND11_MODULE(geometry, m) {
 
   def_geometry(m);
   def_geometry_render(m.def_submodule("render"));
+  def_geometry_testing(m.def_submodule("_testing"));
   def_geometry_all(m.def_submodule("all"));
 }
 

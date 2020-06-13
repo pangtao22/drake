@@ -59,16 +59,7 @@ namespace internal {
 /// for angle `θ₂` (many times referred to as the pitch angle) such that
 /// `θ₂ = π/2 + kπ, ∀ k ∈ ℤ`.
 ///
-/// @tparam T The scalar type. Must be a valid Eigen scalar.
-///
-/// Instantiated templates for the following kinds of T's are provided:
-///
-/// - double
-/// - AutoDiffXd
-/// - symbolic::Expression
-///
-/// They are already available to link against in the containing library.
-/// No other values for T are currently supported.
+/// @tparam_default_scalar
 template <typename T>
 class SpaceXYZMobilizer final : public MobilizerImpl<T, 3, 3> {
  public:
@@ -81,8 +72,6 @@ class SpaceXYZMobilizer final : public MobilizerImpl<T, 3, 3> {
   SpaceXYZMobilizer(const Frame<T>& inboard_frame_F,
                    const Frame<T>& outboard_frame_M) :
       MobilizerBase(inboard_frame_F, outboard_frame_M) {}
-
-  bool is_floating() const override { return true; }
 
   bool has_quaternion_dofs() const override { return false; }
 

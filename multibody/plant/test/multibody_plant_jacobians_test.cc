@@ -26,6 +26,9 @@ using test::KukaIiwaModelTests;
 
 namespace {
 
+using Eigen::MatrixXd;
+using Eigen::Vector3d;
+
 // For one or more points Ei fixed on a body B, this method computes Jq_v_WEi_W,
 // Ei's translational velocity Jacobian in world W with respect to q̇.  However,
 // the way this calculation is performed is by forming the partial derivatives
@@ -115,8 +118,8 @@ TEST_F(KukaIiwaModelTests, CalcJacobianTranslationalVelocityNonUnitQuaternion) {
   const VectorX<double> q_double = plant_->GetPositions(*context_);
   MatrixX<double> p_WoEi_W_deriv_wrt_q(3 * kNumPoints, num_positions);
   CalcJacobianViaPartialDerivativesOfPositionWithRespectToQ(
-      *plant_, context_autodiff_.get(), q_double, frame_E_autodiff, p_EoEi_E,
-      &p_WoEi_W_deriv_wrt_q);
+      *plant_autodiff_, context_autodiff_.get(), q_double, frame_E_autodiff,
+      p_EoEi_E, &p_WoEi_W_deriv_wrt_q);
 
   // Verify the Jacobian Jq_v_WEi_W matches the one from auto-differentiation.
   const double kTolerance = 8 * std::numeric_limits<double>::epsilon();
@@ -264,8 +267,8 @@ TEST_F(KukaIiwaModelTests, CalcJacobianTranslationalVelocityB) {
   const VectorX<double> q_double = plant_->GetPositions(*context_);
   MatrixX<double> p_WoEi_W_deriv_wrt_q(3 * kNumPoints, num_positions);
   CalcJacobianViaPartialDerivativesOfPositionWithRespectToQ(
-      *plant_, context_autodiff_.get(), q_double, frame_E_autodiff, p_EoEi_E,
-      &p_WoEi_W_deriv_wrt_q);
+      *plant_autodiff_, context_autodiff_.get(), q_double, frame_E_autodiff,
+      p_EoEi_E, &p_WoEi_W_deriv_wrt_q);
 
   // Ensure proper sizes for the matrix storing the partial derivatives.
   EXPECT_EQ(p_WoEi_W_deriv_wrt_q.rows(), 3 * kNumPoints);
@@ -275,6 +278,367 @@ TEST_F(KukaIiwaModelTests, CalcJacobianTranslationalVelocityB) {
   const double kTolerance = 8 * std::numeric_limits<double>::epsilon();
   EXPECT_TRUE(CompareMatrices(Jq_v_WEi_W, p_WoEi_W_deriv_wrt_q,
                               kTolerance, MatrixCompareType::relative));
+}
+
+// Fixture for a two degree-of-freedom pendulum having two links A and B.
+// Link A is connected to world (frame W) with a z-axis pin joint.
+// Link B is connected to link A with another z-axis pin joint.
+// Hence links A and B only move in the world's x-y plane (perpendicular to Wz).
+// The long axis of link A is parallel to A's unit vector Ax and
+// the long axis of link B is parallel to B's unit vector Bx.
+// In the baseline configuration, points Wo Ao Fo Mo Bo are sequential along
+// a line parallel to Wx.
+class TwoDOFPlanarPendulumTest : public ::testing::Test {
+ public:
+  // Setup the MBP.
+  void SetUp() override {
+    // Set a spatial inertia for each link.  For now, these are unimportant
+    // because this fixture is only used for kinematic tests (e.g., Jacobians).
+    const UnitInertia<double> G_Bcm =
+        UnitInertia<double>::SolidBox(link_length_, 1, 1);
+    const Vector3<double> p_BoBcm_B = Vector3<double>::Zero();
+    const SpatialInertia<double> M_Bcm(mass_link_, p_BoBcm_B, G_Bcm);
+
+    // Create an empty MultibodyPlant and then add the two links.
+    plant_ = std::make_unique<MultibodyPlant<double>>(0.0);
+    bodyA_ = &plant_->AddRigidBody("BodyA", M_Bcm);
+    bodyB_ = &plant_->AddRigidBody("BodyB", M_Bcm);
+
+    // Create revolute joints connecting world to link A and link A to link B.
+    joint1_ = &plant_->AddJoint<RevoluteJoint>("PinJoint1",
+        plant_->world_body(), std::nullopt, *bodyA_, X_AW_, Vector3d::UnitZ());
+    joint2_ = &plant_->AddJoint<RevoluteJoint>("PinJoint2",
+        *bodyA_, X_AF_, *bodyB_, X_BM_, Vector3d::UnitZ());
+
+    // Finalize the plant and create a context to store this plant's state.
+    plant_->Finalize();
+    context_ = plant_->CreateDefaultContext();
+  }
+
+  const internal::MultibodyTree<double>& tree() const {
+    return internal::GetInternalTree(*plant_);
+  }
+
+ protected:
+  // Since the maximum absolute value of acceleration in this test is
+  // approximately ω² * (2 * link_length) ≈ 72 , we test that the errors in
+  // acceleration calculations is less than 3 bits (2^3 = 8).
+  const double kTolerance = 8 * std::numeric_limits<double>::epsilon();
+  const double mass_link_ = 5.0;    // kg
+  const double link_length_ = 4.0;  // meters
+  const double wAz_ = 3.0;          // rad/sec
+  const double wBz_ = 1.2;          // rad/sec
+
+  std::unique_ptr<MultibodyPlant<double>> plant_;
+  std::unique_ptr<Context<double>> context_;
+  const RigidBody<double>* bodyA_{nullptr};
+  const RigidBody<double>* bodyB_{nullptr};
+  const RevoluteJoint<double>* joint1_{nullptr};
+  const RevoluteJoint<double>* joint2_{nullptr};
+  // The rigid transform constructor X_AW_ below specifies that the position
+  // from Ao (A's origin) to Wo (world origin) is  -0.5 * link_length * Ax.
+  // For X_AF_, frame F is affixed/welded to A and colocated with joint1 and
+  // the position from Ao to Fo (F's origin) is  0.5 * link_length * Ax.
+  // For X_BM_, frame M is affixed/welded to B and colocated with joint1 and
+  // the position from Bo to Mo (M's origin) is 0.5 * link_length * (Ax = Bx).
+  math::RigidTransformd X_AW_{Vector3d(-0.5 * link_length_, 0.0, 0.0)};
+  math::RigidTransformd X_AF_{Vector3d(0.5 * link_length_, 0.0, 0.0)};
+  math::RigidTransformd X_BM_{Vector3d(-0.5 * link_length_, 0.0, 0.0)};
+};
+
+TEST_F(TwoDOFPlanarPendulumTest, CalcBiasSpatialAcceleration) {
+  Eigen::VectorXd state = Eigen::Vector4d(0.0, 0.0, wAz_, wBz_);
+  joint1_->set_angle(context_.get(), state[0]);
+  joint2_->set_angle(context_.get(), state[1]);
+  joint1_->set_angular_rate(context_.get(), state[2]);
+  joint2_->set_angular_rate(context_.get(), state[3]);
+
+  // For point Ap of A, calculate Ap's bias spatial acceleration in world W.
+  const Frame<double>& frame_A = bodyA_->body_frame();
+  const Frame<double>& frame_W = plant_->world_frame();
+  const Vector3<double> p_AoAp_A(0.5 * link_length_, 0.0, 0.0);
+  const SpatialAcceleration<double> aBias_WAp_W =
+      plant_->CalcBiasSpatialAcceleration(*context_, JacobianWrtVariable::kV,
+          frame_A, p_AoAp_A, frame_W, frame_W);
+
+  // Simple by-hand analysis gives aBias_WAp_W = -L wAz_² Wx.
+  const double wA_squared = wAz_ * wAz_;
+  const Vector3<double> aBias_WAp_W_expected = -link_length_ *
+      wA_squared * Vector3d::UnitX();
+  EXPECT_TRUE(CompareMatrices(aBias_WAp_W.translational(), aBias_WAp_W_expected,
+                              kTolerance));
+  EXPECT_TRUE(CompareMatrices(aBias_WAp_W.rotational(), Vector3d::Zero(),
+                              kTolerance));
+
+  // For point Bp of B, calculate Bp's bias spatial acceleration in world W.
+  const Frame<double>& frame_B = bodyB_->body_frame();
+  const Vector3<double> p_BoBp_B(0.5 * link_length_, 0.0, 0.0);
+  const SpatialAcceleration<double> aBias_WBp_W =
+      plant_->CalcBiasSpatialAcceleration(*context_, JacobianWrtVariable::kV,
+                                          frame_B, p_BoBp_B, frame_W, frame_W);
+
+  // By-hand analysis gives aBias_WBp_W = -L wAz_² Wx - L (wAz_ + wBz_)² Wx
+  const double wB_squared = (wAz_ + wBz_) * (wAz_ + wBz_);
+  const Vector3<double> aBias_WBp_W_expected = (-link_length_ * wA_squared +
+      -link_length_ * wB_squared) * Vector3d::UnitX();
+  EXPECT_TRUE(CompareMatrices(aBias_WBp_W.translational(), aBias_WBp_W_expected,
+                              kTolerance));
+  EXPECT_TRUE(CompareMatrices(aBias_WBp_W.rotational(), Vector3d::Zero(),
+                              kTolerance));
+}
+
+TEST_F(TwoDOFPlanarPendulumTest,
+       CalcJacobianVelocityAndBiasAccelerationOfSystemCenterOfMass) {
+  Eigen::VectorXd state = Eigen::Vector4d(0.0, 0.0, wAz_, wBz_);
+  joint1_->set_angle(context_.get(), state[0]);
+  joint2_->set_angle(context_.get(), state[1]);
+  joint1_->set_angular_rate(context_.get(), state[2]);
+  joint2_->set_angular_rate(context_.get(), state[3]);
+
+  // Test for CalcJacobianCenterOfMassTranslationalVelocity()
+  Eigen::MatrixXd Js_v_WCcm_W(3, plant_->num_velocities());
+  plant_->CalcJacobianCenterOfMassTranslationalVelocity(
+      *context_, JacobianWrtVariable::kV, plant_->world_frame(),
+      plant_->world_frame(), &Js_v_WCcm_W);
+
+  Eigen::MatrixXd Js_v_WCcm_W_expected(3, plant_->num_velocities());
+  // CCm's velocity in world W is expected to be (L wAz_ + 0.25 L wBz_) 𝐖𝐲,
+  // hence the CCm's translational Jacobian with respect to {wAz_ , wBz_} is
+  // { L 𝐖𝐲, 0.25 L 𝐖𝐲 } = { [0, L, 0] [0, 0.25 L, 0] }
+  Js_v_WCcm_W_expected << 0.0, 0.0,
+                          link_length_, 0.25 * link_length_,
+                          0.0, 0.0;
+  Vector3d v_WCcm_W_expected =
+      (wAz_ * link_length_ + wBz_ * 0.25 * link_length_) * Vector3d::UnitY();
+
+  EXPECT_TRUE(CompareMatrices(Js_v_WCcm_W, Js_v_WCcm_W_expected, kTolerance));
+  EXPECT_TRUE(
+      CompareMatrices(Js_v_WCcm_W * state.tail(plant_->num_velocities()),
+                      v_WCcm_W_expected, kTolerance));
+
+  // Test for CalcBiasCenterOfMassTranslationalAcceleration()
+  const Vector3<double>& abias_WCcm_W =
+      plant_->CalcBiasCenterOfMassTranslationalAcceleration(
+          *context_, JacobianWrtVariable::kV, plant_->world_frame(),
+          plant_->world_frame());
+
+  // CCm's bias translational in world W is expected to be
+  // abias_WCcm = -L (wAz_² + 0.5 wAz_ wBz_ + 0.25 wBz_²) 𝐖𝐱
+  Vector3d abias_WCcm_W_expected =
+      -link_length_ * (wAz_ * wAz_ + 0.5 * wAz_ * wBz_ + 0.25 * wBz_ * wBz_) *
+      Vector3d::UnitX();
+  EXPECT_TRUE(CompareMatrices(abias_WCcm_W, abias_WCcm_W_expected, kTolerance));
+}
+
+// This tests the method CalcBiasSpatialAcceleration() against an expected
+// solution that uses AutoDiffXd to compute Dt(J𝑠) ⋅ 𝑠, where Dt(J𝑠) is the time
+// derivative of the Jacobian with respect to "speeds" 𝑠, and 𝑠 is either
+// q̇ (time-derivatives of generalized positions) or v (generalized velocities).
+TEST_F(KukaIiwaModelTests, CalcBiasSpatialAcceleration) {
+  // Set state to arbitrary non-planar values for the joint's angles and rates.
+  SetArbitraryConfiguration();
+  const VectorX<double> q = plant_->GetPositions(*context_);
+  const VectorX<double> v = plant_->GetVelocities(*context_);
+  const int num_positions = plant_->num_positions();
+  const int num_velocities = plant_->num_velocities();
+  const int num_states = plant_->num_multibody_states();
+
+  // Bias acceleration is not a function of vdot (it is a function of q and v).
+  // NaN values for generalized accelerations vdot are chosen to highlight the
+  // fact that bias acceleration is not a function of vdot.
+  const VectorX<double> vdot = VectorX<double>::Constant(
+      num_velocities, std::numeric_limits<double>::quiet_NaN());
+
+  // Enable q_autodiff and v_autodiff to differentiate with respect to time.
+  // Note: Pass MatrixXd() so the return gradient uses AutoDiffXd (for which we
+  // do have explicit instantiations) instead of AutoDiffScalar<Matrix1d>.
+  VectorX<double> qdot(num_positions);
+  plant_->MapVelocityToQDot(*context_, v, &qdot);
+  auto q_autodiff =
+      math::initializeAutoDiffGivenGradientMatrix(q, MatrixXd(qdot));
+  auto v_autodiff =
+      math::initializeAutoDiffGivenGradientMatrix(v, MatrixXd(vdot));
+
+  // Set the context for AutoDiffXd computations.
+  VectorX<AutoDiffXd> x_autodiff(num_states);
+  x_autodiff << q_autodiff, v_autodiff;
+  plant_autodiff_->GetMutablePositionsAndVelocities(context_autodiff_.get()) =
+      x_autodiff;
+
+  // Point Ep is affixed/welded to the end-effector E.
+  const Vector3<double> p_EEp(0.1, -0.05, 0.02);
+  const Vector3<AutoDiffXd> p_EEp_autodiff = p_EEp;
+
+  // Get shortcuts to end-effector link frame E and world frame W.
+  const Frame<AutoDiffXd>& frame_E_autodiff =
+      plant_autodiff_->get_body(end_effector_link_->index()).body_frame();
+  const Frame<AutoDiffXd>& frame_W_autodiff = plant_autodiff_->world_frame();
+
+  // Compute point Ep's spatial velocity Jacobian with respect to generalized
+  // velocities v in world frame W, expressed in W, and its time derivative.
+  MatrixX<AutoDiffXd> Jv_V_WEp_autodiff(6, num_velocities);
+  plant_autodiff_->CalcJacobianSpatialVelocity(
+      *context_autodiff_, JacobianWrtVariable::kV, frame_E_autodiff,
+      p_EEp_autodiff, frame_W_autodiff, frame_W_autodiff, &Jv_V_WEp_autodiff);
+
+  // Use AutoDiffXd to extract Dt(Jv_V_WEp), the ordinary time-derivative of
+  // Ep's spatial Jacobian in world W, expressed in W.
+  auto Dt_Jv_V_WEp = math::autoDiffToGradientMatrix(Jv_V_WEp_autodiff);
+  Dt_Jv_V_WEp.resize(6, num_velocities);
+
+  // Form the expected bias spatial acceleration via AutoDiffXd results.
+  const VectorX<double> AvBias_WEp_expected = Dt_Jv_V_WEp * v;
+
+  // Compute Ep's bias spatial acceleration in world frame W.
+  const Frame<double>& frame_W = plant_->world_frame();
+  const Frame<double>& frame_E = end_effector_link_->body_frame();
+  const SpatialAcceleration<double> AvBias_WEp_W =
+      plant_->CalcBiasSpatialAcceleration(*context_, JacobianWrtVariable::kV,
+                                          frame_E, p_EEp, frame_W, frame_W);
+
+  // Numerical tolerance used to verify numerical results.
+  const double kTolerance = 8 * std::numeric_limits<double>::epsilon();
+
+  // Verify computed bias translational acceleration numerical values and ensure
+  // the results are stored in a matrix of size (6 x num_velocities).
+  EXPECT_TRUE(CompareMatrices(AvBias_WEp_W.get_coeffs(), AvBias_WEp_expected,
+                              kTolerance, MatrixCompareType::relative));
+}
+
+// This tests the method CalcBiasTranslationalAcceleration() against an expected
+// solution that uses AutoDiffXd to compute Dt(J𝑠) ⋅ 𝑠, where Dt(J𝑠) is the
+// time derivative of the Jacobian with respect to "speeds" 𝑠, and 𝑠 is either
+// q̇ (time-derivatives of generalized positions) or v (generalized velocities).
+TEST_F(KukaIiwaModelTests, CalcBiasTranslationalAcceleration) {
+  // Set state to arbitrary non-planar values for the joint's angles and rates.
+  SetArbitraryConfiguration();
+
+  const int num_velocities = plant_->num_velocities();
+
+  // Bias acceleration is not a function of vdot (it is a function of q and v).
+  // NaN values for generalized accelerations vdot are chosen to highlight the
+  // fact that bias acceleration is not a function of vdot.
+  const VectorX<double> vdot = VectorX<double>::Constant(
+      num_velocities, std::numeric_limits<double>::quiet_NaN());
+
+  const VectorX<double> q = plant_->GetPositions(*context_);
+  const VectorX<double> v = plant_->GetVelocities(*context_);
+
+  // Enable q_autodiff and v_autodiff to differentiate with respect to time.
+  // Note: Pass MatrixXd() so the return gradient uses AutoDiffXd (for which we
+  // do have explicit instantiations) instead of AutoDiffScalar<Matrix1d>.
+  VectorX<double> qdot(plant_->num_positions());
+  plant_->MapVelocityToQDot(*context_, v, &qdot);
+  auto q_autodiff =
+      math::initializeAutoDiffGivenGradientMatrix(q, MatrixXd(qdot));
+  auto v_autodiff =
+      math::initializeAutoDiffGivenGradientMatrix(v, MatrixXd(vdot));
+
+  // Set the context for AutoDiffXd computations.
+  VectorX<AutoDiffXd> x_autodiff(plant_->num_multibody_states());
+  x_autodiff << q_autodiff, v_autodiff;
+  plant_autodiff_->GetMutablePositionsAndVelocities(context_autodiff_.get()) =
+      x_autodiff;
+
+  // Points Ei (i = 0, 1) are affixed/welded to the end-effector E.
+  // Designate Ei's positions from origin Eo, expressed in frame E.
+  const int kNumPoints = 2;  // The set stores 2 points.
+  Matrix3X<double> p_EEi(3, kNumPoints);
+  p_EEi.col(0) << 0.1, -0.05, 0.02;
+  p_EEi.col(1) << 0.2, 0.3, -0.15;
+  const Matrix3X<AutoDiffXd> p_EEi_autodiff = p_EEi;
+
+  // Get shortcuts to end-effector link frame E and world frame W.
+  const Frame<AutoDiffXd>& frame_E_autodiff =
+      plant_autodiff_->get_body(end_effector_link_->index()).body_frame();
+  const Frame<AutoDiffXd>& frame_W_autodiff = plant_autodiff_->world_frame();
+
+  // Compute Ei's translational velocity Jacobian with respect to generalized
+  // velocities v in world frame W, expressed in W, and its time derivative.
+  MatrixX<AutoDiffXd> Jv_v_WEi_autodiff(3 * kNumPoints, num_velocities);
+  plant_autodiff_->CalcJacobianTranslationalVelocity(
+      *context_autodiff_, JacobianWrtVariable::kV, frame_E_autodiff,
+      p_EEi_autodiff, frame_W_autodiff, frame_W_autodiff, &Jv_v_WEi_autodiff);
+
+  // Use AutoDiffXd to extract Dt(Jv_v_WEi), the ordinary time-derivative of
+  // Ei's translational Jacobian in world W, expressed in W.
+  auto Dt_Jv_v_WEi = math::autoDiffToGradientMatrix(Jv_v_WEi_autodiff);
+  Dt_Jv_v_WEi.resize(3 * kNumPoints, num_velocities);
+
+  // Form the expected bias translational acceleration via AutoDiffXd results.
+  const VectorX<double> avBias_WEi_W_expected_VectorX = Dt_Jv_v_WEi * v;
+
+  // Reshape the expected results from VectorX to Matrix3X.
+  Matrix3X<double> avBias_WEi_W_expected(3, kNumPoints);
+  avBias_WEi_W_expected.col(0) = avBias_WEi_W_expected_VectorX.head(3);
+  avBias_WEi_W_expected.col(1) = avBias_WEi_W_expected_VectorX.tail(3);
+
+  // Compute Ep's bias translational acceleration in world frame W.
+  const Frame<double>& frame_W = plant_->world_frame();
+  const Frame<double>& frame_E = end_effector_link_->body_frame();
+
+  const Matrix3X<double> avBias_WEi_W =
+      plant_->CalcBiasTranslationalAcceleration(
+          *context_, JacobianWrtVariable::kV, frame_E, p_EEi, frame_W, frame_W);
+
+  // Numerical tolerance used to verify numerical results.
+  const double kTolerance = 8 * std::numeric_limits<double>::epsilon();
+
+  // Verify computed bias translational acceleration numerical values and ensure
+  // the results are stored in a matrix of size (3 kNumPoints x num_velocities).
+  EXPECT_TRUE(CompareMatrices(avBias_WEi_W, avBias_WEi_W_expected, kTolerance,
+                              MatrixCompareType::relative));
+
+  // Express the expected bias acceleration result in the end-effector frame_E.
+  const RotationMatrix<double> R_WE =
+      frame_E.CalcRotationMatrixInWorld(*context_);
+  const RotationMatrix<double> R_EW = R_WE.inverse();
+  const Matrix3X<double> avBias_WEi_E_expected = R_EW * avBias_WEi_W_expected;
+
+  // Form Ei's bias translational acceleration in world frame, expressed in E
+  // and ensure it is nearly identical to the expected results.
+  const Matrix3X<double> avBias_WEi_E =
+      plant_->CalcBiasTranslationalAcceleration(
+          *context_, JacobianWrtVariable::kV, frame_E, p_EEi, frame_W, frame_E);
+
+  EXPECT_TRUE(CompareMatrices(avBias_WEi_E, avBias_WEi_E_expected, kTolerance,
+                              MatrixCompareType::relative));
+
+  // Ensure CalcBiasTranslationalAcceleration() works when it is passed a single
+  // generic position vector, which should returns a single bias acceleration.
+  const auto p_EEp = p_EEi.col(0);
+  const Vector3<double> avBias_WEp_E =
+      plant_->CalcBiasTranslationalAcceleration(
+          *context_, JacobianWrtVariable::kV, frame_E, p_EEp, frame_W, frame_E);
+  EXPECT_TRUE(CompareMatrices(avBias_WEp_E, avBias_WEi_E_expected.col(0),
+                              kTolerance, MatrixCompareType::relative));
+
+  // Ensure CalcBiasTranslationalAcceleration() works when it is passed a
+  // MatrixX<double> instead of a Matrix3X<double> of position vectors.
+  const MatrixX<double> p_EEj = p_EEi;
+  const MatrixX<double> avBias_WEj_E =
+      plant_->CalcBiasTranslationalAcceleration(
+          *context_, JacobianWrtVariable::kV, frame_E, p_EEi, frame_W, frame_E);
+  EXPECT_TRUE(CompareMatrices(avBias_WEj_E, avBias_WEi_E_expected, kTolerance,
+                              MatrixCompareType::relative));
+
+  // Verify CalcBiasTranslationalAcceleration() throws an exception if
+  // with_respect_to is JacobianWrtVariable::kQDot.
+  // TODO(Mitiguy) Remove this test when CalcBiasTranslationalAcceleration() is
+  //  improved to handle JacobianWrtVariable::kQDot.
+  EXPECT_THROW(plant_->CalcBiasTranslationalAcceleration(
+                   *context_, JacobianWrtVariable::kQDot, frame_E, p_EEi,
+                   frame_W, frame_W),
+               std::exception);
+
+  // Verify CalcBiasTranslationalAcceleration() throws an exception if
+  // measured-in-frame is something other than the world frame W.
+  // TODO(Mitiguy) Remove this test when CalcBiasTranslationalAcceleration() is
+  //  improved to handle an arbitrary measured-in-frame.
+  EXPECT_THROW(
+      plant_->CalcBiasTranslationalAcceleration(
+          *context_, JacobianWrtVariable::kV, frame_E, p_EEi, frame_E, frame_W),
+      std::exception);
 }
 
 }  // namespace

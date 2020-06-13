@@ -208,7 +208,7 @@ template<typename T> class BodyNode;
 /// - [Featherstone 2008] Featherstone, R., 2008. Rigid body dynamics
 ///                       algorithms. Springer.
 ///
-/// @tparam T The scalar type. Must be a valid Eigen scalar.
+/// @tparam_default_scalar
 template <typename T>
 class Mobilizer : public MultibodyElement<Mobilizer, T, MobilizerIndex> {
  public:
@@ -323,7 +323,7 @@ class Mobilizer : public MultibodyElement<Mobilizer, T, MobilizerIndex> {
   /// the vector of generalized positions related to this mobilizer to zero.
   /// However, in the general case, setting all generalized coordinates to zero
   /// does not correspond to the _zero_ position and it might even not
-  /// represent a mathematicaly valid one. Consider for instance a quaternion
+  /// represent a mathematically valid one. Consider for instance a quaternion
   /// mobilizer, for which its _zero_ position corresponds to the quaternion
   /// [1, 0, 0, 0].
   ///

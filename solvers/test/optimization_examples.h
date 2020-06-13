@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <vector>
@@ -768,6 +769,13 @@ class EckhardtProblem {
   std::unique_ptr<MathematicalProgram> prog_;
   Vector3<symbolic::Variable> x_;
 };
+
+/**
+ * Test dual solution for Eckhardt problem.
+ */
+void TestEckhardtDualSolution(const SolverInterface& solver,
+                              const Eigen::Ref<const Eigen::VectorXd>& x_init,
+                              double tol = 1e-6);
 
 /**
  * This is problem 106 from  Test examples for Nonlinear Programming

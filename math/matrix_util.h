@@ -1,11 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 
 #include <Eigen/Dense>
 
 #include "drake/common/drake_assert.h"
+#include "drake/common/drake_throw.h"
 #include "drake/common/eigen_types.h"
 
 namespace drake {
@@ -117,5 +119,37 @@ ToSymmetricMatrixFromLowerTriangularColumns(
       rows, lower_triangular_columns, &symmetric_matrix);
   return symmetric_matrix;
 }
+
+/// Checks if a matrix is symmetric (with tolerance @p symmetry_tolerance --
+/// @see IsSymmetric) and has all eigenvalues greater than @p
+/// eigenvalue_tolerance.  @p eigenvalue_tolerance must be >= 0 -- where 0
+/// implies positive semi-definite (but is of course subject to all of the
+/// pitfalls of floating point).
+///
+/// To consider the numerical robustness of the eigenvalue estimation, we
+/// specifically check that min_eigenvalue >= eigenvalue_tolerance * max(1,
+/// max_abs_eigenvalue).
+template <typename Derived>
+bool IsPositiveDefinite(const Eigen::MatrixBase<Derived>& matrix,
+                        double eigenvalue_tolerance = 0.0,
+                        double symmetry_tolerance = 0.0) {
+  DRAKE_DEMAND(eigenvalue_tolerance >= 0);
+  DRAKE_DEMAND(symmetry_tolerance >= 0);
+  if (!IsSymmetric(matrix, symmetry_tolerance)) return false;
+
+  // Note: Eigen's documentation clearly warns against using the faster LDLT
+  // for this purpose, as the algorithm cannot handle indefinite matrices.
+  Eigen::SelfAdjointEigenSolver<typename Derived::PlainObject> eigensolver(
+      matrix);
+  DRAKE_THROW_UNLESS(eigensolver.info() == Eigen::Success);
+  // According to the Lapack manual, the absolute accuracy of eigenvalues is
+  // eps*max(|eigenvalues|), so I will write my tolerances relative to that.
+  // Anderson et al., Lapack User's Guide, 3rd ed. section 4.7, 1999.
+  const double max_abs_eigenvalue =
+      eigensolver.eigenvalues().cwiseAbs().maxCoeff();
+  return eigensolver.eigenvalues().minCoeff() >=
+         eigenvalue_tolerance * std::max(1., max_abs_eigenvalue);
+}
+
 }  // namespace math
 }  // namespace drake

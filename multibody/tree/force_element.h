@@ -33,7 +33,7 @@ namespace multibody {
 /// - CalcNonConservativePower(): computes the power dissipated by
 ///   non-conservative forces.
 ///
-/// @tparam T The scalar type. Must be a valid Eigen scalar.
+/// @tparam_default_scalar
 template <typename T>
 class ForceElement : public
                      MultibodyElement<ForceElement, T, ForceElementIndex> {
@@ -47,7 +47,7 @@ class ForceElement : public
 
   /// (Advanced) Computes the force contribution for `this` force element and
   /// **adds** it to the output arrays of forces. Depending on their model,
-  /// different force elements may write into the array of sptial forces
+  /// different force elements may write into the array of spatial forces
   /// `F_B_W` or the array of generalized forces `tau`.
   ///
   /// @param[in] context
@@ -95,7 +95,7 @@ class ForceElement : public
   /// for CalcPotentialEnergy() for a detailed description of the input
   /// arguments of the methods in this group.
   ///
-  // TODO(amcastro-tri): make this methods DoCalcXXX() when caching gets in and
+  // TODO(amcastro-tri): make this methods DoCalcFoo() when caching gets in and
   // make the public API's to only take a Context.
   //@{
 
@@ -198,7 +198,7 @@ class ForceElement : public
   /// an elastic spring between two bodies:
   /// @code
   ///   template <typename T>
-  ///   class SpringElement {
+  ///   class SpringElement : public ForceElement<T> {
   ///    public:
   ///     // Class's constructor.
   ///     SpringElement(

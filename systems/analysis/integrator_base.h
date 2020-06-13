@@ -1,16 +1,18 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <utility>
+#include <vector>
 
+#include "drake/common/default_scalars.h"
 #include "drake/common/drake_assert.h"
+#include "drake/common/drake_bool.h"
 #include "drake/common/drake_copyable.h"
 #include "drake/common/text_logging.h"
-#include "drake/systems/analysis/dense_output.h"
-#include "drake/systems/analysis/hermitian_dense_output.h"
-#include "drake/systems/analysis/stepwise_dense_output.h"
+#include "drake/common/trajectories/piecewise_polynomial.h"
 #include "drake/systems/framework/context.h"
 #include "drake/systems/framework/system.h"
 #include "drake/systems/framework/vector_base.h"
@@ -18,26 +20,23 @@
 namespace drake {
 namespace systems {
 
-/**
- An abstract class for an integrator for ODEs and DAEs as represented by a
- Drake System. Integrators solve initial value problems of the form:<pre>
- ẋ(t) = f(t, x(t)) with f : ℝ × ℝⁿ → ℝⁿ
- </pre>
- (i.e., `f()` is an ordinary differential equation) given initial conditions
- (t₀, x₀). Thus, integrators advance the continuous state of a dynamical
- system forward in time.
-  Apart from solving initial value problems, for which the integrator is a
+/** @addtogroup simulation
+ @{
+ @defgroup integrators Integrators
+
+ Apart from solving initial value problems, for which the integrator is a
  key component of a simulator, integrators can also be used to solve
  boundary value problems (via numerical methods like the Multiple Shooting
  Method) and trajectory optimization problems (via numerical methods like
- direct transcription). This class and its derivatives were developed
- primarily toward the former application (through IntegrateNoFurtherThanTime()
- and the Simulator class). However, the IntegratorBase architecture was
- developed to support these ancillary applications as well using the
- IntegrateWithMultipleStepsToTime() and IntegrateWithSingleFixedStepToTime()
- methods; the latter permits the caller to advance time using fixed steps in
- applications where variable stepping would be deleterious (e.g., direct
- transcription).
+ direct transcription). IntegratorBase and its derivatives were developed
+ primarily toward the former application (through
+ IntegratorBase::IntegrateNoFurtherThanTime() and the Simulator class).
+ However, the IntegratorBase architecture was developed to support these
+ ancillary applications as well using the
+ IntegratorBase::IntegrateWithMultipleStepsToTime() and
+ IntegratorBase::IntegrateWithSingleFixedStepToTime() methods; the latter
+ permits the caller to advance time using fixed steps in applications where
+ variable stepping would be deleterious (e.g., direct transcription).
 
  @section integrator-selection Integrator selection
  A natural question for a user to ask of an integrator is: Which scheme
@@ -74,15 +73,15 @@ namespace systems {
  @section settings Integrator settings
  IntegratorBase provides numerous settings and flags that can leverage
  problem-specific information to speed integration and/or improve integration
- accuracy. As an example, set_maximum_step_size() allows the user to prevent
- overly large integration steps (that integration error control alone might
- be insufficient to detect). As noted previously, IntegratorBase also collects
- a plethora of statistics that can be used to diagnose poor integration
- performance. For example, a large number of shrinkages due to @ref
- error-estimation-and-control "error control" could indicate that a system is
- computationally stiff. **Note that you might need to alter the default settings
- to obtain desired performance even though we have attempted to select
- reasonable defaults for many problems.**
+ accuracy. As an example, IntegratorBase::set_maximum_step_size() allows the
+ user to prevent overly large integration steps (that integration error
+ control alone might be insufficient to detect). As noted previously,
+ IntegratorBase also collects a plethora of statistics that can be used to
+ diagnose poor integration performance. For example, a large number of
+ shrinkages due to @ref error-estimation-and-control "error control" could
+ indicate that a system is computationally stiff. **Note that you might need
+ to alter the default settings to obtain desired performance even though we
+ have attempted to select reasonable defaults for many problems.**
 
  See settings for @ref integrator-accuracy,
  @ref integrator-maxstep "maximum step size",
@@ -95,17 +94,31 @@ namespace systems {
  For applications that require a more dense sampling of the system
  continuous state than what would be available through either fixed or
  error-controlled step integration (for a given accuracy), dense output
- support is available (through StartDenseIntegration() and
- StopDenseIntegration() methods). The accuracy and performance of these
- outputs may vary with each integration scheme implementation. Unless
- specified otherwise, an HermitianDenseOutput is provided by default.
+ support is available (through IntegratorBase::StartDenseIntegration() and
+ IntegratorBase::StopDenseIntegration() methods). The accuracy and performance
+ of these outputs may vary with each integration scheme implementation.
 
  @section references References
   - [Hairer, 1996]   E. Hairer and G. Wanner. Solving Ordinary Differential
                      Equations II (Stiff and Differential-Algebraic Problems).
                      Springer, 1996.
+ @}
+ */
 
- @tparam T The vector element type, which must be a valid Eigen scalar.
+/**
+ An abstract class for an integrator for ODEs and DAEs as represented by a
+ Drake System. Integrators solve initial value problems of the form:<pre>
+ ẋ(t) = f(t, x(t)) with f : ℝ × ℝⁿ → ℝⁿ
+ </pre>
+ (i.e., `f()` is an ordinary differential equation) given initial conditions
+ (t₀, x₀). Thus, integrators advance the continuous state of a dynamical
+ system forward in time.
+
+ Drake's subclasses of IntegratorBase<T> should follow the naming pattern
+ `FooIntegrator<T>` by convention.
+
+ @tparam_default_scalar
+ @ingroup integrators
  */
 template <class T>
 class IntegratorBase {
@@ -155,8 +168,7 @@ class IntegratorBase {
    */
   explicit IntegratorBase(const System<T>& system,
                           Context<T>* context = nullptr)
-      : system_(system), context_(context),
-        derivatives_(system.AllocateTimeDerivatives()) {
+      : system_(system), context_(context) {
     initialization_done_ = false;
   }
 
@@ -168,8 +180,9 @@ class IntegratorBase {
    The precise meaning of *accuracy* is a complicated discussion, but it
    translates roughly to the number of significant digits you want in the
    results. By convention it is supplied as `10^-digits`, meaning that an
-   accuracy of 1e-3 provides about three significant digits. For continued
-   discussion of accuracy, see [Sherman 2011].
+   accuracy of 1e-3 provides about three significant digits. For more
+   discussion of accuracy, see @ref accuracy_and_tolerance and ref.
+   [[1]](https://dx.doi.org/10.1016/j.piutam.2011.04.023).
 
    Integrators vary in the range of accuracy (loosest to tightest) that they
    can support, and each integrator will choose a default accuracy to be used
@@ -185,9 +198,8 @@ class IntegratorBase {
    certainly implies greater error in the ODE solution and might impact the
    stability of the solution negatively as well.
 
-   - [Sherman, 2011]  M. Sherman, et al. Procedia IUTAM 2:241-261 (2011),
-                      Section 3.3.
-                      http://dx.doi.org/10.1016/j.piutam.2011.04.023
+   - [1] M. Sherman, A. Seth, S. Delp. Procedia IUTAM 2:241-261 (2011),
+     Section 3.3. https://dx.doi.org/10.1016/j.piutam.2011.04.023
 
    @{
    */
@@ -711,52 +723,51 @@ class IntegratorBase {
    Variable step integrators reduce their step sizes as needed to achieve
    requirements such as specified accuracy or step convergence. However, it is
    not possible to take an arbitrarily small step. Normally integrators choose
-   an appropriate minimum step and throw an exception if the requirements
-   can't be achieved without going below that. Methods in this section allow
-   you to influence two aspects of this procedure:
+   an appropriate minimum step and throw an exception if the requirements can't
+   be achieved without going below that. Methods in this section allow you to
+   influence two aspects of this procedure:
 
    - you can increase the minimum step size, and
-   - you can control whether an exception is thrown if a smaller step would
-     have been needed to achieve the aforementioned integrator requirements.
+   - you can control whether an exception is thrown if a smaller step would have
+     been needed to achieve the aforementioned integrator requirements.
 
-   By default, integrators allow a very small minimum step which can
-   result in long run times. Setting a larger minimum can be helpful as a
-   diagnostic to figure out what aspect of your simulation is requiring small
-   steps. You can set the minimum to what should be a "reasonable" minimum
-   based on what you know about the physical system. You will then get an
-   std::runtime_error exception thrown at any point in time where your model
-   behaves unexpectedly (due to, e.g., a discontinuity in the derivative
-   evaluation function).
+   By default, integrators allow a very small minimum step which can result in
+   long run times. Setting a larger minimum can be helpful as a diagnostic to
+   figure out what aspect of your simulation is requiring small steps. You can
+   set the minimum to what should be a "reasonable" minimum based on what you
+   know about the physical system. You will then get an std::runtime_error
+   exception thrown at any point in time where your model behaves unexpectedly
+   (due to, e.g., a discontinuity in the derivative evaluation function).
 
    If you disable the exception (via
    `set_throw_on_minimum_step_size_violation(false)`), the integrator will
-   simply proceed with a step of the minimum size: accuracy is guaranteed
-   only when the minimum step size is not violated. Beware that there can be
-   no guarantee about the magnitude of any errors introduced by violating the
-   accuracy "requirements" in this manner, so disabling the exception should
-   be done warily.
+   simply proceed with a step of the minimum size: accuracy is guaranteed only
+   when the minimum step size is not violated. Beware that there can be no
+   guarantee about the magnitude of any errors introduced by violating the
+   accuracy "requirements" in this manner, so disabling the exception should be
+   done warily.
 
    #### Details
-   Because time is maintained to finite precision, the integrator uses a
-   scalar `h_floor` to constrain time step h ≥ `h_floor` such that
-   `current_time + h > current_time` will be strictly satisfied.
-   The integrator will never automatically decrease its step below `h_floor`.
-   We calculate `h_floor=max(ε, ε⋅t)`, where t is the current time and ε is a
-   small multiple of machine precision, typically a number like 1e-14. Note
-   that `h_floor` necessarily grows with time; if that is a concern you should
-   limit how long your simulations are allowed to run without resetting time.
+   Because time is maintained to finite precision, the integrator uses a scalar
+   `h_floor` to constrain time step h ≥ `h_floor` such that `current_time + h >
+   current_time` will be strictly satisfied. The integrator will never
+   automatically decrease its step below `h_floor`. We calculate `h_floor=max(ε,
+   ε⋅abs(t))`, where t is the current time and ε is a small multiple of machine
+   precision, typically a number like 1e-14. Note that `h_floor` necessarily
+   grows with time; if that is a concern you should limit how long your
+   simulations are allowed to run without resetting time.
 
-   You may request a larger minimum step size `h_min`. Then at every time t,
-   the integrator determines a "working" minimum `h_work=max(h_min, h_floor)`.
-   If the step size selection algorithm determines that a step smaller than
-   `h_work` is needed to meet accuracy or other needs, then a
-   std::runtime_error exception will be thrown and the simulation halted. On
-   the other hand, if you have suppressed the exception (again, via
-   `set_throw_on_minimum_step_size_violation(false)`), the integration
-   will continue, taking a step of size `h_work`.
+   You may request a larger minimum step size `h_min`. Then at every time t, the
+   integrator determines a "working" minimum `h_work=max(h_min, h_floor)`. If
+   the step size selection algorithm determines that a step smaller than
+   `h_work` is needed to meet accuracy or other needs, then a std::runtime_error
+   exception will be thrown and the simulation halted. On the other hand, if you
+   have suppressed the exception (again, via
+   `set_throw_on_minimum_step_size_violation(false)`), the integration will
+   continue, taking a step of size `h_work`.
 
-   Under some circumstances the integrator may legitimately take a step of
-   size `h` smaller than your specified `h_min`, although never smaller than
+   Under some circumstances the integrator may legitimately take a step of size
+   `h` smaller than your specified `h_min`, although never smaller than
    `h_floor`. For example, occasionally the integrator may reach an event or
    time limit that occurs a very short time after the end of a previous step,
    necessitating that a tiny "sliver" of a step be taken to complete the
@@ -764,15 +775,15 @@ class IntegratorBase {
    convergence goals are achieved. Larger steps can resume immediately
    afterwards. Another circumstance is when one of the integrator's stepping
    methods is called directly requesting a very small step, for example
-   `IntegrateWithMultipleStepsToTime(h)`. No exception will be thrown in
-   either of these cases.
+   `IntegrateWithMultipleStepsToTime(h)`. No exception will be thrown in either
+   of these cases.
    */
 
   //@{
   /**
    Sets the requested minimum step size `h_min` that may be taken by this
    integrator. No step smaller than this will be taken except under
-   circumstances as described @link Minstep above. @endlink This setting will
+   circumstances as described @ref integrator-minstep "above". This setting will
    be ignored if it is smaller than the absolute minimum `h_floor` also
    described above. Default value is zero.
    @param min_step_size a non-negative value. Setting this value to zero
@@ -800,7 +811,7 @@ class IntegratorBase {
    must take a step smaller than the minimum step size (for, e.g., purposes
    of error control). Default is `true`. If `false`, the integrator will
    advance time and state using the minimum specified step size in such
-   situations. See @link Minstep this section @endlink for more detail.
+   situations. See @ref integrator-minstep "this section" for more detail.
    */
   void set_throw_on_minimum_step_size_violation(bool throws) {
     min_step_exceeded_throws_ = throws;
@@ -819,16 +830,15 @@ class IntegratorBase {
    Gets the current value of the working minimum step size `h_work(t)` for
    this integrator, which may vary with the current time t as stored in the
    integrator's context.
-   @see @link Minstep this section @endlink for more detail.
+   See @ref integrator-minstep "this section" for more detail.
    */
   T get_working_minimum_step_size() const {
     using std::max;
+    using std::abs;
     // Tolerance is just a number close to machine epsilon.
     const double tol = 1e-14;
 
-    // Formula below requires time to be non-negative.
-    DRAKE_DEMAND(get_context().get_time() >= 0);
-    const T smart_minimum = max(tol, get_context().get_time() * tol);
+    const T smart_minimum = max(tol, abs(get_context().get_time()) * tol);
     return max(smart_minimum, req_min_step_size_);
   }
   // @}
@@ -890,17 +900,19 @@ class IntegratorBase {
     if (!context_) throw std::logic_error("Context has not been set.");
 
     // Verify that user settings are reasonable.
-    if (max_step_size_ < req_min_step_size_) {
-      throw std::logic_error("Integrator maximum step size is less than the "
-                             "minimum step size");
-    }
-    if (req_initial_step_size_ > max_step_size_) {
-      throw std::logic_error("Requested integrator initial step size is larger "
-                             "than the maximum step size.");
-    }
-    if (req_initial_step_size_ < req_min_step_size_) {
-      throw std::logic_error("Requested integrator initial step size is smaller"
-                             " than the minimum step size.");
+    if constexpr (scalar_predicate<T>::is_bool) {
+      if (max_step_size_ < req_min_step_size_) {
+        throw std::logic_error("Integrator maximum step size is less than the "
+                               "minimum step size");
+      }
+      if (req_initial_step_size_ > max_step_size_) {
+        throw std::logic_error("Requested integrator initial step size is "
+                               "larger than the maximum step size.");
+      }
+      if (req_initial_step_size_ < req_min_step_size_) {
+        throw std::logic_error("Requested integrator initial step size is "
+                               "smaller than the minimum step size.");
+      }
     }
 
     // TODO(edrumwri): Compute qbar_weight_, z_weight_ automatically.
@@ -1042,7 +1054,7 @@ class IntegratorBase {
     using std::abs;
 
     const T h = t_target - context_->get_time();
-    if (h < 0) {
+    if (scalar_predicate<T>::is_bool && h < 0) {
       throw std::logic_error("IntegrateWithSingleFixedStepToTime() called with "
                              "a negative step size.");
     }
@@ -1055,12 +1067,15 @@ class IntegratorBase {
 
     UpdateStepStatistics(h);
 
-    // Correct any round-off error that has occurred. Formula below requires
-    // that time be non-negative.
-    DRAKE_DEMAND(context_->get_time() >= 0);
-    const double tol = 10 * std::numeric_limits<double>::epsilon() *
-        ExtractDoubleOrThrow(max(1.0, max(t_target, context_->get_time())));
-    DRAKE_DEMAND(abs(context_->get_time() - t_target) < tol);
+    if constexpr (scalar_predicate<T>::is_bool) {
+      // Correct any round-off error that has occurred. Formula below requires
+      // that time be non-negative.
+      DRAKE_DEMAND(context_->get_time() >= 0);
+      const double tol = 10 * std::numeric_limits<double>::epsilon() *
+          ExtractDoubleOrThrow(max(1.0, max(t_target, context_->get_time())));
+      DRAKE_DEMAND(abs(context_->get_time() - t_target) < tol);
+    }
+
     context_->SetTime(t_target);
 
     return true;
@@ -1233,16 +1248,16 @@ class IntegratorBase {
     if (get_dense_output()) {
       throw std::logic_error("Dense integration has been started already.");
     }
-    dense_output_ = DoStartDenseIntegration();
+    dense_output_ = std::make_unique<trajectories::PiecewisePolynomial<T>>();
   }
 
   /**
-   Returns a const pointer to the integrator's current DenseOutput instance,
-   holding a representation of the continuous state trajectory since the last
-   StartDenseIntegration() call. This is suitable to query the integrator's
-   current dense output, if any (may be nullptr).
+   Returns a const pointer to the integrator's current PiecewisePolynomial
+   instance, holding a representation of the continuous state trajectory since
+   the last StartDenseIntegration() call. This is suitable to query the
+   integrator's current dense output, if any (may be nullptr).
    */
-  const DenseOutput<T>* get_dense_output() const {
+  const trajectories::PiecewisePolynomial<T>* get_dense_output() const {
     return dense_output_.get();
   }
 
@@ -1251,7 +1266,7 @@ class IntegratorBase {
    to the caller.
 
    @remarks This process is irreversible.
-   @returns A DenseOutput instance, i.e. a representation of the
+   @returns A PiecewisePolynomial instance, i.e. a representation of the
             continuous state trajectory of the system being integrated
             that can be evaluated at any time within its extension. This
             representation is defined starting at the context time of the
@@ -1263,7 +1278,7 @@ class IntegratorBase {
          the integrator anymore.
    @throws std::logic_error if any of the preconditions is not met.
    */
-  std::unique_ptr<DenseOutput<T>> StopDenseIntegration() {
+  std::unique_ptr<trajectories::PiecewisePolynomial<T>> StopDenseIntegration() {
     if (!dense_output_) {
       throw std::logic_error("No dense integration has been started.");
     }
@@ -1335,50 +1350,6 @@ class IntegratorBase {
    @sa get_target_accuracy()
    */
   void set_accuracy_in_use(double accuracy) { accuracy_in_use_ = accuracy; }
-
-  /**
-   Generic code for validating (and resetting, if need be) the integrator
-   working accuracy for error controlled integrators. This method is
-   intended to be called from an integrator's DoInitialize() method.
-   @param default_accuracy a reasonable default accuracy setting for this
-          integrator.
-   @param loosest_accuracy the loosest accuracy that this integrator should
-          support.
-   @param max_step_fraction a fraction of the maximum step size to use when
-          setting the integrator accuracy and the user has not specified
-          accuracy directly.
-   @throws std::logic_error if neither the initial step size target nor
-           the maximum step size has been set.
-   */
-  void InitializeAccuracy(double default_accuracy, double loosest_accuracy,
-                          double max_step_fraction) {
-    using std::isnan;
-
-    // Set an artificial step size target, if not set already.
-    if (isnan(this->get_initial_step_size_target())) {
-      // Verify that maximum step size has been set.
-      if (isnan(this->get_maximum_step_size()))
-        throw std::logic_error("Neither initial step size target nor maximum "
-                                   "step size has been set!");
-
-      this->request_initial_step_size_target(
-          this->get_maximum_step_size() * max_step_fraction);
-    }
-
-    // Sets the working accuracy to a good value.
-    double working_accuracy = this->get_target_accuracy();
-
-    // If the user asks for accuracy that is looser than the loosest this
-    // integrator can provide, use the integrator's loosest accuracy setting
-    // instead.
-    if (isnan(working_accuracy)) {
-      working_accuracy = default_accuracy;
-    } else {
-      if (working_accuracy > loosest_accuracy)
-        working_accuracy = loosest_accuracy;
-    }
-    this->set_accuracy_in_use(working_accuracy);
-  }
 
   /**
    Default code for advancing the continuous state of the system by a single
@@ -1457,26 +1428,14 @@ class IntegratorBase {
    */
   virtual void DoReset() {}
 
-  // TODO(hidmic): Make pure virtual and override on each subclass, as
-  // the 'optimal' dense output scheme is only known by the specific
-  // integration scheme being implemented.
   /**
-   Derived classes can override this method to provide a continuous
-   extension of their own when StartDenseIntegration() is called.
-   */
-  virtual
-  std::unique_ptr<StepwiseDenseOutput<T>> DoStartDenseIntegration() {
-    return std::make_unique<HermitianDenseOutput<T>>();
-  }
-
-  /**
-   Returns a mutable pointer to the internally-maintained StepwiseDenseOutput
+   Returns a mutable pointer to the internally-maintained PiecewisePolynomial
    instance, holding a representation of the continuous state trajectory since
    the last time StartDenseIntegration() was called. This is useful for
    derived classes to update the integrator's current dense output, if any
    (may be nullptr).
    */
-  StepwiseDenseOutput<T>* get_mutable_dense_output() {
+  trajectories::PiecewisePolynomial<T>* get_mutable_dense_output() {
     return dense_output_.get();
   }
 
@@ -1502,50 +1461,57 @@ class IntegratorBase {
    */
   virtual bool DoStep(const T& h) = 0;
 
-  // TODO(hidmic): Make pure virtual and override on each subclass, as
-  // the 'optimal' dense output scheme is only known by the specific
-  // integration scheme being implemented.
+  // TODO(russt): Allow subclasses to override the interpolation scheme used, as
+  // the 'optimal' dense output scheme is only known by the specific integration
+  // scheme being implemented.
   /**
-   Derived classes may implement this method to (1) integrate the continuous
-   portion of this system forward by a single step of size @p h, (2) set the
-   error estimate (via get_mutable_error_estimate()) and (3) update their own
-   dense output implementation (via get_mutable_dense_output()).  This
-   method is called during the integration process (via
-   StepOnceErrorControlledAtMost(), IntegrateNoFurtherThanTime(), and
-   IntegrateWithSingleFixedStepToTime()).
+   Calls DoStep(h) while recording the resulting step in the dense output.  If
+   the current dense output is already non-empty, then the time in the current
+   context must match either the final segment time of the dense output, or the
+   penultimate segment time (to support the case where the same integration step
+   is attempted multiple times, which occurs e.g. in witness function
+   isolation).
    @param h The integration step to take.
-   @returns `true` if successful, `false` if either the integrator was
-             unable to take a single step of size @p h or to advance
-             its dense output an equal step.
+   @returns `true` if successful, `false` if either the integrator was unable to
+           take a single step of size @p h or to advance its dense output an
+           equal step.
    @sa DoStep()
    */
-  virtual bool DoDenseStep(const T& h) {
+  bool DoDenseStep(const T& h) {
     const ContinuousState<T>& state = context_->get_continuous_state();
-    // Makes a null (i.e. zero size) dense output step with initial
-    // time and state, before the actual integration step. This will later
-    // be extended with the final values after the step.
-    system_.CalcTimeDerivatives(*context_, derivatives_.get());
-    typename HermitianDenseOutput<T>::IntegrationStep step(
-        context_->get_time(), state.CopyToVector(),
-        derivatives_->CopyToVector());
+
+    // Note: It is tempting to avoid this initial call to EvalTimeDerivatives,
+    // and just use AppendCubicHermiteSegment below.  But this version is robust
+    // to e.g. UnrestrictedUpdates or any other changes that could occur between
+    // calls to DoDenseStep().  And we hope that the caching in
+    // EvalTimeDerivatives() avoids any cost for the easy case.
+    const T start_time = context_->get_time();
+    VectorX<T> start_state, start_derivatives;
+    start_state = state.CopyToVector();
+    start_derivatives = EvalTimeDerivatives(*context_).CopyToVector();
 
     // Performs the integration step.
     if (!DoStep(h)) return false;
 
-    // Extends dense output step to the end of the integration step, using
-    // the post-step values.
-    system_.CalcTimeDerivatives(*context_, derivatives_.get());
-    step.Extend(context_->get_time(), state.CopyToVector(),
-                derivatives_->CopyToVector());
+    // Allow this update to *replace* the final segment if the start_time of
+    // this step is earlier than the current end_time of the dense output and
+    // matches the start_time of the the final segment of the dense output.
+    // This happens, for instance, when the Simulator is doing WitnessFunction
+    // isolation; it routinely back up the integration and try the same step
+    // multiple times.  Note: we intentionally check for equality between
+    // double values here.
+    if (dense_output_->get_segment_times().size() > 1 &&
+        start_time < dense_output_->end_time() &&
+        start_time == dense_output_->get_segment_times().end()[-2]) {
+      dense_output_->RemoveFinalSegment();
+    }
 
-    // Retrieves dense output. This cast is safe if the base implementations
-    // of this method and DoStartDenseIntegration() are in use. Otherwise, a
-    // different dense output type may have been allocated and the following
-    // cast will throw.
-    HermitianDenseOutput<T>& dense_output =
-        dynamic_cast<HermitianDenseOutput<T>&>(*get_mutable_dense_output());
-    // Updates dense output with the integration step taken.
-    dense_output.Update(std::move(step));
+    const ContinuousState<T>& derivatives = EvalTimeDerivatives(*context_);
+    dense_output_->ConcatenateInTime(
+        trajectories::PiecewisePolynomial<T>::CubicHermite(
+            std::vector<T>({start_time, context_->get_time()}),
+            {start_state, state.CopyToVector()},
+            {start_derivatives, derivatives.CopyToVector()}));
     return true;
   }
 
@@ -1618,7 +1584,8 @@ class IntegratorBase {
   // result of the step and might "rewind" and take a smaller one.
   // @returns `true` if successful, `false` otherwise (due to, e.g., integrator
   //          convergence failure).
-  // @note The working minimum step size does not apply here- see @link Minstep.
+  // @note The working minimum step size does not apply here- see
+  // @ref integrator-minstep "this section" for details.
   // @sa DoStep()
   // @sa DoDenseStep()
   bool Step(const T& h) {
@@ -1635,7 +1602,7 @@ class IntegratorBase {
   Context<T>* context_{nullptr};  // The trajectory Context.
 
   // Current dense output.
-  std::unique_ptr<StepwiseDenseOutput<T>> dense_output_{nullptr};
+  std::unique_ptr<trajectories::PiecewisePolynomial<T>> dense_output_{nullptr};
 
   // Runtime variables.
   // For variable step integrators, this is set at the end of each step to guide
@@ -1683,11 +1650,6 @@ class IntegratorBase {
   // State copy for reversion during error-controlled integration.
   VectorX<T> xc0_save_;
 
-  // A continuous state derivatives scratchpad for the default continuous
-  // extension implementation.
-  // TODO(hidmic): Remove when DoDenseStep() is made pure virtual.
-  std::unique_ptr<ContinuousState<T>> derivatives_;
-
   // The error estimate computed during integration with error control.
   std::unique_ptr<ContinuousState<T>> err_est_;
 
@@ -1716,462 +1678,8 @@ class IntegratorBase {
   T req_initial_step_size_{nan()};  // means "unspecified, use default"
 };
 
-template <class T>
-bool IntegratorBase<T>::StepOnceErrorControlledAtMost(const T& h_max) {
-  using std::isnan;
-  using std::min;
-
-  // Verify that the integrator supports error estimates.
-  if (!supports_error_estimation()) {
-    throw std::logic_error("StepOnceErrorControlledAtMost() requires error "
-                               "estimation.");
-  }
-
-  // Save time, continuous variables, and time derivative because we'll possibly
-  // revert time and state.
-  const Context<T>& context = get_context();
-  const T current_time = context.get_time();
-  VectorBase<T>& xc =
-      get_mutable_context()->get_mutable_continuous_state_vector();
-  xc0_save_ = xc.CopyToVector();
-
-  // Set the step size to attempt.
-  T step_size_to_attempt = get_ideal_next_step_size();
-  if (isnan(step_size_to_attempt)) {
-    // Integrator has not taken a step. Set the current step size to the
-    // initial step size.
-    step_size_to_attempt = get_initial_step_size_target();
-    DRAKE_DEMAND(!isnan(step_size_to_attempt));
-  }
-
-  // This variable indicates when the integrator has been pushed to its minimum
-  // step limit. It can only be "true" if minimum step exceptions have been
-  // suppressed by the user via set_throw_on_minimum_step_size_violation(false),
-  // and the error control mechanism determines that the step is as low as it
-  // can go.
-  bool at_minimum_step_size = false;
-
-  bool step_succeeded = false;
-  do {
-    // Constants used to determine whether modifications to the step size are
-    // close enough to the attempted step size to use the unadjusted originals,
-    // or (1) whether the step size to be attempted is so small that we should
-    // consider it to be artificially limited or (2) whether the step size to
-    // be attempted is sufficiently close to that requested such that the step
-    // size should be stretched slightly.
-    const double near_enough_smaller = 0.95;
-    const double near_enough_larger = 1.001;
-
-    // If we lose more than a small fraction of the step size we wanted
-    // to take due to a need to stop at h_max, make a note of that so the
-    // step size adjuster won't try to grow from the current step.
-    bool h_was_artificially_limited = false;
-    if (h_max < near_enough_smaller * step_size_to_attempt) {
-      // h_max much smaller than current step size.
-      h_was_artificially_limited = true;
-      step_size_to_attempt = h_max;
-    } else {
-      if (h_max < near_enough_larger * step_size_to_attempt) {
-        // h_max is roughly current step. Make it the step size to prevent
-        // creating a small sliver (the remaining step).
-        step_size_to_attempt = h_max;
-      }
-    }
-
-    // Limit the current step size.
-    step_size_to_attempt = min(step_size_to_attempt, get_maximum_step_size());
-
-    // Keep adjusting the integration step size until any integrator
-    // convergence failures disappear. Note: this loop's correctness is
-    // predicated on the assumption that an integrator will always converge for
-    // a sufficiently small, yet nonzero step size.
-    T adjusted_step_size = step_size_to_attempt;
-    while (!Step(adjusted_step_size)) {
-      DRAKE_LOGGER_DEBUG("Sub-step failed at {}", adjusted_step_size);
-      adjusted_step_size *= subdivision_factor_;
-
-      // Note: we could give the user more rope to hang themselves by looking
-      // for zero rather than machine epsilon, which might be advantageous if
-      // the user were modeling systems over extremely small time scales.
-      // However, that issue could be addressed instead by scaling units, and
-      // using machine epsilon allows failure to be detected much more rapidly.
-      if (adjusted_step_size < std::numeric_limits<double>::epsilon()) {
-        throw std::runtime_error("Integrator has been directed to a near zero-"
-                                 "length step in order to obtain convergence.");
-      }
-      ValidateSmallerStepSize(step_size_to_attempt, adjusted_step_size);
-      ++num_shrinkages_from_substep_failures_;
-      ++num_substep_failures_;
-    }
-    step_size_to_attempt = adjusted_step_size;
-
-    //--------------------------------------------------------------------
-    T err_norm = CalcStateChangeNorm(*get_error_estimate());
-    T next_step_size;
-    std::tie(step_succeeded, next_step_size) = CalcAdjustedStepSize(
-        err_norm, step_size_to_attempt, &at_minimum_step_size);
-    DRAKE_LOGGER_DEBUG("Succeeded? {}, Next step size: {}",
-        step_succeeded, next_step_size);
-
-    if (step_succeeded) {
-      // Only update the next step size (retain the previous one) if the
-      // step size was not artificially limited.
-      if (!h_was_artificially_limited)
-        ideal_next_step_size_ = next_step_size;
-
-      if (isnan(get_actual_initial_step_size_taken()))
-        set_actual_initial_step_size_taken(step_size_to_attempt);
-
-      // Record the adapted step size taken.
-      if (isnan(get_smallest_adapted_step_size_taken()) ||
-          (step_size_to_attempt < get_smallest_adapted_step_size_taken() &&
-                step_size_to_attempt < h_max))
-          set_smallest_adapted_step_size_taken(step_size_to_attempt);
-    } else {
-      ++num_shrinkages_from_error_control_;
-
-      // Set the next step size to attempt.
-      step_size_to_attempt = next_step_size;
-
-      // Reset the time, state, and time derivative at t0.
-      get_mutable_context()->SetTime(current_time);
-      xc.SetFromVector(xc0_save_);
-      if (get_dense_output()) {
-        // Take dense output one step back to undo
-        // the last integration step.
-        get_mutable_dense_output()->Rollback();
-      }
-    }
-  } while (!step_succeeded);
-  return (step_size_to_attempt == h_max);
-}
-
-template <class T>
-T IntegratorBase<T>::CalcStateChangeNorm(
-    const ContinuousState<T>& dx_state) const {
-  using std::max;
-  const Context<T>& context = get_context();
-  const System<T>& system = get_system();
-
-  // Get weighting matrices.
-  const auto& qbar_v_weight = this->get_generalized_state_weight_vector();
-  const auto& z_weight = this->get_misc_state_weight_vector();
-
-  // Get the differences in the generalized position, velocity, and
-  // miscellaneous continuous state vectors.
-  const VectorBase<T>& dgq = dx_state.get_generalized_position();
-  const VectorBase<T>& dgv = dx_state.get_generalized_velocity();
-  const VectorBase<T>& dgz = dx_state.get_misc_continuous_state();
-
-  // (re-)Initialize pinvN_dq_change_ and weighted_q_change_, if necessary.
-  // Reinitialization might be required if the system state variables can
-  // change during the course of the simulation.
-  if (pinvN_dq_change_ == nullptr) {
-    pinvN_dq_change_ = std::make_unique<BasicVector<T>>(dgv.size());
-    weighted_q_change_ = std::make_unique<BasicVector<T>>(dgq.size());
-  }
-  DRAKE_DEMAND(pinvN_dq_change_->size() == dgv.size());
-  DRAKE_DEMAND(weighted_q_change_->size() == dgq.size());
-
-  // TODO(edrumwri): Acquire characteristic time properly from the system
-  //                 (i.e., modify the System to provide this value).
-  const double characteristic_time = 1.0;
-
-  // Computes the infinity norm of the weighted velocity variables.
-  unweighted_substate_change_ = dgv.CopyToVector();
-  T v_nrm = qbar_v_weight.cwiseProduct(unweighted_substate_change_).
-      template lpNorm<Eigen::Infinity>() * characteristic_time;
-
-  // Compute the infinity norm of the weighted auxiliary variables.
-  unweighted_substate_change_ = dgz.CopyToVector();
-  T z_nrm = (z_weight.cwiseProduct(unweighted_substate_change_))
-                .template lpNorm<Eigen::Infinity>();
-
-  // Compute N * Wq * dq = N * Wꝗ * N+ * dq.
-  unweighted_substate_change_ = dgq.CopyToVector();
-  system.MapQDotToVelocity(context, unweighted_substate_change_,
-                           pinvN_dq_change_.get());
-  system.MapVelocityToQDot(
-      context, qbar_v_weight.cwiseProduct(pinvN_dq_change_->CopyToVector()),
-      weighted_q_change_.get());
-  T q_nrm = weighted_q_change_->CopyToVector().
-      template lpNorm<Eigen::Infinity>();
-  DRAKE_LOGGER_DEBUG("dq norm: {}, dv norm: {}, dz norm: {}",
-      q_nrm, v_nrm, z_nrm);
-
-  // Return NaN if one of the values is NaN (whether std::max does this is
-  // dependent upon ordering!)
-  using std::isnan;
-  if (isnan(q_nrm) || isnan(v_nrm) || isnan(z_nrm))
-    return std::numeric_limits<T>::quiet_NaN();
-
-  // TODO(edrumwri): Record the worst offender (which of the norms resulted
-  // in the largest value).
-  // Infinity norm of the concatenation of multiple vectors is equal to the
-  // maximum of the infinity norms of the individual vectors.
-  return max(z_nrm, max(q_nrm, v_nrm));
-}
-
-template <class T>
-std::pair<bool, T> IntegratorBase<T>::CalcAdjustedStepSize(
-    const T& err,
-    const T& step_taken,
-    bool* at_minimum_step_size) const {
-  using std::pow;
-  using std::min;
-  using std::max;
-  using std::isnan;
-  using std::isinf;
-
-  // Magic numbers come from Simbody.
-  const double kSafety = 0.9;
-  const double kMinShrink = 0.1;
-  const double kMaxGrow = 5.0;
-  const double kHysteresisLow = 0.9;
-  const double kHysteresisHigh = 1.2;
-
-  // Get the order for the integrator's error estimate.
-  const int err_order = get_error_estimate_order();
-
-  // Set value for new step size to invalid value initially.
-  T new_step_size(-1);
-
-  // First, make a guess at the next step size to use based on
-  // the supplied error norm. Watch out for NaN. Further adjustments will be
-  // made in blocks of code that follow.
-  if (isnan(err) || isinf(err)) {  // e.g., integrand returned NaN.
-    new_step_size = kMinShrink * step_taken;
-    return std::make_pair(false, new_step_size);
-  } else {
-    if (err == 0) {  // A "perfect" step; can happen if no dofs for example.
-      new_step_size = kMaxGrow * step_taken;
-    } else {  // Choose best step for skating just below the desired accuracy.
-      new_step_size = kSafety * step_taken *
-                      pow(get_accuracy_in_use() / err, 1.0 / err_order);
-    }
-  }
-
-  // Error indicates that the step size can be increased.
-  if (new_step_size > step_taken) {
-    // If the integrator has been directed down to the minimum step size, but
-    // now error indicates that the step size can be increased, de-activate
-    // at_minimum_step_size.
-    *at_minimum_step_size = false;
-
-    // If the new step is bigger than the old, don't make the change if the
-    // old one was small for some unimportant reason (like reached a publishing
-    // interval). Also, don't grow the step size if the change would be very
-    // small; better to keep the step size stable in that case (maybe just
-    // for aesthetic reasons).
-    if (new_step_size < kHysteresisHigh * step_taken)
-      new_step_size = step_taken;
-  }
-
-  // If error indicates that we should shrink the step size but are not allowed
-  // to, quit and indicate that the step was successful.
-  if (new_step_size < step_taken && *at_minimum_step_size) {
-    return std::make_pair(true, step_taken);
-  }
-
-  // If we're supposed to shrink the step size but the one we have actually
-  // achieved the desired accuracy last time, we won't change the step now.
-  // Otherwise, if we are going to shrink the step, let's not be shy -- we'll
-  // shrink it by at least a factor of kHysteresisLow.
-  if (new_step_size < step_taken) {
-    if (err <= get_accuracy_in_use()) {
-      new_step_size = step_taken;  // not this time
-    } else {
-      T test_value = kHysteresisLow * step_taken;
-      new_step_size = min(new_step_size, test_value);
-    }
-  }
-
-  // Keep the size change within the allowable bounds.
-  T max_grow_step = kMaxGrow * step_taken;
-  T min_shrink_step = kMinShrink * step_taken;
-  new_step_size = min(new_step_size, max_grow_step);
-  new_step_size = max(new_step_size, min_shrink_step);
-
-  // Apply user-requested limits on min and max step size.
-  // TODO(edrumwri): Introduce some feedback to the user when integrator wants
-  // to take a smaller step than user has selected as the minimum. Options for
-  // this feedback could include throwing a special exception, logging, setting
-  // a flag in the integrator that allows throwing an exception, or returning
-  // a special status from IntegrateNoFurtherThanTime().
-  if (!isnan(get_maximum_step_size()))
-    new_step_size = min(new_step_size, get_maximum_step_size());
-  ValidateSmallerStepSize(step_taken, new_step_size);
-
-  // Increase the next step size, as necessary.
-  new_step_size = max(new_step_size, get_working_minimum_step_size());
-  if (new_step_size == get_working_minimum_step_size()) {
-    // Indicate that the step is integrator is now trying the minimum step
-    // size.
-    *at_minimum_step_size = true;
-
-    // If the integrator wants to shrink the step size below the
-    // minimum allowed and exceptions are suppressed, indicate that status.
-    if (new_step_size < step_taken)
-      return std::make_pair(false, new_step_size);
-  }
-
-  return std::make_pair(new_step_size >= step_taken, new_step_size);
-}
-
-template <class T>
-typename IntegratorBase<T>::StepResult
-    IntegratorBase<T>::IntegrateNoFurtherThanTime(
-        const T& publish_time, const T& update_time, const T& boundary_time) {
-  if (!IntegratorBase<T>::is_initialized())
-    throw std::logic_error("Integrator not initialized.");
-
-  // Now that integrator has been checked for initialization, get the current
-  // time.
-  const T t0 = context_->get_time();
-
-  // Verify that h's are non-negative.
-  const T publish_dt = publish_time - t0;
-  const T update_dt = update_time - t0;
-  const T boundary_dt = boundary_time - t0;
-  if (publish_dt < 0.0)
-    throw std::logic_error("Publish h is negative.");
-  if (update_dt < 0.0)
-    throw std::logic_error("Update h is negative.");
-  if (boundary_dt < 0.0)
-    throw std::logic_error("Boundary h is negative.");
-
-  // The size of the integration step is the minimum of the time until the next
-  // update event, the time until the next publish event, the boundary time
-  // (i.e., the maximum time that the user wished to step to), and the maximum
-  // step size (which may stretch slightly to hit a discrete event).
-
-  // We report to the caller which event ultimately constrained the step size.
-  // If multiple events constrained it equally, we prefer to report update
-  // events over publish events, publish events over boundary step limits,
-  // and boundary limits over maximum step size limits. The caller must
-  // determine event simultaneity by inspecting the time.
-
-  // The maintainer of this code is advised to consider that, while updates
-  // and boundary times, may both conceptually be deemed events, the distinction
-  // is made for a reason. If both an update and a boundary time occur
-  // simultaneously, the following behavior should result:
-  // (1) kReachedUpdateTime is returned, (2) Simulator::AdvanceTo() performs the
-  // necessary update, (3) IntegrateNoFurtherThanTime() is called with
-  // boundary_time equal to the current time in the context and returns
-  // kReachedBoundaryTime, and (4) the simulation terminates. This sequence of
-  // operations will ensure that the simulation state is valid if
-  // Simulator::AdvanceTo() is called again to advance time further.
-
-  // We now analyze the following simultaneous cases with respect to Simulator:
-  //
-  // { publish, update }
-  // kReachedUpdateTime will be returned, an update will be followed by a
-  // publish.
-  //
-  // { publish, update, max step }
-  // kReachedUpdateTime will be returned, an update will be followed by a
-  // publish.
-  //
-  // { publish, boundary time, max step }
-  // kReachedPublishTime will be returned, a publish will be performed followed
-  // by another call to this function, which should return kReachedBoundaryTime
-  // (followed in rapid succession by AdvanceTo(.) return).
-  //
-  // { publish, boundary time, max step }
-  // kReachedPublishTime will be returned, a publish will be performed followed
-  // by another call to this function, which should return kReachedBoundaryTime
-  // (followed in rapid succession by AdvanceTo(.) return).
-  //
-  // { publish, update, boundary time, maximum step size }
-  // kUpdateTimeReached will be returned, an update followed by a publish
-  // will then be performed followed by another call to this function, which
-  // should return kReachedBoundaryTime (followed in rapid succession by
-  // AdvanceTo(.) return).
-
-  // By default, the target time is that of the the next discrete update event.
-  StepResult candidate_result = IntegratorBase<T>::kReachedUpdateTime;
-  T target_time = update_time;
-
-  // If the next discrete publish event is sooner than the next discrete update
-  // event, the time of the publish event becomes the target time.
-  if (publish_time < update_time) {
-    candidate_result = IntegratorBase<T>::kReachedPublishTime;
-    target_time = publish_time;
-  }
-
-  // If the stop time (boundary time) is sooner than the candidate, use it
-  // instead.
-  if (boundary_time < target_time) {
-    candidate_result = IntegratorBase<T>::kReachedBoundaryTime;
-    target_time = boundary_time;
-  }
-
-  // If there is no continuous state, there will be no need to limit the
-  // integration step size.
-  if (get_context().num_continuous_states() == 0) {
-    Context<T>* context = get_mutable_context();
-    context->SetTime(target_time);
-    return candidate_result;
-  }
-
-  // If all events are further into the future than the maximum step
-  // size times a stretch factor of 1.01, the maximum time becomes the
-  // target time. Put another way, if the maximum step occurs right before
-  // an update or a publish, the update or publish is done instead. In contrast,
-  // we never step past boundary_time, even if doing so would allow hitting a
-  // publish or an update.
-  const bool reached_boundary =
-      (candidate_result == IntegratorBase<T>::kReachedBoundaryTime);
-  const T& max_h = this->get_maximum_step_size();
-  const T max_integrator_time = t0 + max_h;
-  if ((reached_boundary && max_integrator_time < target_time) ||
-      (!reached_boundary && t0 + max_h * get_stretch_factor() < target_time)) {
-    candidate_result = IntegratorBase<T>::kTimeHasAdvanced;
-    target_time = max_integrator_time;
-  }
-
-  T h = target_time - t0;
-  if (h < 0.0) throw std::logic_error("Negative h.");
-
-  // If error control is disabled, call the generic stepper. Otherwise, use
-  // the error controlled method.
-  bool full_step = true;
-  if (this->get_fixed_step_mode()) {
-    T adjusted_h = h;
-    while (!Step(adjusted_h)) {
-      ++num_shrinkages_from_substep_failures_;
-      ++num_substep_failures_;
-      adjusted_h *= subdivision_factor_;
-      ValidateSmallerStepSize(h, adjusted_h);
-      full_step = false;
-    }
-  } else {
-    full_step = StepOnceErrorControlledAtMost(h);
-  }
-  if (get_dense_output()) {
-    // Consolidates current dense output, merging the step
-    // taken into its internal representation.
-    get_mutable_dense_output()->Consolidate();
-  }
-
-  // Update generic statistics.
-  const T actual_h = context_->get_time() - t0;
-  UpdateStepStatistics(actual_h);
-
-  if (full_step || context_->get_time() >= target_time) {
-    // Correct any rounding error that may have caused the time to overrun
-    // the target time.
-    context_->SetTime(target_time);
-
-    // If the integrator took the entire maximum step size we allowed above,
-    // we report to the caller that a step constraint was hit, which may
-    // indicate a discrete event has arrived.
-    return candidate_result;
-  } else {
-    // Otherwise, we expect that time has advanced, but no event has arrived.
-    return IntegratorBase<T>::kTimeHasAdvanced;
-  }
-}
-
 }  // namespace systems
 }  // namespace drake
+
+DRAKE_DECLARE_CLASS_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_SCALARS(
+    class drake::systems::IntegratorBase)

@@ -28,14 +28,7 @@ namespace acrobot {
 ///   @input_port{elbow_torque},
 ///   @output_port{acrobot_state} }
 ///
-/// @tparam T The vector element type, which must be a valid Eigen scalar.
-///
-/// Instantiated templates for the following kinds of T's are provided:
-///
-/// - double
-/// - drake::AutoDiffXd
-/// - symbolic::Expression
-///
+/// @tparam_default_scalar
 /// @ingroup acrobot_systems
 template <typename T>
 class AcrobotPlant : public systems::LeafSystem<T> {
@@ -43,7 +36,7 @@ class AcrobotPlant : public systems::LeafSystem<T> {
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(AcrobotPlant)
 
   /// Constructs the plant.  The parameters of the system are stored as
-  /// Parameters in the Context (see acrobot_params.named_vector).
+  /// Parameters in the Context (see acrobot_params_named_vector.yaml).
   AcrobotPlant();
 
   /// Scalar-converting copy constructor.  See @ref system_scalar_conversion.
@@ -94,17 +87,22 @@ class AcrobotPlant : public systems::LeafSystem<T> {
     return this->template GetNumericParameter<AcrobotParams>(context, 0);
   }
 
- protected:
-  T DoCalcKineticEnergy(const systems::Context<T>& context) const override;
-  T DoCalcPotentialEnergy(const systems::Context<T>& context) const override;
-
  private:
   void CopyStateOut(const systems::Context<T>& context,
                     AcrobotState<T>* output) const;
 
+  T DoCalcKineticEnergy(const systems::Context<T>& context) const override;
+
+  T DoCalcPotentialEnergy(const systems::Context<T>& context) const override;
+
   void DoCalcTimeDerivatives(
       const systems::Context<T>& context,
       systems::ContinuousState<T>* derivatives) const override;
+
+  void DoCalcImplicitTimeDerivativesResidual(
+    const systems::Context<T>& context,
+    const systems::ContinuousState<T>& proposed_derivatives,
+    EigenPtr<VectorX<T>> residual) const override;
 };
 
 /// Constructs the Acrobot with (only) encoder outputs.

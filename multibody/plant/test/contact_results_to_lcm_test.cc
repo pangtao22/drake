@@ -142,7 +142,7 @@ GTEST_TEST(ConnectContactResultsToDrakeVisualizer, BasicTest) {
   systems::DiagramBuilder<double> builder;
 
   // Make a trivial plant with at least one body.
-  auto plant = builder.AddSystem<MultibodyPlant>();
+  auto plant = builder.AddSystem<MultibodyPlant>(0.0);
   plant->AddRigidBody("link", SpatialInertia<double>());
   plant->Finalize();
 
@@ -163,7 +163,7 @@ GTEST_TEST(ConnectContactResultsToDrakeVisualizer, NestedDiagramTest) {
   // Make a trivial plant with at least one body.
   MultibodyPlant<double>* plant;
   SceneGraph<double>* scene_graph;
-  std::tie(plant, scene_graph) = AddMultibodyPlantSceneGraph(&builder);
+  std::tie(plant, scene_graph) = AddMultibodyPlantSceneGraph(&builder, 0.0);
   plant->AddRigidBody("link", SpatialInertia<double>());
   plant->Finalize();
 
@@ -345,7 +345,7 @@ GTEST_TEST(ContactResultsToLcmTest, HydroelasticContactResults) {
   DiagramBuilder<double> builder;
   MultibodyPlant<double>* plant;
   geometry::SceneGraph<double>* scene_graph;
-  std::tie(plant, scene_graph) = AddMultibodyPlantSceneGraph(&builder);
+  std::tie(plant, scene_graph) = AddMultibodyPlantSceneGraph(&builder, 0.0);
 
   // We need some geometries for this test. Parameters below are selected
   // arbitrarily and do not affect this test.

@@ -125,6 +125,9 @@ class ContextBase : public internal::ContextMessageInterface {
                                 : system_name_;
   }
 
+  /** (Internal) Gets the id of the subsystem that created this context. */
+  internal::SystemId get_system_id() const { return system_id_; }
+
   /** Returns the full pathname of the subsystem for which this is the Context.
   This is intended primarily for error messages and logging.
   @see SystemBase::GetSystemPathname() for details. */
@@ -590,6 +593,9 @@ class ContextBase : public internal::ContextMessageInterface {
   // Records the name of the system whose context this is.
   void set_system_name(const std::string& name) { system_name_ = name; }
 
+  // Records the id of the subsystem that created this context.
+  void set_system_id(internal::SystemId id) { system_id_ = id; }
+
   // Fixes the input port at `index` to the internal value source `port_value`.
   // If the port wasn't previously fixed, assigns a ticket and tracker for the
   // `port_value`, then subscribes the input port to the source's tracker.
@@ -655,12 +661,17 @@ class ContextBase : public internal::ContextMessageInterface {
   // Name of the subsystem whose subcontext this is.
   std::string system_name_;
 
+  // Unique id of the subsystem whose subcontext this is.
+  internal::SystemId system_id_;
+
   // Used to validate that System-derived classes didn't forget to invoke the
   // SystemBase method that properly sets up the ContextBase.
   bool is_context_base_initialized_{false};
 };
 
 #ifndef DRAKE_DOXYGEN_CXX
+class DiagramContextTest;
+class LeafContextTest;
 class SystemBase;
 namespace internal {
 
@@ -672,11 +683,17 @@ class SystemBaseContextBaseAttorney {
   SystemBaseContextBaseAttorney() = delete;
 
  private:
+  friend class drake::systems::DiagramContextTest;
+  friend class drake::systems::LeafContextTest;
   friend class drake::systems::SystemBase;
 
   static void set_system_name(ContextBase* context, const std::string& name) {
     DRAKE_DEMAND(context != nullptr);
     context->set_system_name(name);
+  }
+  static void set_system_id(ContextBase* context, internal::SystemId id) {
+    DRAKE_DEMAND(context != nullptr);
+    context->set_system_id(id);
   }
   static const ContextBase* get_parent_base(const ContextBase& context) {
     return context.get_parent_base();

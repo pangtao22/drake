@@ -2,6 +2,9 @@
 This is intended for use by Drake maintainers (only).
 This program is only supported on Ubuntu Bionic 18.04.
 
+The usage of this tools is outlined in the "201912 Drake release playbook"
+document on Google Drive.
+
 The tool reads the commit history of github.com/RobotLocomotion/drake using
 the GitHub APIs -- the status of your current git clone is ignored.
 
@@ -14,7 +17,7 @@ via a GitHub API token:
 To create the required ~/.config/readonly_github_api_token.txt file, open a
 browser to https://github.com/settings/tokens and create a new token (it does
 not need any extra permissions; the default "no checkboxes are set" is good),
-and save the plaintext hexidecimal token to that file.
+and save the plaintext hexadecimal token to that file.
 """
 
 import argparse

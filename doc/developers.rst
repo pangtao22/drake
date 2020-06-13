@@ -79,14 +79,17 @@ Drake requires a compiler running in C++17 mode.
 | Operating System                 | Bazel | CMake | C/C++ Compiler      | Java              | Python |
 +==================================+=======+=======+=====================+===================+========+
 +----------------------------------+-------+-------+---------------------+-------------------+--------+
-| Ubuntu 18.04 LTS (Bionic Beaver) | 2.0   | 3.10  | | Clang 6.0         | OpenJDK 11        | 3.6    |
-|                                  |       |       | | GCC 7.4 (default) |                   |        |
-+----------------------------------+       +-------+---------------------+-------------------+--------+
-| macOS Mojave (10.14)             |       | 3.16  | | Apple LLVM 11.0.0 | | AdoptOpenJDK 13 | 3.7    |
-|                                  |       |       | | (Xcode 11.3)      | | (HotSpot JVM)   |        |
-+----------------------------------+       |       |                     |                   |        |
-| macOS Catalina (10.15)           |       |       |                     |                   |        |
+| Ubuntu 18.04 LTS (Bionic Beaver) | 3.0   | 3.10  | | Clang 6.0         | OpenJDK 11        | 3.6    |
+|                                  |       |       | | GCC 7.5 (default) |                   |        |
++----------------------------------+       +-------+---------------------+                   +--------+
+| Ubuntu 20.04 LTS (Focal Fossa)   |       | 3.16  | GCC 9.3             |                   | 3.8    |
 |                                  |       |       |                     |                   |        |
++----------------------------------+       +-------+---------------------+-------------------+        |
+| macOS Mojave (10.14)             |       | 3.17  | | Apple LLVM 11.0.0 | | AdoptOpenJDK 14 |        |
+|                                  |       |       | | (Xcode 11.3)      | | (HotSpot JVM)   |        |
++----------------------------------+       |       +---------------------+                   |        |
+| macOS Catalina (10.15)           |       |       | | Apple LLVM 11.0.3 |                   |        |
+|                                  |       |       | | (Xcode 11.5)      |                   |        |
 +----------------------------------+-------+-------+---------------------+-------------------+--------+
 
 CPython is the only Python implementation supported. On Ubuntu, amd64
@@ -119,8 +122,8 @@ to :ref:`ask for help <getting_help>`.
 Binary Packages
 ---------------
 
-The binary releases of Drake are built with GCC 7.4 on Ubuntu Bionic, and Apple
-LLVM 11.0.0 on macOS Mojave.
+The binary releases of Drake are built with GCC 7.5 on Ubuntu 18.04 (Bionic),
+GCC 9.3 on Ubuntu 20.04 (Focal), and Apple LLVM 11.0.0 on macOS Mojave.
 
 The links for these packages are listed in :ref:`binary-installation`.
 
@@ -217,11 +220,17 @@ make the review faster.
 - @soonho-tri (Toyota Research Institute)
 - @RussTedrake (MIT / Toyota Research Institute)
 
-**Merge.** If you have write access to RobotLocomotion/drake, a green
-"Merge Pull Request" button will appear when your change is fully reviewed and
-passes CI. You may click it to merge your PR. If you do not have write access,
-or if you believe that status checks are failing for inconsequential reasons,
-ask your platform reviewer to perform the merge for you.
+**Merge.** Once the PR is fully reviewed and passes CI, the assigned platform
+reviewer will merge it to master.  If time is of the essence, you may post a
+reminder to the PR to get the reviewer's attention.  If the PR should not be
+merged yet, or if you prefer to merge it yourself, apply the label "status:
+do not merge" to disable the merge.
+
+If you are a frequent contributor who has been granted write access to
+RobotLocomotion/drake, a green "Merge Pull Request" button will appear when
+your change is fully reviewed and passes CI. You may click it to merge your PR.
+Choose the "Squash and merge option" unless otherwise instructed (see
+:ref:`curate_commits_before_merging`).
 
 **After Merge.** If your PR breaks continuous integration, the :doc:`buildcop`
 will contact you to work out a resolution.
@@ -256,21 +265,18 @@ new link on the GitHub issue, and close the issue.
 Handling User StackOverflow Questions
 -------------------------------------
 
-Please subscribe to the ``drake`` tag by following
-`these general instructions <https://meta.stackoverflow.com/a/336515/7829525>`_,
-if you are able to.
+Please subscribe to the ``drake`` tag by following these instructions:
+
+.. toctree::
+    :maxdepth: 1
+
+    stackoverflow_notifications
 
 Please also monitor for `unanswered StackOverflow posts
 <https://stackoverflow.com/unanswered/tagged/drake?tab=noanswers>`_
 once per day. If there are unanswered questions that you are unsure of the
 answer, consider posting on the Slack ``#onramp`` channel to see if someone
 can can look into the question.
-
-The following developers are subscribed to the ``drake`` tag, and will monitor
-it:
-
-  - Russ Tedrake
-  - Eric Cousineau
 
 Continuous Integration Notes
 ============================

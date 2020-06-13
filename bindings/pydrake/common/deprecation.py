@@ -20,6 +20,8 @@ import warnings
 
 # TODO(eric.cousineau): Make autocomplete ignore `ModuleShim` attributes
 # (e.g. `install`).
+# TODO(eric.cousineau): Remove ModuleShim once Drake requires Python >= 3.7
+# (for PEP 562).
 
 
 class ModuleShim(object):
@@ -30,6 +32,14 @@ class ModuleShim(object):
 
     See Also:
         https://stackoverflow.com/a/7668273/7829525
+
+    Note:
+        This is not necessary in Python >= 3.7 due to PEP 562.
+    Warning:
+        This will not work if called on a cc module during import (e.g. using
+        ExecuteExtraPythonCode). Instead, you should rename the module from
+        `{name}` to `_{name}`, and import the symbols into the new module using
+        _import_cc_module_vars.
     """
 
     def __init__(self, orig_module, handler):
@@ -98,12 +108,7 @@ class ModuleShim(object):
 class DrakeDeprecationWarning(DeprecationWarning):
     """Extends `DeprecationWarning` to permit Drake-specific warnings to
     be filtered by default, without having side effects on other libraries."""
-    addendum = ("\n    Please see `help(pydrake.common.deprecation)` " +
-                "for more information.")
-
-    def __init__(self, message, *args):
-        extra_message = message + DrakeDeprecationWarning.addendum
-        DeprecationWarning.__init__(self, extra_message, *args)
+    pass
 
 
 def _warn_deprecated(message, stacklevel=2):

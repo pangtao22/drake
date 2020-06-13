@@ -17,7 +17,9 @@ import warnings
 import numpy as np
 
 import pydrake
+from pydrake.common import kDrakeAssertIsArmed
 from pydrake.autodiffutils import AutoDiffXd
+from pydrake.common.test_utilities.deprecation import catch_drake_warnings
 from pydrake.common.test_utilities import numpy_compare
 from pydrake.forwarddiff import jacobian
 from pydrake.math import ge
@@ -25,6 +27,26 @@ import pydrake.symbolic as sym
 
 
 SNOPT_NO_GUROBI = SnoptSolver().available() and not GurobiSolver().available()
+# MathematicalProgram is only bound for float and AutoDiffXd.
+SCALAR_TYPES = [float, AutoDiffXd]
+
+
+class TestCost(unittest.TestCase):
+    def test_linear_cost(self):
+        a = np.array([1., 2.])
+        b = 0.5
+        cost = mp.LinearCost(a, b)
+        np.testing.assert_allclose(cost.a(), a)
+        self.assertEqual(cost.b(), b)
+
+    def test_quadratic_cost(self):
+        Q = np.array([[1., 2.], [2., 3.]])
+        b = np.array([3., 4.])
+        c = 0.4
+        cost = mp.QuadraticCost(Q, b, c)
+        np.testing.assert_allclose(cost.Q(), Q)
+        np.testing.assert_allclose(cost.b(), b)
+        self.assertEqual(cost.c(), c)
 
 
 class TestQP:
@@ -168,6 +190,9 @@ class TestMathematicalProgram(unittest.TestCase):
 
     def test_bindings(self):
         qp = TestQP()
+        self.assertEqual(
+            str(qp.constraints[0]),
+            "BoundingBoxConstraint\n1 <= x(0) <= inf\n")
         prog = qp.prog
         x = qp.x
 
@@ -406,6 +431,38 @@ class TestMathematicalProgram(unittest.TestCase):
         result = mp.Solve(prog)
         self.assertTrue(result.is_success())
 
+    def test_make_polynomial(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewIndeterminates(1, "x")[0]
+        a = prog.NewContinuousVariables(1, "a")[0]
+        # e = (a + 1)x² + 2ax + 3a.
+        e = (a + 1) * (x * x) + (2 * a) * x + 3 * a
+
+        # We create a polynomial of `e` via MakePolynomial.
+        p = prog.MakePolynomial(e)
+        # Check its indeterminates and decision variables are correctly set,
+        self.assertEqual(p.indeterminates().size(), 1)
+        self.assertTrue(p.indeterminates().include(x))
+        self.assertEqual(p.decision_variables().size(), 1)
+        self.assertTrue(p.decision_variables().include(a))
+        # Check if it holds the same expression when converted back to
+        # symbolic expression.
+        self.assertTrue(p.ToExpression().EqualTo(e))
+
+    def test_reparse(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewIndeterminates(1, "x")[0]
+        a = prog.NewContinuousVariables(1, "a")[0]
+        e = (a + 1) * (x * x) + (2 * a) * x + 3 * a
+
+        # p = (x^2 + 2x + 3)a + x^2 with indeterminates {a}.
+        p = sym.Polynomial(e, [a])
+        self.assertEqual(p.TotalDegree(), 1)
+
+        # p = (a + 1)x² + 2ax + 3a with indeterminates {x}.
+        prog.Reparse(p)
+        self.assertEqual(p.TotalDegree(), 2)
+
     def test_equality_between_polynomials(self):
         prog = mp.MathematicalProgram()
         x = prog.NewIndeterminates(1, "x")
@@ -531,6 +588,131 @@ class TestMathematicalProgram(unittest.TestCase):
         # Verify that they can be evaluated.
         self.assertAlmostEqual(cost_binding.evaluator().Eval(xstar), 0.)
         self.assertAlmostEqual(constraint_binding.evaluator().Eval(xstar), 1.)
+        self.assertEqual(len(prog.generic_constraints()), 1)
+        self.assertEqual(
+            prog.generic_constraints()[0].evaluator(),
+            constraint_binding.evaluator())
+        self.assertEqual(len(prog.generic_costs()), 1)
+        self.assertEqual(
+            prog.generic_costs()[0].evaluator(), cost_binding.evaluator())
+
+    def get_different_scalar_type(self, T):
+        # Gets U such that U != T.
+        next_index = SCALAR_TYPES.index(T) + 1
+        U = SCALAR_TYPES[next_index % len(SCALAR_TYPES)]
+        self.assertNotEqual(U, T)
+        return U
+
+    def test_pycost_wrap_error(self):
+        """Tests for checks using PyFunctionCost::Wrap."""
+        # TODO(eric.cousineau): It would be nice to not need a
+        # MathematicalProgram to test these.
+
+        def user_cost_bad_shape(x):
+            # WARNING: This should return a scalar, not a vector!
+            return x
+
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(1, 'x')
+        binding_bad_shape = prog.AddCost(user_cost_bad_shape, vars=x)
+
+        for T in SCALAR_TYPES:
+            array_T = np.vectorize(T)
+            x0 = array_T([0.])
+            x0_bad = array_T([0., 1.])
+            # Bad input (before function is called).
+            if kDrakeAssertIsArmed:
+                # See note in `WrapUserFunc`.
+                input_error_cls = SystemExit
+                input_error_expected = (
+                    "x.rows() == num_vars_ || num_vars_ == Eigen::Dynamic")
+            else:
+                input_error_cls = RuntimeError
+                input_error_expected = (
+                    "PyFunctionCost: Input must be of .ndim = 1 or 2 (vector) "
+                    "and .size = 1. Got .ndim = 1 and .size = 2 instead.")
+            with self.assertRaises(input_error_cls) as cm:
+                binding_bad_shape.evaluator().Eval(x0_bad)
+            self.assertIn(input_error_expected, str(cm.exception))
+            # Bad output shape.
+            with self.assertRaises(RuntimeError) as cm:
+                binding_bad_shape.evaluator().Eval(x0)
+            self.assertEqual(
+                str(cm.exception),
+                "PyFunctionCost: Output must be of .ndim = 0 (scalar) and "
+                ".size = 1. Got .ndim = 1 and .size = 1 instead.")
+
+            # Bad output dtype.
+            U = self.get_different_scalar_type(T)
+
+            def user_cost_bad_dtype(x):
+                # WARNING: This should return the same dtype as x!
+                return U(0.)
+
+            binding_bad_dtype = prog.AddCost(user_cost_bad_dtype, vars=x)
+            with self.assertRaises(RuntimeError) as cm:
+                binding_bad_dtype.evaluator().Eval(x0)
+            self.assertEqual(
+                str(cm.exception),
+                f"PyFunctionCost: Output must be of scalar type {T.__name__}. "
+                f"Got {U.__name__} instead.")
+
+    def test_pyconstraint_wrap_error(self):
+        """Tests for checks using PyFunctionConstraint::Wrap."""
+        # TODO(eric.cousineau): It would be nice to not need a
+        # MathematicalProgram to test these.
+
+        def user_constraint_bad_shape(x):
+            # WARNING: This should return a vector, not a scalar!
+            return x[0]
+
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(1, 'x')
+        binding_bad_shape = prog.AddConstraint(
+            user_constraint_bad_shape, lb=[0.], ub=[2.], vars=x)
+
+        for T in SCALAR_TYPES:
+            array_T = np.vectorize(T)
+            x0 = array_T([0.])
+            x0_bad = array_T([0., 1.])
+            # Bad input (before function is called).
+            if kDrakeAssertIsArmed:
+                # See note in `WrapUserFunc`.
+                input_error_cls = SystemExit
+                input_error_expected = (
+                    "x.rows() == num_vars_ || num_vars_ == Eigen::Dynamic")
+            else:
+                input_error_cls = RuntimeError
+                input_error_expected = (
+                    "PyFunctionConstraint: Input must be of .ndim = 1 or 2 "
+                    "(vector) and .size = 1. Got .ndim = 1 and .size = 2 "
+                    "instead.")
+            with self.assertRaises(input_error_cls) as cm:
+                binding_bad_shape.evaluator().Eval(x0_bad)
+            self.assertIn(input_error_expected, str(cm.exception))
+            # Bad output.
+            with self.assertRaises(RuntimeError) as cm:
+                binding_bad_shape.evaluator().Eval(x0)
+            self.assertEqual(
+                str(cm.exception),
+                "PyFunctionConstraint: Output must be of .ndim = 1 or 2 "
+                "(vector) and .size = 1. Got .ndim = 0 and .size = 1 instead.")
+
+            # Bad output dtype.
+            U = self.get_different_scalar_type(T)
+
+            def user_constraint_bad_dtype(x):
+                # WARNING: This should return the same dtype as x!
+                return [U(0.)]
+
+            binding_bad_dtype = prog.AddConstraint(
+                user_constraint_bad_dtype, lb=[0.], ub=[2.], vars=x)
+            with self.assertRaises(RuntimeError) as cm:
+                binding_bad_dtype.evaluator().Eval(x0)
+            self.assertEqual(
+                str(cm.exception),
+                f"PyFunctionConstraint: Output must be of scalar type "
+                f"{T.__name__}. Got {U.__name__} instead.")
 
     def test_addcost_symbolic(self):
         prog = mp.MathematicalProgram()
@@ -540,6 +722,14 @@ class TestMathematicalProgram(unittest.TestCase):
         prog.AddConstraint(x[0] <= 2)
         result = mp.Solve(prog)
         self.assertAlmostEqual(result.GetSolution(x)[0], 1.)
+
+    def test_addconstraint_matrix(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(1, 'x')
+        prog.AddConstraint(np.array([[x[0] <= 2], [x[0] >= -2]]))
+        result = mp.Solve(prog)
+        self.assertTrue(result.GetSolution(x)[0] <= 2)
+        self.assertTrue(result.GetSolution(x)[0] >= -2)
 
     def test_initial_guess(self):
         prog = mp.MathematicalProgram()
@@ -603,7 +793,11 @@ class TestMathematicalProgram(unittest.TestCase):
         prog.AddLorentzConeConstraint(np.array([z[0], x[0], x[1]]))
 
         # Test result
-        result = mp.Solve(prog)
+        # The default initial guess is [0, 0, 0]. This initial guess is bad
+        # because LorentzConeConstraint with eval_type=kConvex is not
+        # differentiable at [0, 0, 0]. Use initial guess [0.5, 0.5, 0.5]
+        # instead.
+        result = mp.Solve(prog, [0.5, 0.5, 0.5])
         self.assertTrue(result.is_success())
 
         # Check answer
@@ -645,9 +839,20 @@ class TestMathematicalProgram(unittest.TestCase):
         prog = mp.MathematicalProgram()
         x = prog.NewContinuousVariables(1)
         result = mp.Solve(prog)
-        infeasible = mp.GetInfeasibleConstraints(prog=prog, result=result,
-                                                 tol=1e-4)
-        self.assertEquals(len(infeasible), 0)
+        with catch_drake_warnings(expected_count=1):
+            infeasible = mp.GetInfeasibleConstraints(prog=prog, result=result,
+                                                     tol=1e-4)
+            self.assertEqual(len(infeasible), 0)
+
+        infeasible = result.GetInfeasibleConstraints(prog)
+        self.assertEqual(len(infeasible), 0)
+
+        infeasible = result.GetInfeasibleConstraints(prog, tol=1e-4)
+        self.assertEqual(len(infeasible), 0)
+
+        infeasible_names = result.GetInfeasibleConstraintNames(
+                prog=prog, tol=1e-4)
+        self.assertEqual(len(infeasible_names), 0)
 
     def test_add_indeterminates_and_decision_variables(self):
         prog = mp.MathematicalProgram()
@@ -670,6 +875,9 @@ class DummySolverInterface(SolverInterface):
     def available(self):
         return True
 
+    def enabled(self):
+        return True
+
     def solver_id(self):
         return SolverId("dummy")
 
@@ -684,6 +892,7 @@ class TestSolverInterface(unittest.TestCase):
     def test_dummy_solver_interface(self):
         solver = DummySolverInterface()
         self.assertTrue(solver.available())
+        self.assertTrue(solver.enabled())
         self.assertEqual(solver.solver_id().name(), "dummy")
         self.assertIsInstance(solver, SolverInterface)
         prog = mp.MathematicalProgram()
@@ -693,3 +902,6 @@ class TestSolverInterface(unittest.TestCase):
         self.assertTrue("Dummy solver cannot solve" in str(context.exception))
         self.assertIsInstance(result, mp.MathematicalProgramResult)
         self.assertTrue(solver.AreProgramAttributesSatisfied(prog))
+        with self.assertRaises(Exception) as context:
+            result2 = solver.Solve(prog)
+            self.assertIsInstance(result2, mp.MathematicalProgramResult)

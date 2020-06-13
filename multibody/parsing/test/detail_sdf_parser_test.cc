@@ -1,5 +1,6 @@
 #include "drake/multibody/parsing/detail_sdf_parser.h"
 
+#include <fstream>
 #include <memory>
 
 #include <gtest/gtest.h>
@@ -18,6 +19,12 @@
 #include "drake/math/roll_pitch_yaw.h"
 #include "drake/multibody/parsing/detail_path_utils.h"
 #include "drake/multibody/plant/multibody_plant.h"
+#include "drake/multibody/tree/ball_rpy_joint.h"
+#include "drake/multibody/tree/linear_bushing_roll_pitch_yaw.h"
+#include "drake/multibody/tree/prismatic_joint.h"
+#include "drake/multibody/tree/revolute_joint.h"
+#include "drake/multibody/tree/revolute_spring.h"
+#include "drake/multibody/tree/universal_joint.h"
 #include "drake/systems/framework/context.h"
 
 namespace drake {
@@ -25,6 +32,7 @@ namespace multibody {
 namespace internal {
 namespace {
 
+using Eigen::Vector2d;
 using Eigen::Vector3d;
 using geometry::GeometryId;
 using geometry::GeometryInstance;
@@ -60,6 +68,21 @@ GTEST_TEST(MultibodyPlantSdfParserTest, PackageMapSpecified) {
   plant.Finalize();
 
   // Verify the number of model instances.
+  EXPECT_EQ(plant.num_model_instances(), 3);
+}
+
+// Acceptance test that libsdformat can upgrade very old files.  This ensures
+// the upgrade machinery keeps working (in particular our re-implementation of
+// the embedSdf.rb tool within tools/workspace/sdformat).
+GTEST_TEST(MultibodyPlantSdfParserTest, VeryOldVersion) {
+  MultibodyPlant<double> plant(0.0);
+  PackageMap package_map;
+  const std::string full_sdf_filename = FindResourceOrThrow(
+      "drake/multibody/parsing/test/sdf_parser_test/very_old_version.sdf");
+
+  EXPECT_EQ(plant.num_model_instances(), 2);
+  AddModelFromSdfFile(full_sdf_filename, "", package_map, &plant, nullptr);
+  plant.Finalize();
   EXPECT_EQ(plant.num_model_instances(), 3);
 }
 
@@ -215,7 +238,7 @@ PlantAndSceneGraph ParseTestString(const std::string& inner) {
   file << "<sdf version='1.6'>" << inner << "\n</sdf>\n";
   file.close();
   PlantAndSceneGraph pair;
-  pair.plant = std::make_unique<MultibodyPlant<double>>();
+  pair.plant = std::make_unique<MultibodyPlant<double>>(0.0);
   pair.scene_graph = std::make_unique<SceneGraph<double>>();
   PackageMap package_map;
   pair.plant->RegisterAsSourceForSceneGraph(pair.scene_graph.get());
@@ -452,7 +475,16 @@ GTEST_TEST(MultibodyPlantSdfParserTest, JointParsingTest) {
   AddModelFromSdfFile(full_name, "", package_map, &plant, &scene_graph);
   plant.Finalize();
 
-  const Joint<double>& revolute_joint = plant.GetJointByName("revolute_joint");
+  // Revolute joint
+  DRAKE_EXPECT_NO_THROW(
+      plant.GetJointByName<RevoluteJoint>("revolute_joint"));
+  const RevoluteJoint<double>& revolute_joint =
+      plant.GetJointByName<RevoluteJoint>("revolute_joint");
+  EXPECT_EQ(revolute_joint.name(), "revolute_joint");
+  EXPECT_EQ(revolute_joint.parent_body().name(), "link1");
+  EXPECT_EQ(revolute_joint.child_body().name(), "link2");
+  EXPECT_EQ(revolute_joint.revolute_axis(), Vector3d::UnitZ());
+  EXPECT_EQ(revolute_joint.damping(), 0.2);
   EXPECT_TRUE(CompareMatrices(
       revolute_joint.position_lower_limits(), Vector1d(-1)));
   EXPECT_TRUE(CompareMatrices(
@@ -462,8 +494,16 @@ GTEST_TEST(MultibodyPlantSdfParserTest, JointParsingTest) {
   EXPECT_TRUE(CompareMatrices(
       revolute_joint.velocity_upper_limits(), Vector1d(100)));
 
-  const Joint<double>& prismatic_joint =
-      plant.GetJointByName("prismatic_joint");
+  // Prismatic joint
+  DRAKE_EXPECT_NO_THROW(
+      plant.GetJointByName<PrismaticJoint>("prismatic_joint"));
+  const PrismaticJoint<double>& prismatic_joint =
+      plant.GetJointByName<PrismaticJoint>("prismatic_joint");
+  EXPECT_EQ(prismatic_joint.name(), "prismatic_joint");
+  EXPECT_EQ(prismatic_joint.parent_body().name(), "link2");
+  EXPECT_EQ(prismatic_joint.child_body().name(), "link3");
+  EXPECT_EQ(prismatic_joint.translation_axis(), Vector3d::UnitZ());
+  EXPECT_EQ(prismatic_joint.damping(), 0.3);
   EXPECT_TRUE(CompareMatrices(
       prismatic_joint.position_lower_limits(), Vector1d(-2)));
   EXPECT_TRUE(CompareMatrices(
@@ -473,15 +513,60 @@ GTEST_TEST(MultibodyPlantSdfParserTest, JointParsingTest) {
   EXPECT_TRUE(CompareMatrices(
       prismatic_joint.velocity_upper_limits(), Vector1d(5)));
 
-  const Joint<double>& no_limit_joint =
-      plant.GetJointByName("revolute_joint_no_limits");
+  // Limitless revolute joint
+  DRAKE_EXPECT_NO_THROW(
+      plant.GetJointByName<RevoluteJoint>("revolute_joint_no_limits"));
+  const RevoluteJoint<double>& no_limit_joint =
+      plant.GetJointByName<RevoluteJoint>("revolute_joint_no_limits");
+  EXPECT_EQ(no_limit_joint.name(), "revolute_joint_no_limits");
+  EXPECT_EQ(no_limit_joint.parent_body().name(), "link3");
+  EXPECT_EQ(no_limit_joint.child_body().name(), "link4");
+  EXPECT_EQ(no_limit_joint.revolute_axis(), Vector3d::UnitZ());
   const Vector1d inf(std::numeric_limits<double>::infinity());
   const Vector1d neg_inf(-std::numeric_limits<double>::infinity());
-
   EXPECT_TRUE(CompareMatrices(no_limit_joint.position_lower_limits(), neg_inf));
   EXPECT_TRUE(CompareMatrices(no_limit_joint.position_upper_limits(), inf));
   EXPECT_TRUE(CompareMatrices(no_limit_joint.velocity_lower_limits(), neg_inf));
   EXPECT_TRUE(CompareMatrices(no_limit_joint.velocity_upper_limits(), inf));
+
+  // Ball joint
+  DRAKE_EXPECT_NO_THROW(plant.GetJointByName<BallRpyJoint>("ball_joint"));
+  const BallRpyJoint<double>& ball_joint =
+      plant.GetJointByName<BallRpyJoint>("ball_joint");
+  EXPECT_EQ(ball_joint.name(), "ball_joint");
+  EXPECT_EQ(ball_joint.parent_body().name(), "link4");
+  EXPECT_EQ(ball_joint.child_body().name(), "link5");
+  EXPECT_EQ(ball_joint.damping(), 0.1);
+  const Vector3d inf3(std::numeric_limits<double>::infinity(),
+                      std::numeric_limits<double>::infinity(),
+                      std::numeric_limits<double>::infinity());
+  const Vector3d neg_inf3(-std::numeric_limits<double>::infinity(),
+                          -std::numeric_limits<double>::infinity(),
+                          -std::numeric_limits<double>::infinity());
+  EXPECT_TRUE(CompareMatrices(ball_joint.position_lower_limits(), neg_inf3));
+  EXPECT_TRUE(CompareMatrices(ball_joint.position_upper_limits(), inf3));
+  EXPECT_TRUE(CompareMatrices(ball_joint.velocity_lower_limits(), neg_inf3));
+  EXPECT_TRUE(CompareMatrices(ball_joint.velocity_upper_limits(), inf3));
+
+  // Universal joint
+  DRAKE_EXPECT_NO_THROW(
+      plant.GetJointByName<UniversalJoint>("universal_joint"));
+  const UniversalJoint<double>& universal_joint =
+      plant.GetJointByName<UniversalJoint>("universal_joint");
+  EXPECT_EQ(universal_joint.name(), "universal_joint");
+  EXPECT_EQ(universal_joint.parent_body().name(), "link5");
+  EXPECT_EQ(universal_joint.child_body().name(), "link6");
+  EXPECT_EQ(universal_joint.damping(), 0.1);
+  const Vector2d inf2(std::numeric_limits<double>::infinity(),
+                      std::numeric_limits<double>::infinity());
+  const Vector2d neg_inf2(-std::numeric_limits<double>::infinity(),
+                          -std::numeric_limits<double>::infinity());
+  EXPECT_TRUE(CompareMatrices(universal_joint.position_lower_limits(),
+                              neg_inf2));
+  EXPECT_TRUE(CompareMatrices(universal_joint.position_upper_limits(), inf2));
+  EXPECT_TRUE(CompareMatrices(universal_joint.velocity_lower_limits(),
+                              neg_inf2));
+  EXPECT_TRUE(CompareMatrices(universal_joint.velocity_upper_limits(), inf2));
 }
 
 // Verifies that the SDF parser parses the joint actuator limit correctly.
@@ -517,6 +602,55 @@ GTEST_TEST(MultibodyPlantSdfParserTest, JointActuatorParsingTest) {
   DRAKE_EXPECT_THROWS_MESSAGE(
       plant.GetJointActuatorByName("prismatic_joint_zero_limit"),
       std::logic_error, "There is no joint actuator named '.*' in the model.");
+}
+
+// Verifies that the SDF parser parses the revolute spring parameters correctly.
+GTEST_TEST(MultibodyPlantSdfParserTest, RevoluteSpringParsingTest) {
+  MultibodyPlant<double> plant(0.0);
+
+  const std::string full_name = FindResourceOrThrow(
+      "drake/multibody/parsing/test/sdf_parser_test/"
+      "revolute_spring_parsing_test.sdf");
+  PackageMap package_map;
+  package_map.PopulateUpstreamToDrake(full_name);
+
+  // Reads in the SDF file.
+  AddModelFromSdfFile(full_name, "", package_map, &plant, nullptr);
+  plant.Finalize();
+
+  // Plant should have a UniformGravityFieldElement by default.
+  // Our test contains two joints that have nonzero stiffness
+  // and two joints that have zero stiffness. We only add a
+  // spring for nonzero stiffness, so only two spring forces
+  // should have been added.
+  constexpr int kNumSpringForces = 2;
+  DRAKE_DEMAND(plant.num_force_elements() == kNumSpringForces + 1);
+
+  // In these two tests, we verify that the generalized forces are
+  // correct for both springs. The first spring has a nonzero reference
+  // of 1.0 radians so should have nonzero torque. The second spring
+  // has a zero reference, so it should have no applied torque.
+  MultibodyForces<double> forces(plant);
+  auto context = plant.CreateDefaultContext();
+  constexpr int kGeneralizedForcesSize = 10;
+  Matrix2X<double> expected_generalized_forces(kNumSpringForces,
+                                               kGeneralizedForcesSize);
+  expected_generalized_forces << 0, 0, 0, 0, 0, 0, 5, 0, 0, 0,
+                                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0;
+  for (int i = 0; i < kNumSpringForces; ++i) {
+    // The ForceElement at index zero is gravity, so we skip that index.
+    const ForceElementIndex force_index(i + 1);
+    const auto& nonzero_reference = plant.GetForceElement(force_index);
+    forces.SetZero();
+    nonzero_reference.CalcAndAddForceContribution(
+        *context, plant.EvalPositionKinematics(*context),
+        plant.EvalVelocityKinematics(*context), &forces);
+
+    const VectorX<double>& generalized_forces = forces.generalized_forces();
+    EXPECT_TRUE(CompareMatrices(generalized_forces,
+                                expected_generalized_forces.row(i).transpose(),
+                                kEps, MatrixCompareType::relative));
+  }
 }
 
 GTEST_TEST(SdfParser, TestSupportedFrames) {
@@ -589,7 +723,7 @@ void FailWithReservedName(const std::string& inner) {
 }
 
 GTEST_TEST(SdfParser, TestUnsupportedFrames) {
-  // Model frames cannnot attach to / nor be relative to the world frame.
+  // Model frames cannot attach to / nor be relative to the world frame.
   FailWithInvalidWorld(R"(
 <model name='bad'>
   <link name='dont_crash_plz'/>  <!-- Need at least one link -->
@@ -711,6 +845,100 @@ GTEST_TEST(SdfParser, VisualGeometryParsing) {
       "drake/multibody/parsing/test/sdf_parser_test/"
       "all_geometries_as_visual.sdf",
       geometry::Role::kPerception);
+}
+
+GTEST_TEST(SdfParser, BushingParsing) {
+  // Test successful parsing
+  auto [plant, scene_graph] = ParseTestString(R"(
+    <model name='BushingModel'>
+      <link name='A'/>
+      <link name='C'/>
+      <frame name='frameA' attached_to='A'/>
+      <frame name='frameC' attached_to='C'/>
+      <drake:linear_bushing_rpy>
+        <drake:bushing_frameA>frameA</drake:bushing_frameA>
+        <drake:bushing_frameC>frameC</drake:bushing_frameC>
+        <drake:bushing_torque_stiffness>1 2 3</drake:bushing_torque_stiffness>
+        <drake:bushing_torque_damping>4 5 6</drake:bushing_torque_damping>
+        <drake:bushing_force_stiffness>7 8 9</drake:bushing_force_stiffness>
+        <drake:bushing_force_damping>10 11 12</drake:bushing_force_damping>
+      </drake:linear_bushing_rpy>
+    </model>)");
+
+  // MBP will always create a UniformGravityField, so the only other
+  // ForceElement should be the LinearBushingRollPitchYaw element parsed.
+  EXPECT_EQ(plant->num_force_elements(), 2);
+
+  const LinearBushingRollPitchYaw<double>& bushing =
+      plant->GetForceElement<LinearBushingRollPitchYaw>(ForceElementIndex(1));
+
+  EXPECT_STREQ(bushing.frameA().name().c_str(), "frameA");
+  EXPECT_STREQ(bushing.frameC().name().c_str(), "frameC");
+  EXPECT_EQ(bushing.torque_stiffness_constants(), Eigen::Vector3d(1, 2, 3));
+  EXPECT_EQ(bushing.torque_damping_constants(), Eigen::Vector3d(4, 5, 6));
+  EXPECT_EQ(bushing.force_stiffness_constants(), Eigen::Vector3d(7, 8, 9));
+  EXPECT_EQ(bushing.force_damping_constants(), Eigen::Vector3d(10, 11, 12));
+
+  // Test missing frame tag
+  DRAKE_EXPECT_THROWS_MESSAGE(ParseTestString(R"(
+    <model name='BushingModel'>
+      <link name='A'/>
+      <link name='C'/>
+      <frame name='frameA' attached_to='A'/>
+      <frame name='frameC' attached_to='C'/>
+      <drake:linear_bushing_rpy>
+        <drake:bushing_frameA>frameA</drake:bushing_frameA>
+        <!-- missing the drake:bushing_frameC tag -->
+        <drake:bushing_torque_stiffness>1 2 3</drake:bushing_torque_stiffness>
+        <drake:bushing_torque_damping>4 5 6</drake:bushing_torque_damping>
+        <drake:bushing_force_stiffness>7 8 9</drake:bushing_force_stiffness>
+        <drake:bushing_force_damping>10 11 12</drake:bushing_force_damping>
+      </drake:linear_bushing_rpy>
+    </model>)"),
+      std::runtime_error,
+      "Unable to find the <drake:bushing_frameC> tag.");
+
+  // Test non-existent frame
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      ParseTestString(R"(
+    <model name='BushingModel'>
+      <link name='A'/>
+      <link name='C'/>
+      <frame name='frameA' attached_to='A'/>
+      <frame name='frameC' attached_to='C'/>
+      <drake:linear_bushing_rpy>
+        <drake:bushing_frameA>frameA</drake:bushing_frameA>
+        <drake:bushing_frameC>frameZ</drake:bushing_frameC>
+        <!-- frameZ does not exist in the model -->
+        <drake:bushing_torque_stiffness>1 2 3</drake:bushing_torque_stiffness>
+        <drake:bushing_torque_damping>4 5 6</drake:bushing_torque_damping>
+        <drake:bushing_force_stiffness>7 8 9</drake:bushing_force_stiffness>
+        <drake:bushing_force_damping>10 11 12</drake:bushing_force_damping>
+      </drake:linear_bushing_rpy>
+    </model>)"),
+      std::runtime_error,
+      "Frame: frameZ specified for <drake:bushing_frameC> does not exist in "
+      "the model.");
+
+  // Test missing constants tag
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      ParseTestString(R"(
+    <model name='BushingModel'>
+      <link name='A'/>
+      <link name='C'/>
+      <frame name='frameA' attached_to='A'/>
+      <frame name='frameC' attached_to='C'/>
+      <drake:linear_bushing_rpy>
+        <drake:bushing_frameA>frameA</drake:bushing_frameA>
+        <drake:bushing_frameC>frameC</drake:bushing_frameC>
+        <drake:bushing_torque_stiffness>1 2 3</drake:bushing_torque_stiffness>
+        <!-- missing the drake:bushing_torque_damping tag -->
+        <drake:bushing_force_stiffness>7 8 9</drake:bushing_force_stiffness>
+        <drake:bushing_force_damping>10 11 12</drake:bushing_force_damping>
+      </drake:linear_bushing_rpy>
+    </model>)"),
+      std::runtime_error,
+      "Unable to find the <drake:bushing_torque_damping> tag.");
 }
 
 }  // namespace

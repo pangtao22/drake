@@ -17,6 +17,7 @@
 #include "drake/common/autodiff.h"
 #include "drake/common/drake_assert.h"
 #include "drake/common/never_destroyed.h"
+#include "drake/common/text_logging.h"
 
 namespace drake {
 namespace solvers {
@@ -166,6 +167,11 @@ void MobyLCPSolver<T>::DoSolve(
     const Eigen::VectorXd& initial_guess,
     const SolverOptions& merged_options,
     MathematicalProgramResult* result) const {
+  if (!prog.GetVariableScaling().empty()) {
+    static const logging::Warn log_once(
+      "MobyLCPSolver doesn't support the feature of variable scaling.");
+  }
+
   // Moby doesn't use initial guess or the solver options.
   unused(initial_guess);
   unused(merged_options);
@@ -1027,7 +1033,8 @@ bool MobyLCPSolver<T>::SolveLcpLemkeRegularized(const MatrixX<T>& M,
 
 template <typename T>
 MobyLCPSolver<T>::MobyLCPSolver()
-    : SolverBase(&id, &is_available, &ProgramAttributesSatisfied) {}
+    : SolverBase(&id, &is_available, &is_enabled,
+                 &ProgramAttributesSatisfied) {}
 
 template <typename T>
 MobyLCPSolver<T>::~MobyLCPSolver() = default;
@@ -1044,6 +1051,11 @@ SolverId MobyLCPSolver<T>::id() {
 
 template <typename T>
 bool MobyLCPSolver<T>::is_available() {
+  return true;
+}
+
+template <typename T>
+bool MobyLCPSolver<T>::is_enabled() {
   return true;
 }
 

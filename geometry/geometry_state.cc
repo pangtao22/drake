@@ -30,6 +30,8 @@ using math::RigidTransformd;
 using std::make_pair;
 using std::make_unique;
 using std::move;
+using std::set;
+using std::string;
 using std::swap;
 using std::to_string;
 using systems::sensors::ImageDepth32F;
@@ -128,7 +130,7 @@ GeometryState<T>::GeometryState()
 }
 
 template <typename T>
-int GeometryState<T>::GetNumGeometriesWithRole(Role role) const {
+int GeometryState<T>::NumGeometriesWithRole(Role role) const {
   int count = 0;
   for (const auto& pair : geometries_) {
     if (pair.second.has_role(role)) ++count;
@@ -137,7 +139,7 @@ int GeometryState<T>::GetNumGeometriesWithRole(Role role) const {
 }
 
 template <typename T>
-int GeometryState<T>::GetNumDynamicGeometries() const {
+int GeometryState<T>::NumDynamicGeometries() const {
   int count = 0;
   for (const auto& pair : frames_) {
     const InternalFrame& frame = pair.second;
@@ -148,7 +150,7 @@ int GeometryState<T>::GetNumDynamicGeometries() const {
 }
 
 template <typename T>
-int GeometryState<T>::GetNumAnchoredGeometries() const {
+int GeometryState<T>::NumAnchoredGeometries() const {
   const InternalFrame& frame = frames_.at(InternalFrame::world_frame_id());
   return frame.num_child_geometries();
 }
@@ -177,12 +179,12 @@ GeometryState<T>::GetCollisionCandidates() const {
 }
 
 template <typename T>
-bool GeometryState<T>::source_is_registered(SourceId source_id) const {
+bool GeometryState<T>::SourceIsRegistered(SourceId source_id) const {
   return source_frame_id_map_.find(source_id) != source_frame_id_map_.end();
 }
 
 template <typename T>
-const std::string& GeometryState<T>::get_source_name(SourceId id) const {
+const std::string& GeometryState<T>::GetName(SourceId id) const {
   auto itr = source_names_.find(id);
   if (itr != source_names_.end()) return itr->second;
   throw std::logic_error(
@@ -196,7 +198,7 @@ int GeometryState<T>::NumFramesForSource(SourceId source_id) const {
 }
 
 template <typename T>
-const FrameIdSet& GeometryState<T>::GetFramesForSource(
+const FrameIdSet& GeometryState<T>::FramesForSource(
     SourceId source_id) const {
   return GetValueOrThrow(source_id, source_frame_id_map_);
 }
@@ -218,7 +220,7 @@ const std::string& GeometryState<T>::GetOwningSourceName(FrameId id) const {
 }
 
 template <typename T>
-const std::string& GeometryState<T>::get_frame_name(FrameId frame_id) const {
+const std::string& GeometryState<T>::GetName(FrameId frame_id) const {
   FindOrThrow(frame_id, frames_, [frame_id]() {
     return "No frame name available for invalid frame id: " +
         to_string(frame_id);
@@ -227,7 +229,7 @@ const std::string& GeometryState<T>::get_frame_name(FrameId frame_id) const {
 }
 
 template <typename T>
-int GeometryState<T>::get_frame_group(FrameId frame_id) const {
+int GeometryState<T>::GetFrameGroup(FrameId frame_id) const {
   FindOrThrow(frame_id, frames_, [frame_id]() {
     return "No frame group available for invalid frame id: " +
         to_string(frame_id);
@@ -236,13 +238,13 @@ int GeometryState<T>::get_frame_group(FrameId frame_id) const {
 }
 
 template <typename T>
-int GeometryState<T>::GetNumFrameGeometries(FrameId frame_id) const {
+int GeometryState<T>::NumGeometriesForFrame(FrameId frame_id) const {
   const InternalFrame& frame = GetValueOrThrow(frame_id, frames_);
   return static_cast<int>(frame.child_geometries().size());
 }
 
 template <typename T>
-int GeometryState<T>::GetNumFrameGeometriesWithRole(FrameId frame_id,
+int GeometryState<T>::NumGeometriesForFrameWithRole(FrameId frame_id,
                                                     Role role) const {
   const InternalFrame& frame = GetValueOrThrow(frame_id, frames_);
   int count = 0;
@@ -267,7 +269,7 @@ int GeometryState<T>::NumGeometriesWithRole(FrameId frame_id, Role role) const {
 }
 
 template <typename T>
-GeometryId GeometryState<T>::GetGeometryFromName(
+GeometryId GeometryState<T>::GetGeometryIdByName(
     FrameId frame_id, Role role, const std::string& name) const {
   const std::string canonical_name = internal::CanonicalizeStringName(name);
 
@@ -663,88 +665,106 @@ void GeometryState<T>::AssignRole(SourceId source_id, GeometryId geometry_id,
   InternalGeometry& geometry =
       ValidateRoleAssign(source_id, geometry_id, Role::kProximity, assign);
 
-  // TODO(SeanCurtis-TRI): Before setting the properties, if this is kReplace I
-  //  may need to address the changes between properties (possibly undoing
-  //  something).
+  switch (assign) {
+    case RoleAssign::kNew:
+      geometry.SetRole(std::move(properties));
+      if (geometry.is_dynamic()) {
+        // Pass the geometry to the engine.
+        geometry_engine_->AddDynamicGeometry(geometry.shape(), geometry_id,
+                                             *geometry.proximity_properties());
 
-  geometry.SetRole(std::move(properties));
+        InternalFrame& frame = frames_[geometry.frame_id()];
 
-  if (assign == RoleAssign::kNew) {
-    if (geometry.is_dynamic()) {
-      // Pass the geometry to the engine.
-      geometry_engine_->AddDynamicGeometry(geometry.shape(), geometry_id,
-                                           *geometry.proximity_properties());
-
-      InternalFrame& frame = frames_[geometry.frame_id()];
-
-      int child_count = static_cast<int>(frame.child_geometries().size());
-      if (child_count > 1) {
-        // Having multiple children is _necessary_ but not _sufficient_ to
-        // require collision filtering. Only if there are multiple children with
-        // the proximity role do we engage filtering.
-        // TODO(SeanCurtis-TRI): Perhaps refactor this elsewhere?
-        std::vector<GeometryId> proximity_geometries;
-        proximity_geometries.reserve(child_count);
-        for (GeometryId child_id : frame.child_geometries()) {
-          if (geometries_[child_id].has_proximity_role()) {
-            proximity_geometries.push_back(child_id);
+        int child_count = static_cast<int>(frame.child_geometries().size());
+        if (child_count > 1) {
+          // Having multiple children is _necessary_ but not _sufficient_ to
+          // require collision filtering. Only if there are multiple children
+          // with the proximity role do we engage filtering.
+          // TODO(SeanCurtis-TRI): Perhaps refactor this logic into its own
+          //  method?
+          std::vector<GeometryId> proximity_geometries;
+          proximity_geometries.reserve(child_count);
+          for (GeometryId child_id : frame.child_geometries()) {
+            if (geometries_[child_id].has_proximity_role()) {
+              proximity_geometries.push_back(child_id);
+            }
           }
-        }
-        const int proximity_count =
-            static_cast<int>(proximity_geometries.size());
+          const int proximity_count =
+              static_cast<int>(proximity_geometries.size());
 
-        if (proximity_count > 1) {
-          // Filter collisions between geometries affixed to the same frame. We
-          // only add a clique to a frame's geometries when there are *multiple*
-          // child geometries.
-          ProximityEngine<T>& engine = *geometry_engine_.get_mutable();
-          if (proximity_count > 2) {
-            // Assume all previous geometries have already had the clique
-            // assigned.
-            GeometryStateCollisionFilterAttorney::set_dynamic_geometry_clique(
-                &engine, geometry_id, frame.clique());
-          } else {  // proximity_count == 2.
-            // This geometry tips us over to the point where we need to assign
-            // the clique to the new (and previous) geometries.
-            // NOTE: this is an optimization based on the clunky nature of the
-            // current collision filtering -- we're benefited in limiting the
-            // number of cliques assigned to a geometry.
-            for (GeometryId child_id : proximity_geometries) {
+          if (proximity_count > 1) {
+            // Filter collisions between geometries affixed to the same frame.
+            // We only add a clique to a frame's geometries when there are
+            // *multiple* child geometries.
+            ProximityEngine<T>& engine = *geometry_engine_.get_mutable();
+            if (proximity_count > 2) {
+              // Assume all previous geometries have already had the clique
+              // assigned.
               GeometryStateCollisionFilterAttorney::set_dynamic_geometry_clique(
-                  &engine, child_id, frame.clique());
+                  &engine, geometry_id, frame.clique());
+            } else {  // proximity_count == 2.
+              // This geometry tips us over to the point where we need to assign
+              // the clique to the new (and previous) geometries.
+              // NOTE: this is an optimization based on the clunky nature of the
+              // current collision filtering -- we're benefited in limiting the
+              // number of cliques assigned to a geometry.
+              for (GeometryId child_id : proximity_geometries) {
+                GeometryStateCollisionFilterAttorney::
+                    set_dynamic_geometry_clique(&engine, child_id,
+                                                frame.clique());
+              }
             }
           }
         }
+      } else {
+        // If it's not dynamic, it must be anchored. No clique madness required;
+        // anchored geometries are not tested against each other by the process.
+        geometry_engine_->AddAnchoredGeometry(geometry.shape(), geometry.X_FG(),
+                                              geometry_id,
+                                              *geometry.proximity_properties());
       }
-    } else {
-      // If it's not dynamic, it must be anchored. No clique madness required;
-      // anchored geometries are not tested against each other by the process.
-      geometry_engine_->AddAnchoredGeometry(geometry.shape(), geometry.X_FG(),
-                                            geometry_id,
-                                            *geometry.proximity_properties());
-    }
+      break;
+    case RoleAssign::kReplace:
+      // Give the engine a chance to compare properties before and after.
+      geometry_engine_->UpdateRepresentationForNewProperties(geometry,
+                                                             properties);
+      geometry.SetRole(std::move(properties));
+      break;
+    default:
+      DRAKE_UNREACHABLE();
   }
-  // TODO(SeanCurtis-TRI): Handle the assign == kReplace branch for when
-  //  ProximityEngine depends on the properties.
 }
 
 template <typename T>
 void GeometryState<T>::AssignRole(SourceId source_id, GeometryId geometry_id,
                                   PerceptionProperties properties,
                                   RoleAssign assign) {
-  InternalGeometry& geometry = ValidateRoleAssign(source_id, geometry_id,
-                     Role::kPerception, assign);
+  InternalGeometry& geometry =
+      ValidateRoleAssign(source_id, geometry_id, Role::kPerception, assign);
 
   // TODO(SeanCurtis-TRI): To support RoleAssign::kReplace, the render engines
   //  need to handle these changes.
 
+  auto accepting_renderers =
+      properties.GetPropertyOrDefault("renderer", "accepting", set<string>{});
+
   geometry.SetRole(std::move(properties));
 
-  for (auto& pair : render_engines_) {
-    auto& engine = pair.second;
-    engine->RegisterVisual(
-        geometry_id, geometry.shape(), *geometry.perception_properties(),
-        RigidTransformd(geometry.X_FG()), geometry.is_dynamic());
+  bool added_to_renderer{false};
+  for (auto& [name, engine] : render_engines_) {
+    if (accepting_renderers.empty() || accepting_renderers.count(name) > 0) {
+      added_to_renderer =
+          engine->RegisterVisual(
+              geometry_id, geometry.shape(), *geometry.perception_properties(),
+              RigidTransformd(geometry.X_FG()), geometry.is_dynamic()) ||
+          added_to_renderer;
+    }
+  }
+  if (!added_to_renderer && render_engines_.size() > 0) {
+    // TODO(SeanCurtis-TRI): This message would be better with a geometry name.
+    drake::log()->warn(
+        "Perception role assigned to geometry {}, but no renderer accepted it",
+        geometry_id);
   }
 }
 
@@ -1008,7 +1028,7 @@ template <typename ValueType>
 void GeometryState<T>::ValidateFrameIds(
     const SourceId source_id,
     const FrameKinematicsVector<ValueType>& kinematics_data) const {
-  auto& frames = GetFramesForSource(source_id);
+  auto& frames = FramesForSource(source_id);
   const int ref_frame_count = static_cast<int>(frames.size());
   if (ref_frame_count != kinematics_data.size()) {
     // TODO(SeanCurtis-TRI): Determine if more specific information is required.

@@ -3,6 +3,7 @@
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 
+#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/polynomial_types_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
@@ -22,7 +23,11 @@ PYBIND11_MODULE(trajectories, m) {
 
   using T = double;
 
-  py::class_<Trajectory<T>>(m, "Trajectory", doc.Trajectory.doc);
+  py::class_<Trajectory<T>>(m, "Trajectory", doc.Trajectory.doc)
+      .def("EvalDerivative", &Trajectory<T>::EvalDerivative, py::arg("t"),
+          py::arg("derivative_order") = 1, doc.Trajectory.EvalDerivative.doc)
+      .def("rows", &Trajectory<T>::rows, doc.Trajectory.rows.doc)
+      .def("cols", &Trajectory<T>::cols, doc.Trajectory.cols.doc);
 
   py::class_<PiecewiseTrajectory<T>, Trajectory<T>>(
       m, "PiecewiseTrajectory", doc.PiecewiseTrajectory.doc)
@@ -50,7 +55,9 @@ PYBIND11_MODULE(trajectories, m) {
       .def("get_segment_index", &PiecewiseTrajectory<T>::get_segment_index,
           py::arg("t"), doc.PiecewiseTrajectory.get_segment_index.doc)
       .def("get_segment_times", &PiecewiseTrajectory<T>::get_segment_times,
-          doc.PiecewiseTrajectory.get_segment_times.doc);
+          doc.PiecewiseTrajectory.get_segment_times.doc)
+      .def("vector_values", &PiecewiseTrajectory<T>::vector_values,
+          doc.Trajectory.vector_values.doc);
 
   py::class_<PiecewisePolynomial<T>, PiecewiseTrajectory<T>>(
       m, "PiecewisePolynomial", doc.PiecewisePolynomial.doc)
@@ -73,37 +80,95 @@ PYBIND11_MODULE(trajectories, m) {
               const Eigen::Ref<const MatrixX<T>>&>(
               &PiecewisePolynomial<T>::FirstOrderHold),
           doc.PiecewisePolynomial.FirstOrderHold.doc)
-      .def_static("Pchip",
+      .def_static("CubicShapePreserving",
           py::overload_cast<const Eigen::Ref<const Eigen::VectorXd>&,
               const Eigen::Ref<const MatrixX<T>>&, bool>(
-              &PiecewisePolynomial<T>::Pchip),
-          py::arg("breaks"), py::arg("knots"),
+              &PiecewisePolynomial<T>::CubicShapePreserving),
+          py::arg("breaks"), py::arg("samples"),
           py::arg("zero_end_point_derivatives") = false,
-          doc.PiecewisePolynomial.Pchip.doc)
-      .def_static("Cubic",
+          doc.PiecewisePolynomial.CubicShapePreserving.doc)
+      .def_static(
+          "Pchip",
+          [](const Eigen::Ref<const Eigen::VectorXd>& breaks,
+              const Eigen::Ref<const MatrixX<T>>& samples,
+              bool zero_end_point_derivatives) {
+            WarnDeprecated(
+                "Pchip has been renamed to CubicShapePreserving.  "
+                "Support will be removed after 2020-07-01.");
+            return PiecewisePolynomial<T>::CubicShapePreserving(
+                breaks, samples, zero_end_point_derivatives);
+          },
+          py::arg("breaks"), py::arg("knots"),
+          py::arg("zero_end_point_derivatives") = false)
+      .def_static("CubicWithContinuousSecondDerivatives",
           py::overload_cast<const Eigen::Ref<const Eigen::VectorXd>&,
               const Eigen::Ref<const MatrixX<T>>&,
               const Eigen::Ref<const VectorX<T>>&,
               const Eigen::Ref<const VectorX<T>>&>(
-              &PiecewisePolynomial<T>::Cubic),
+              &PiecewisePolynomial<T>::CubicWithContinuousSecondDerivatives),
+          py::arg("breaks"), py::arg("samples"), py::arg("sample_dot_at_start"),
+          py::arg("sample_dot_at_end"),
+          doc.PiecewisePolynomial.CubicWithContinuousSecondDerivatives
+              .doc_4args)
+      .def_static(
+          "Cubic",
+          [](const Eigen::Ref<const Eigen::VectorXd>& breaks,
+              const Eigen::Ref<const MatrixX<T>>& samples,
+              const Eigen::Ref<const VectorX<T>>& sample_dot_at_start,
+              const Eigen::Ref<const VectorX<T>>& sample_dot_at_end) {
+            WarnDeprecated(
+                "This version of Cubic has been renamed to "
+                "CubicWithContinuousSecondDerivatives.  "
+                "Support will be removed after 2020-07-01.");
+            return PiecewisePolynomial<T>::CubicWithContinuousSecondDerivatives(
+                breaks, samples, sample_dot_at_start, sample_dot_at_end);
+          },
           py::arg("breaks"), py::arg("knots"), py::arg("knots_dot_start"),
-          py::arg("knots_dot_end"),
-          doc.PiecewisePolynomial.Cubic
-              .doc_4args_breaks_knots_knots_dot_start_knots_dot_end)
-      .def_static("Cubic",
+          py::arg("knots_dot_end"))
+      .def_static("CubicHermite",
           py::overload_cast<const Eigen::Ref<const Eigen::VectorXd>&,
               const Eigen::Ref<const MatrixX<T>>&,
               const Eigen::Ref<const MatrixX<T>>&>(
-              &PiecewisePolynomial<T>::Cubic),
-          py::arg("breaks"), py::arg("knots"), py::arg("knots_dot"),
-          doc.PiecewisePolynomial.Cubic.doc_3args_breaks_knots_knots_dot)
-      .def_static("Cubic",
+              &PiecewisePolynomial<T>::CubicHermite),
+          py::arg("breaks"), py::arg("samples"), py::arg("samples_dot"),
+          doc.PiecewisePolynomial.CubicHermite.doc)
+      .def_static(
+          "Cubic",
+          [](const Eigen::Ref<const Eigen::VectorXd>& breaks,
+              const Eigen::Ref<const MatrixX<T>>& samples,
+              const Eigen::Ref<const MatrixX<T>>& samples_dot) {
+            WarnDeprecated(
+                "This version of Cubic has been renamed to CubicHermite.  "
+                "Support will be removed after 2020-07-01.");
+            return PiecewisePolynomial<T>::CubicHermite(
+                breaks, samples, samples_dot);
+          },
+          py::arg("breaks"), py::arg("knots"), py::arg("knots_dot"))
+      .def_static("CubicWithContinuousSecondDerivatives",
           py::overload_cast<const Eigen::Ref<const Eigen::VectorXd>&,
               const Eigen::Ref<const MatrixX<T>>&, bool>(
-              &PiecewisePolynomial<T>::Cubic),
-          py::arg("breaks"), py::arg("knots"), py::arg("periodic_end"),
-          doc.PiecewisePolynomial.Cubic
-              .doc_3args_breaks_knots_periodic_end_condition)
+              &PiecewisePolynomial<T>::CubicWithContinuousSecondDerivatives),
+          py::arg("breaks"), py::arg("samples"), py::arg("periodic_end"),
+          doc.PiecewisePolynomial.CubicWithContinuousSecondDerivatives
+              .doc_3args)
+      .def_static(
+          "Cubic",
+          [](const Eigen::Ref<const Eigen::VectorXd>& breaks,
+              const Eigen::Ref<const MatrixX<T>>& samples, bool periodic_end) {
+            WarnDeprecated(
+                "This version of Cubic has been renamed to "
+                "CubicWithContinuousSecondDerivatives.  "
+                "Support will be removed after 2020-07-01.");
+            return PiecewisePolynomial<T>::CubicWithContinuousSecondDerivatives(
+                breaks, samples, periodic_end);
+          },
+          py::arg("breaks"), py::arg("knots"), py::arg("periodic_end"))
+      .def_static("LagrangeInterpolatingPolynomial",
+          py::overload_cast<const Eigen::Ref<const Eigen::VectorXd>&,
+              const Eigen::Ref<const MatrixX<T>>&>(
+              &PiecewisePolynomial<T>::LagrangeInterpolatingPolynomial),
+          py::arg("times"), py::arg("samples"),
+          doc.PiecewisePolynomial.LagrangeInterpolatingPolynomial.doc)
       .def("value", &PiecewisePolynomial<T>::value, py::arg("t"),
           doc.PiecewisePolynomial.value.doc)
       .def("derivative", &PiecewisePolynomial<T>::derivative,
@@ -119,14 +184,26 @@ PYBIND11_MODULE(trajectories, m) {
           &PiecewisePolynomial<T>::getSegmentPolynomialDegree,
           py::arg("segment_index"), py::arg("row") = 0, py::arg("col") = 0,
           doc.PiecewisePolynomial.getSegmentPolynomialDegree.doc)
-      .def("rows", &PiecewisePolynomial<T>::rows,
-          doc.PiecewisePolynomial.rows.doc)
-      .def("cols", &PiecewisePolynomial<T>::cols,
-          doc.PiecewisePolynomial.cols.doc)
       .def("isApprox", &PiecewisePolynomial<T>::isApprox, py::arg("other"),
-          py::arg("tol"), doc.PiecewisePolynomial.isApprox.doc)
+          py::arg("tol"), py::arg("tol_type") = drake::ToleranceType::kRelative,
+          doc.PiecewisePolynomial.isApprox.doc)
+      .def("Reshape", &PiecewisePolynomial<T>::Reshape, py::arg("rows"),
+          py::arg("cols"), doc.PiecewisePolynomial.Reshape.doc)
+      .def("Block", &PiecewisePolynomial<T>::Block, py::arg("start_row"),
+          py::arg("start_col"), py::arg("block_rows"), py::arg("block_cols"),
+          doc.PiecewisePolynomial.Block.doc)
       .def("ConcatenateInTime", &PiecewisePolynomial<T>::ConcatenateInTime,
           py::arg("other"), doc.PiecewisePolynomial.ConcatenateInTime.doc)
+      .def("AppendCubicHermiteSegment",
+          &PiecewisePolynomial<T>::AppendCubicHermiteSegment, py::arg("time"),
+          py::arg("sample"), py::arg("sample_dot"),
+          doc.PiecewisePolynomial.AppendCubicHermiteSegment.doc)
+      .def("RemoveFinalSegment", &PiecewisePolynomial<T>::RemoveFinalSegment,
+          doc.PiecewisePolynomial.RemoveFinalSegment.doc)
+      .def("ReverseTime", &PiecewisePolynomial<T>::ReverseTime,
+          doc.PiecewisePolynomial.ReverseTime.doc)
+      .def("ScaleTime", &PiecewisePolynomial<T>::ScaleTime, py::arg("scale"),
+          doc.PiecewisePolynomial.ScaleTime.doc)
       .def("slice", &PiecewisePolynomial<T>::slice,
           py::arg("start_segment_index"), py::arg("num_segments"),
           doc.PiecewisePolynomial.slice.doc)

@@ -4,6 +4,7 @@
 
 #include <Eigen/Dense>
 
+#include "drake/attic_warning.h"
 #include "drake/common/eigen_stl_types.h"
 #include "drake/multibody/shapes/element.h"
 
@@ -23,10 +24,11 @@ class VisualElement final : public Element {
                 const Eigen::Vector4d& material,
                 const std::string& name = "");
 
-  /** Copy constructor for use by, e.g., std::vector. */
+  /** Copy and move constructor for use by, e.g., std::vector. */
   VisualElement(const VisualElement&) = default;
+  VisualElement(VisualElement&&) = default;
+
   void operator=(const VisualElement&) = delete;
-  VisualElement(VisualElement&&) = delete;
   void operator=(VisualElement&&) = delete;
 
   ~VisualElement() override = default;

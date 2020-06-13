@@ -15,7 +15,7 @@ template <class T>
 struct GenericIntegratorTest : public ::testing::Test {
  public:
   void SetUp() {
-    plant_ = std::make_unique<multibody::MultibodyPlant<double>>();
+    plant_ = std::make_unique<multibody::MultibodyPlant<double>>(0.0);
 
     // Add a single free body to the world.
     const double radius = 0.05;  // m
@@ -82,14 +82,14 @@ TYPED_TEST_P(GenericIntegratorTest, DenseOutput) {
 
     // Check solution.
     EXPECT_TRUE(CompareMatrices(
-        this->integrator_->get_dense_output()->Evaluate(
+        this->integrator_->get_dense_output()->value(
             this->context_->get_time()),
         this->plant_->GetPositionsAndVelocities(*this->context_),
         this->integrator_->get_accuracy_in_use(), MatrixCompareType::relative));
   }
 
   // Stop undergoing dense integration.
-  std::unique_ptr<systems::DenseOutput<double>> dense_output =
+  std::unique_ptr<trajectories::PiecewisePolynomial<double>> dense_output =
       this->integrator_->StopDenseIntegration();
   EXPECT_FALSE(this->integrator_->get_dense_output());
 
@@ -100,7 +100,17 @@ TYPED_TEST_P(GenericIntegratorTest, DenseOutput) {
   EXPECT_LT(dense_output->end_time(), this->context_->get_time());
 }
 
-REGISTER_TYPED_TEST_SUITE_P(GenericIntegratorTest, DenseOutput);
+// Confirm that integration supports times < 0.
+TYPED_TEST_P(GenericIntegratorTest, NegativeTime) {
+  this->integrator_->set_maximum_step_size(0.1);
+  this->integrator_->set_target_accuracy(1e-5);
+  this->integrator_->Initialize();
+  this->context_->SetTime(-1.0);
+  this->integrator_->IntegrateWithMultipleStepsToTime(-0.5);
+  EXPECT_EQ(this->context_->get_time(), -0.5);
+}
+
+REGISTER_TYPED_TEST_SUITE_P(GenericIntegratorTest, DenseOutput, NegativeTime);
 
 }  // namespace analysis_test
 }  // namespace systems

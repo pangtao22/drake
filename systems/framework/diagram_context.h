@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -13,6 +14,7 @@
 #include "drake/systems/framework/basic_vector.h"
 #include "drake/systems/framework/context.h"
 #include "drake/systems/framework/diagram_continuous_state.h"
+#include "drake/systems/framework/diagram_discrete_values.h"
 #include "drake/systems/framework/fixed_input_port_value.h"
 #include "drake/systems/framework/framework_common.h"
 #include "drake/systems/framework/parameters.h"
@@ -69,16 +71,14 @@ class DiagramState : public State<T> {
     finalized_ = true;
     std::vector<ContinuousState<T>*> sub_xcs;
     sub_xcs.reserve(num_substates());
-    std::vector<BasicVector<T>*> sub_xds;
+    std::vector<DiscreteValues<T>*> sub_xds;
     std::vector<AbstractValue*> sub_xas;
     for (State<T>* substate : substates_) {
       // Continuous
       sub_xcs.push_back(&substate->get_mutable_continuous_state());
       // Discrete
-      const std::vector<BasicVector<T>*>& xd_data =
-          substate->get_mutable_discrete_state().get_data();
-      sub_xds.insert(sub_xds.end(), xd_data.begin(), xd_data.end());
-      // Abstract
+      sub_xds.push_back(&substate->get_mutable_discrete_state());
+      // Abstract (no substructure)
       AbstractValues& xa = substate->get_mutable_abstract_state();
       for (int i_xa = 0; i_xa < xa.size(); ++i_xa) {
         sub_xas.push_back(&xa.get_mutable_value(i_xa));
@@ -92,7 +92,8 @@ class DiagramState : public State<T> {
     // pointers to that memory.
     this->set_continuous_state(
         std::make_unique<DiagramContinuousState<T>>(sub_xcs));
-    this->set_discrete_state(std::make_unique<DiscreteValues<T>>(sub_xds));
+    this->set_discrete_state(
+        std::make_unique<DiagramDiscreteValues<T>>(sub_xds));
     this->set_abstract_state(std::make_unique<AbstractValues>(sub_xas));
   }
 
@@ -114,8 +115,7 @@ class DiagramState : public State<T> {
 /// In general, users should not need to interact with a DiagramContext
 /// directly. Use the accessors on Diagram instead.
 ///
-/// @tparam T The mathematical type of the context, which must be a valid Eigen
-///           scalar.
+/// @tparam_default_scalar
 template <typename T>
 class DiagramContext final : public Context<T> {
  public:
@@ -304,6 +304,7 @@ class DiagramContext final : public Context<T> {
       state->set_substate(i, &Context<T>::access_mutable_state(&subcontext));
     }
     state->Finalize();
+    state->get_mutable_continuous_state().set_system_id(this->get_system_id());
     state_ = std::move(state);
   }
 
@@ -459,10 +460,13 @@ class DiagramContext final : public Context<T> {
   }
 
   // Recursively sets the time on all subcontexts.
-  void DoPropagateTimeChange(const T& time_sec, int64_t change_event) final {
+  void DoPropagateTimeChange(const T& time_sec,
+                             const std::optional<T>& true_time,
+                             int64_t change_event) final {
     for (auto& subcontext : contexts_) {
       DRAKE_ASSERT(subcontext != nullptr);
-      Context<T>::PropagateTimeChange(&*subcontext, time_sec, change_event);
+      Context<T>::PropagateTimeChange(&*subcontext, time_sec, true_time,
+                                      change_event);
     }
   }
 

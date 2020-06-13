@@ -17,7 +17,43 @@
 
 namespace drake {
 namespace geometry {
-namespace mesh_intersection {
+namespace internal {
+
+template<typename T>
+class SurfaceVolumeIntersectorTester {
+ public:
+  Vector3<T> CalcIntersection(const Vector3<T>& p_FA, const Vector3<T>& p_FB,
+                              const PosedHalfSpace<T>& H_F) {
+    return intersect_.CalcIntersection(p_FA, p_FB, H_F);
+  }
+  void ClipPolygonByHalfSpace(const std::vector<Vector3<T>>& polygon_vertices_F,
+                              const PosedHalfSpace<T>& H_F,
+                              std::vector<Vector3<T>>* output_vertices_F) {
+    intersect_.ClipPolygonByHalfSpace(polygon_vertices_F, H_F,
+                                      output_vertices_F);
+  }
+  void RemoveDuplicateVertices(std::vector<Vector3<T>>* polygon) {
+    intersect_.RemoveDuplicateVertices(polygon);
+  }
+  const std::vector<Vector3<T>>& ClipTriangleByTetrahedron(
+      VolumeElementIndex element, const VolumeMesh<T>& volume_M,
+      SurfaceFaceIndex face, const SurfaceMesh<T>& surface_N,
+      const math::RigidTransform<T>& X_MN) {
+    return intersect_.ClipTriangleByTetrahedron(element, volume_M, face,
+                                                surface_N, X_MN);
+  }
+  bool IsFaceNormalAlongPressureGradient(
+      const VolumeMeshField<T, T>& volume_field_M,
+      const SurfaceMesh<T>& surface_N, const math::RigidTransform<T>& X_MN,
+      const VolumeElementIndex& tet_index, const SurfaceFaceIndex& tri_index) {
+    return intersect_.IsFaceNormalAlongPressureGradient(
+        volume_field_M, surface_N, X_MN, tet_index, tri_index);
+  }
+
+ private:
+  SurfaceVolumeIntersector<T> intersect_;
+};
+
 namespace {
 
 using Eigen::Vector3d;
@@ -25,35 +61,6 @@ using math::RigidTransform;
 using math::RigidTransformd;
 using math::RollPitchYawd;
 using std::unique_ptr;
-
-// TODO(SeanCurtis-TRI): Unit test HalfSpace's signed_distance() and
-//  point_is_outside() methods.
-
-// This simply tests arbitrary normals to make sure they satisfy the
-// normalization test. They hypothesis is that *any* Vector3 normalized must
-// have a magnitude that is less than 1 epsilon away from 1 (except for the
-// zero vector, obviously).
-GTEST_TEST(HalfSpace, Construction) {
-  const double kEps = std::numeric_limits<double>::epsilon();
-  std::vector<Vector3d> dirs{
-      {1., kEps, kEps},
-      {1., std::sqrt(kEps), std::sqrt(kEps)},
-      {1., 2 * std::sqrt(kEps), 2 * std::sqrt(kEps)},
-      {1.123412345, 10.1231231235, -200.23298298374}
-  };
-  for (const Vector3d& dir : dirs) {
-    // This would abort for normal vectors that aren't unit length (see the
-    // death test below).
-    HalfSpace<double>(dir.normalized(), 0.25);
-  }
-}
-
-// Confirms that a plane normal that is *insufficiently* unit length aborts.
-GTEST_TEST(HalfSpaceTest, Unnormalized) {
-  const double kDelta = 4 * std::sqrt(std::numeric_limits<double>::epsilon());
-  EXPECT_THROW(HalfSpace<double>(Vector3d{1, kDelta, kDelta}, 0.25),
-               std::exception);
-}
 
 // TODO(SeanCurtis-TRI): Robustly confirm that epsilon of 1e-14 is correct for
 //  determining that the intersection is valid. One would suppose that it will
@@ -64,17 +71,19 @@ GTEST_TEST(MeshIntersectionTest, CalcIntersection) {
   const double kEps = std::numeric_limits<double>::epsilon();
   // TODO(SeanCurtis-TRI): This test has too many zeros in it (the normal is
   //  [1, 0, 0] -- that is not a robust test. Pick a more arbitrary normal.
-  // Halfspace {(x,y,z) : x <= 2.0}
+  // Half space {(x,y,z) : x <= 2.0}
   const Vector3d unit_normal_H = Vector3d::UnitX();
   const double plane_offset = 2.0;
-  const HalfSpace<double> half_space_H(unit_normal_H, plane_offset);
+  const PosedHalfSpace<double> half_space_H(unit_normal_H,
+                                            plane_offset * unit_normal_H);
 
   // The line AB intersects the plane of the half space.
   {
     const Vector3d p_HA = Vector3d::Zero();
     const Vector3d p_HB(4, 6, 10);
     const Vector3d intersection =
-        mesh_intersection::CalcIntersection(p_HA, p_HB, half_space_H);
+        SurfaceVolumeIntersectorTester<double>().CalcIntersection(
+            p_HA, p_HB, half_space_H);
     const Vector3d expect_intersection(2, 3, 5);
     EXPECT_LE((expect_intersection - intersection).norm(), kEps);
   }
@@ -84,7 +93,8 @@ GTEST_TEST(MeshIntersectionTest, CalcIntersection) {
     const Vector3d p_HA(plane_offset + 2.0 * kEps, 0., 0.);
     const Vector3d p_HB(plane_offset - 2.0 * kEps, 1., 1.);
     const Vector3d intersection =
-        mesh_intersection::CalcIntersection(p_HA, p_HB, half_space_H);
+        SurfaceVolumeIntersectorTester<double>().CalcIntersection(
+            p_HA, p_HB, half_space_H);
     const Vector3d expect_intersection(2., 0.5, 0.5);
     EXPECT_LE((expect_intersection - intersection).norm(), kEps);
   }
@@ -111,10 +121,11 @@ GTEST_TEST(MeshIntersectionTest, ClipPolygonByHalfSpace) {
   //  The normal is [1, 0, 0] which kills most of the multiplication. Pick a
   //  more arbitrarily oriented normal and an offset that is not perfectly
   //  represented as a power of two.
-  // Halfspace {(x,y,z) : x <= 2.0}
-  const Vector3d unit_normal = Vector3d::UnitX();
+  // Half space {(x,y,z) : x <= 2.0}
+  const Vector3d unit_normal_H = Vector3d::UnitX();
   const double offset = 2.0;
-  const HalfSpace<double> half_space(unit_normal, offset);
+  const PosedHalfSpace<double> half_space_H(unit_normal_H,
+                                            offset * unit_normal_H);
 
   // The input polygon is half inside the half space and half outside the
   // half space. Expect the output polygon to be half of the input polygon.
@@ -137,8 +148,9 @@ GTEST_TEST(MeshIntersectionTest, ClipPolygonByHalfSpace) {
     // (i.e., z = 0 for all vertices). There is no need to test this explicitly.
     // Also, by construction, the winding matches, so we will also not be
     // explicitly testing that.
-    const std::vector<Vector3d> output_polygon =
-        mesh_intersection::ClipPolygonByHalfSpace(input_polygon, half_space);
+    std::vector<Vector3d> output_polygon;
+    SurfaceVolumeIntersectorTester<double>().ClipPolygonByHalfSpace(
+        input_polygon, half_space_H, &output_polygon);
     EXPECT_TRUE(CompareConvexPolygon(expect_output_polygon, output_polygon));
   }
   // The input polygon is on the plane X=0, which is parallel to the plane of
@@ -155,8 +167,9 @@ GTEST_TEST(MeshIntersectionTest, ClipPolygonByHalfSpace) {
     // clang-format on
     // Because we expect the output polygon to *be* the input polygon, we don't
     // need to explicitly test planarity or winding.
-    const std::vector<Vector3d> output_polygon =
-        mesh_intersection::ClipPolygonByHalfSpace(input_polygon, half_space);
+    std::vector<Vector3d> output_polygon;
+    SurfaceVolumeIntersectorTester<double>().ClipPolygonByHalfSpace(
+        input_polygon, half_space_H, &output_polygon);
     EXPECT_TRUE(CompareConvexPolygon(input_polygon, output_polygon));
   }
   // The input polygon is on the plane X=3, which is parallel to the plane of
@@ -172,8 +185,9 @@ GTEST_TEST(MeshIntersectionTest, ClipPolygonByHalfSpace) {
     };
     // clang-format on
     // Empty polygons have no winding and no planarity.
-    const std::vector<Vector3d> output_polygon =
-        mesh_intersection::ClipPolygonByHalfSpace(input_polygon, half_space);
+    std::vector<Vector3d> output_polygon;
+    SurfaceVolumeIntersectorTester<double>().ClipPolygonByHalfSpace(
+        input_polygon, half_space_H, &output_polygon);
     const std::vector<Vector3d> empty_polygon;
     EXPECT_TRUE(CompareConvexPolygon(empty_polygon, output_polygon));
   }
@@ -190,8 +204,9 @@ GTEST_TEST(MeshIntersectionTest, ClipPolygonByHalfSpace) {
     // clang-format on
     // Because we expect the output polygon to *be* the input polygon, we don't
     // need to explicitly test planarity or winding.
-    const std::vector<Vector3d> output_polygon =
-        mesh_intersection::ClipPolygonByHalfSpace(input_polygon, half_space);
+    std::vector<Vector3d> output_polygon;
+    SurfaceVolumeIntersectorTester<double>().ClipPolygonByHalfSpace(
+        input_polygon, half_space_H, &output_polygon);
     EXPECT_TRUE(CompareConvexPolygon(input_polygon, output_polygon));
   }
   // The input polygon is outside the half space, but it has one edge on the
@@ -214,8 +229,9 @@ GTEST_TEST(MeshIntersectionTest, ClipPolygonByHalfSpace) {
     // clang-format on
     // By construction, expected output is planar (z = 0 for all vertices). It
     // has no area, so winding is immaterial.
-    const std::vector<Vector3d> output_polygon =
-        mesh_intersection::ClipPolygonByHalfSpace(input_polygon, half_space);
+    std::vector<Vector3d> output_polygon;
+    SurfaceVolumeIntersectorTester<double>().ClipPolygonByHalfSpace(
+        input_polygon, half_space_H, &output_polygon);
     EXPECT_TRUE(CompareConvexPolygon(expect_output_polygon, output_polygon));
   }
   // The input polygon is outside the half space, but it has one vertex on the
@@ -236,8 +252,9 @@ GTEST_TEST(MeshIntersectionTest, ClipPolygonByHalfSpace) {
     // clang-format on
     // By construction, expected output is planar (z = 0 for all vertices). It
     // has no area, so winding is immaterial.
-    const std::vector<Vector3d> output_polygon =
-        mesh_intersection::ClipPolygonByHalfSpace(input_polygon, half_space);
+    std::vector<Vector3d> output_polygon;
+    SurfaceVolumeIntersectorTester<double>().ClipPolygonByHalfSpace(
+        input_polygon, half_space_H, &output_polygon);
     EXPECT_TRUE(CompareConvexPolygon(expect_output_polygon, output_polygon));
   }
   // TODO(SeanCurtis-TRI): Clip a triangle into a quad. Clip a triangle into a
@@ -255,8 +272,9 @@ GTEST_TEST(MeshIntersectionTest, RemoveDuplicateVertices) {
         {0., 0., 1.}
     };
     // clang-format on
-    const std::vector<Vector3d> output_polygon =
-        mesh_intersection::RemoveDuplicateVertices(input_polygon);
+    std::vector<Vector3d> output_polygon = input_polygon;
+    SurfaceVolumeIntersectorTester<double>().RemoveDuplicateVertices(
+        &output_polygon);
     EXPECT_TRUE(CompareConvexPolygon(input_polygon, output_polygon));
   }
   // AAA: Three identical vertices reduced to a single vertex A.
@@ -271,8 +289,9 @@ GTEST_TEST(MeshIntersectionTest, RemoveDuplicateVertices) {
         {2., 0., 0.}
     };
     // clang-format on
-    const std::vector<Vector3d> output_polygon =
-        mesh_intersection::RemoveDuplicateVertices(input_polygon);
+    std::vector<Vector3d> output_polygon = input_polygon;
+    SurfaceVolumeIntersectorTester<double>().RemoveDuplicateVertices(
+        &output_polygon);
     EXPECT_TRUE(CompareConvexPolygon(expect_single_vertex, output_polygon));
   }
   // AABB: Two pairs of duplicate vertices. Reduced to two vertices AB.
@@ -289,8 +308,9 @@ GTEST_TEST(MeshIntersectionTest, RemoveDuplicateVertices) {
         {2., 2., 0.}
     };
     // clang-format on
-    const std::vector<Vector3d> output_polygon =
-        mesh_intersection::RemoveDuplicateVertices(input_polygon);
+    std::vector<Vector3d> output_polygon = input_polygon;
+    SurfaceVolumeIntersectorTester<double>().RemoveDuplicateVertices(
+        &output_polygon);
     EXPECT_TRUE(CompareConvexPolygon(expect_two_vertices, output_polygon));
   }
   // TODO(SeanCurtis-TRI): Add tests:
@@ -316,8 +336,9 @@ GTEST_TEST(MeshIntersectionTest, RemoveDuplicateVertices) {
         {2., 1., 0.},
     };
     // clang-format on
-    const std::vector<Vector3d> output_polygon =
-        mesh_intersection::RemoveDuplicateVertices(input_polygon);
+    std::vector<Vector3d> output_polygon = input_polygon;
+    SurfaceVolumeIntersectorTester<double>().RemoveDuplicateVertices(
+        &output_polygon);
     EXPECT_TRUE(CompareConvexPolygon(expect_three_vertices, output_polygon));
   }
 }
@@ -380,8 +401,9 @@ unique_ptr<SurfaceMesh<T>> TrivialSurfaceMesh() {
 // +X    |
 //      -Z
 //
-template<typename T>
-unique_ptr<VolumeMesh<T>> TrivialVolumeMesh() {
+template <typename T>
+unique_ptr<VolumeMesh<T>> TrivialVolumeMesh(
+    const math::RigidTransform<T>& X_MN = math::RigidTransform<T>::Identity()) {
   const int element_data[2][4] = {
       {0, 1, 2, 3},
       {0, 2, 1, 4}};
@@ -390,11 +412,11 @@ unique_ptr<VolumeMesh<T>> TrivialVolumeMesh() {
     elements.emplace_back(element);
   }
   const Vector3<T> vertex_data[5] = {
-      Vector3<T>::Zero(),
-      Vector3<T>::UnitX(),
-      Vector3<T>::UnitY(),
-      Vector3<T>::UnitZ(),
-      -Vector3<T>::UnitZ()
+      X_MN * Vector3<T>::Zero(),
+      X_MN * Vector3<T>::UnitX(),
+      X_MN * Vector3<T>::UnitY(),
+      X_MN * Vector3<T>::UnitZ(),
+      X_MN * (-Vector3<T>::UnitZ())
   };
   std::vector<VolumeVertex<T>> vertices;
   for (auto& vertex : vertex_data) {
@@ -407,16 +429,12 @@ unique_ptr<VolumeMesh<T>> TrivialVolumeMesh() {
 template<typename T>
 unique_ptr<VolumeMeshFieldLinear<T, T>> TrivialVolumeMeshField(
     const VolumeMesh<T>* volume_mesh) {
-  // TODO(SeanCurtis-TRI): All the zeros and ones prevent meaningful recognition
-  // of valid interpolation. I.e., interpolating values at v0, v1, v2
-  // incorrectly will still produce zero. Provide more complex values.
-
   // Pressure field value pᵢ at vertex vᵢ.
   const T p0{0.};
   const T p1{0.};
   const T p2{0.};
-  const T p3{1.};
-  const T p4{1.};
+  const T p3{1e+7};
+  const T p4{1e+10};
   std::vector<T> p_values = {p0, p1, p2, p3, p4};
   DRAKE_DEMAND(5 == volume_mesh->num_vertices());
   auto volume_mesh_field = std::make_unique<VolumeMeshFieldLinear<T, T>>(
@@ -494,8 +512,9 @@ GTEST_TEST(MeshIntersectionTest, ClipTriangleByTetrahedron) {
   // face of the tetrahedron. Expect the output polygon to be empty.
   {
     const auto X_MN = RigidTransformd(Vector3d::UnitX());
-    const auto polygon = mesh_intersection::ClipTriangleByTetrahedron(
-        element0, *volume_M, face, *surface_N, X_MN);
+    const std::vector<Vector3d> polygon =
+        SurfaceVolumeIntersectorTester<double>().ClipTriangleByTetrahedron(
+            element0, *volume_M, face, *surface_N, X_MN);
     const std::vector<Vector3d> expect_empty_polygon;
     EXPECT_TRUE(CompareConvexPolygon(expect_empty_polygon, polygon));
   }
@@ -505,8 +524,9 @@ GTEST_TEST(MeshIntersectionTest, ClipTriangleByTetrahedron) {
   {
     const auto X_MN = RigidTransformd(RollPitchYawd(0, 0, M_PI_2),
                                              Vector3d::Zero());
-    const auto polygon = mesh_intersection::ClipTriangleByTetrahedron(
-        element0, *volume_M, face, *surface_N, X_MN);
+    const std::vector<Vector3d> polygon =
+        SurfaceVolumeIntersectorTester<double>().ClipTriangleByTetrahedron(
+            element0, *volume_M, face, *surface_N, X_MN);
     EXPECT_TRUE(CompareConvexPolygon(empty_polygon, polygon));
   }
 
@@ -517,10 +537,12 @@ GTEST_TEST(MeshIntersectionTest, ClipTriangleByTetrahedron) {
   //  count" problem.
   {
     const auto X_MN = RigidTransformd::Identity();
-    const auto polygon0_M = mesh_intersection::ClipTriangleByTetrahedron(
-        element0, *volume_M, face, *surface_N, X_MN);
-    const auto polygon1_M = mesh_intersection::ClipTriangleByTetrahedron(
-        element1, *volume_M, face, *surface_N, X_MN);
+    const std::vector<Vector3d> polygon0_M =
+        SurfaceVolumeIntersectorTester<double>().ClipTriangleByTetrahedron(
+            element0, *volume_M, face, *surface_N, X_MN);
+    const std::vector<Vector3d> polygon1_M =
+        SurfaceVolumeIntersectorTester<double>().ClipTriangleByTetrahedron(
+            element1, *volume_M, face, *surface_N, X_MN);
     // clang-format off
     const std::vector<Vector3d> expect_triangle_M{
         {0, 0, 0},
@@ -535,8 +557,9 @@ GTEST_TEST(MeshIntersectionTest, ClipTriangleByTetrahedron) {
   // triangle.
   {
     const auto X_MN = RigidTransformd(Vector3d(0, 0, 0.5));
-    const auto polygon0_M = mesh_intersection::ClipTriangleByTetrahedron(
-        element0, *volume_M, face, *surface_N, X_MN);
+    const std::vector<Vector3d> polygon0_M =
+        SurfaceVolumeIntersectorTester<double>().ClipTriangleByTetrahedron(
+            element0, *volume_M, face, *surface_N, X_MN);
     // clang-format off
     const std::vector<Vector3d> expect_triangle_M{
         {0,   0,   0.5},
@@ -550,8 +573,9 @@ GTEST_TEST(MeshIntersectionTest, ClipTriangleByTetrahedron) {
   // is the empty polygon.
   {
     const auto X_MN = RigidTransformd(Vector3d(0, 0, 0.5));
-    const auto polygon1_M = mesh_intersection::ClipTriangleByTetrahedron(
-        element1, *volume_M, face, *surface_N, X_MN);
+    const std::vector<Vector3d> polygon1_M =
+        SurfaceVolumeIntersectorTester<double>().ClipTriangleByTetrahedron(
+            element1, *volume_M, face, *surface_N, X_MN);
     EXPECT_TRUE(CompareConvexPolygon(empty_polygon, polygon1_M));
   }
 
@@ -560,8 +584,9 @@ GTEST_TEST(MeshIntersectionTest, ClipTriangleByTetrahedron) {
   {
     const auto X_MN = RigidTransformd(RollPitchYawd(0, 0, M_PI),
                                              Vector3d(0.5, 0.5, 0));
-    const auto polygon0_M = mesh_intersection::ClipTriangleByTetrahedron(
-        element0, *volume_M, face, *surface_N, X_MN);
+    const std::vector<Vector3d> polygon0_M =
+        SurfaceVolumeIntersectorTester<double>().ClipTriangleByTetrahedron(
+            element0, *volume_M, face, *surface_N, X_MN);
     // clang-format off
     const std::vector<Vector3d> expect_square_M{
         {0,   0,   0},
@@ -663,8 +688,9 @@ GTEST_TEST(MeshIntersectionTest, ClipTriangleByTetrahedronIntoHeptagon) {
   const VolumeElementIndex tetrahedron(0);
   const SurfaceFaceIndex triangle(0);
   const auto X_MN = RigidTransformd::Identity();
-  const auto polygon_M = mesh_intersection::ClipTriangleByTetrahedron(
-      tetrahedron, *volume_M, triangle, *surface_N, X_MN);
+  const std::vector<Vector3d> polygon_M =
+      SurfaceVolumeIntersectorTester<double>().ClipTriangleByTetrahedron(
+          tetrahedron, *volume_M, triangle, *surface_N, X_MN);
   // clang-format off
   const std::vector<Vector3d> expect_heptagon_M{
       {1.,    1.,   0.},
@@ -679,9 +705,58 @@ GTEST_TEST(MeshIntersectionTest, ClipTriangleByTetrahedronIntoHeptagon) {
   EXPECT_TRUE(CompareConvexPolygon(expect_heptagon_M, polygon_M));
 }
 
-// TODO(DamrongGuoy): Add unit tests for AddPolygonToMeshData().
+GTEST_TEST(MeshIntersectionTest, IsFaceNormalAlongPressureGradient) {
+  // It is ok to use the trivial mesh and trivial mesh field in this test.
+  // The function under test asks for the gradient values and operates on it.
+  // It is not responsible for making sure that the gradient is computed
+  // correctly -- that is tested elsewhere.
 
-// TODO(DamrongGuoy): Add unit tests for ComputeNormalField().
+  // Let F be the expressed-in frame of the trivial volume mesh. In frame F,
+  // the tetrahedron Element_0 is above the X-Y plane, and its trivial volume
+  // mesh field has the gradient vector in Element_0 in +Z direction of frame
+  // F. We will use the following general rigid transform X_MF to express the
+  // volume mesh and its field in another frame M, so the test is more general.
+  RigidTransformd X_MF(RollPitchYawd(M_PI_4, 2. * M_PI / 3., M_PI / 6.),
+                       Vector3d(1.1, 2.5, 4.0));
+  const auto volume_M = TrivialVolumeMesh<double>(X_MF);
+  const auto volume_field_M = TrivialVolumeMeshField<double>(volume_M.get());
+  // Rigid surface mesh N has the triangle Face_0 with its face normal vector
+  // in +Z direction of N's frame.
+  const auto rigid_N = TrivialSurfaceMesh<double>();
+
+  // We will set the pose of SurfaceMesh N in frame M so that triangle
+  // Face_0 of N has its face normal vector make various angles with the
+  // gradient vector in tetrahedron Element_0.
+  struct TestData {
+    double angle;        // Angle between the face normal and the gradient.
+    bool expect_result;  // true when `angle` <  hard-coded threshold 5π/8.
+  } test_data[]{{0, true},
+                 {M_PI_2, true},
+                 {(5. * M_PI / 8.) * 0.99, true},   // slightly less than 5π/8
+                 {(5. * M_PI / 8.) * 1.01, false},  // slightly more than 5π/8
+                 {3. * M_PI_4, false},
+                 {M_PI, false}};
+
+  // Whether triangle Face_0 intersects tetrahedron Element_0 is not
+  // relevant to this test because IsFaceNormalAlongPressureGradient()
+  // only checks the angle between the normal and the gradient without
+  // triangle-tetrahedron intersection test.
+  for (const TestData& t : test_data) {
+    // First we use a simple pose of surface N in frame F of the trivial volume
+    // mesh, so we can check the angle threshold conveniently.
+    const auto X_FN =
+        RigidTransformd(RollPitchYawd(t.angle, 0, 0), Vector3d::Zero());
+    // Then, we use the general rigid transform X_MF to change simple X_FN to
+    // general X_MN as an argument to the tested function
+    // IsFaceNormalAlongPressureGradient().
+    const auto X_MN = X_MF * X_FN;
+    EXPECT_EQ(t.expect_result,
+              SurfaceVolumeIntersectorTester<double>()
+                  .IsFaceNormalAlongPressureGradient(
+                      *volume_field_M, *rigid_N, X_MN, VolumeElementIndex(0),
+                      SurfaceFaceIndex(0)));
+  }
+}
 
 // TODO(DamrongGuoy): Test SampleVolumeFieldOnSurface with more general
 //  X_MN.  Right now X_MN is a simple translation without rotation.
@@ -694,9 +769,8 @@ GTEST_TEST(MeshIntersectionTest, SampleVolumeFieldOnSurface) {
 
   unique_ptr<SurfaceMesh<double>> surface;
   unique_ptr<SurfaceMeshFieldLinear<double, double>> e_field;
-  mesh_intersection::SampleVolumeFieldOnSurface(
-      *volume_field_M, *rigid_N, X_MN,
-      &surface, &e_field);
+  SurfaceVolumeIntersector<double>().SampleVolumeFieldOnSurface(
+      *volume_field_M, *rigid_N, X_MN, &surface, &e_field);
 
   const double kEps = std::numeric_limits<double>::epsilon();
   EXPECT_EQ(3, surface->num_faces());
@@ -708,11 +782,27 @@ GTEST_TEST(MeshIntersectionTest, SampleVolumeFieldOnSurface) {
   // surface has area (1/8)/3.
   const double expect_area = 1. / 24.;
   EXPECT_NEAR(expect_area, area, kEps);
+
+  // Here we exploit the simplicity of TrivialVolumeMeshField<>() to check
+  // the field value. The test of field evaluation with more complex field
+  // values are in the unit test of VolumeMeshFieldLinear<>. Furthermore,
+  // testing that the right vertex is assigned the right field value is done
+  // in testing ComputeContactSurfaceFromSoftVolumeRigidSurface().
   const SurfaceFaceIndex face0(0);
   const SurfaceMesh<double>::Barycentric centroid(1. / 3., 1. / 3., 1. / 3.);
   const double e = e_field->Evaluate(face0, centroid);
-  const double expect_e = 0.5;
+  const double expect_e = 5e6;
   EXPECT_NEAR(expect_e, e, kEps);
+
+  // Test the face normals of resulting mesh. Because the 'trivial' surface mesh
+  // is a single triangle, all triangles in the resulting mesh should have the
+  // same normal.
+  using FIndex = SurfaceMesh<double>::ElementIndex;
+  ASSERT_TRUE(
+      CompareMatrices(rigid_N->face_normal(FIndex{0}), Vector3d::UnitZ()));
+  for (FIndex f(0); f < surface->num_faces(); ++f) {
+    EXPECT_TRUE(CompareMatrices(surface->face_normal(f), Vector3d::UnitZ()));
+  }
 }
 
 // Generates a volume mesh of an octahedron comprising of eight tetrahedral
@@ -764,9 +854,9 @@ unique_ptr<VolumeMesh<T>> OctahedronVolume() {
 template<typename T>
 unique_ptr<VolumeMeshFieldLinear<T, T>> OctahedronPressureField(
     VolumeMesh<T>* volume_mesh) {
-  // The field is 0 on the boundary and linearly increasing to 1 at the
+  // The field is 0 on the boundary and linearly increasing to 1e7 at the
   // center of the octahedron.
-  std::vector<T> values{1, 0, 0, 0, 0, 0, 0};
+  std::vector<T> values{1e7, 0, 0, 0, 0, 0, 0};
   return std::make_unique<VolumeMeshFieldLinear<T, T>>(
       "pressure", std::move(values), volume_mesh);
 }
@@ -853,18 +943,16 @@ void TestComputeContactSurfaceSoftRigid() {
 
   // In this case, we assign id_A to soft and we already know that id_A < id_B.
   // Confirm order
-  auto contact_SR =
-      mesh_intersection::ComputeContactSurfaceFromSoftVolumeRigidSurface(
-          id_A, *field_S, X_WS, id_B, *surface_R, X_WR);
+  auto contact_SR = ComputeContactSurfaceFromSoftVolumeRigidSurface(
+      id_A, *field_S, X_WS, id_B, *surface_R, X_WR);
   EXPECT_EQ(contact_SR->id_M(), id_A);
   EXPECT_EQ(contact_SR->id_N(), id_B);
 
   // Now reverse the ids. It should *still* be the case that the reported id_A
   // is less than id_B, but we should further satisfy various invariants
   // (listed below).
-  auto contact_RS =
-      mesh_intersection::ComputeContactSurfaceFromSoftVolumeRigidSurface(
-          id_B, *field_S, X_WS, id_A, *surface_R, X_WR);
+  auto contact_RS = ComputeContactSurfaceFromSoftVolumeRigidSurface(
+      id_B, *field_S, X_WS, id_A, *surface_R, X_WR);
   EXPECT_EQ(contact_RS->id_M(), id_A);
   EXPECT_EQ(contact_RS->id_N(), id_B);
 
@@ -899,34 +987,61 @@ GTEST_TEST(MeshIntersectionTest, ComputeContactSurfaceSoftRigidAutoDiffXd) {
   TestComputeContactSurfaceSoftRigid<AutoDiffXd>();
 }
 
-// Utility to find the vertex of the surface mesh M coincident with point Q. It
-// reports the index of an incident face and the barycentric coordinates of that
-// vertex. This naively performs an exhaustive search and is not suitable for
-// production use and requires the point to be bit-identical to `p_MQ`.
+// Finds the vertex of the mesh M (SurfaceMesh or VolumeMesh) coincident with
+// point Q. It reports the index of the vertex in the mesh. This naively
+// performs an exhaustive search and is not suitable for production use. It
+// uses a tolerance 1e-14 in checking whether Q and a mesh vertex are
+// coincident.
+//
 // @param[in] p_MQ
 //     The position of query point Q measured and expressed in M's frame.
-// @param[in] surface_M
-//     The surface mesh with vertex positions expressed in M's frame.
-// @param[out] face
-//     The index of a face incident to the coincindent vertex.
+// @param[in] mesh_M
+//     The mesh with vertex positions expressed in M's frame.
 // @param[out] vertex
-//     Barycentric coordinates of the vertex in the face. It would be either
-//     (1,0,0) or (0,1,0) or (0,0,1) depending on which vertex in the face
-//     matches `p_MQ`.
+//     Index of the mesh's vertex coincident with Q.
 // @return
 //     true if found.
-bool FindFaceVertex(Vector3d p_MQ, const SurfaceMesh<double>& surface_M,
-                    SurfaceFaceIndex* face,
-                    SurfaceMesh<double>::Barycentric* vertex) {
-  for (SurfaceFaceIndex f(0); f < surface_M.num_faces(); ++f) {
-    for (int i = 0; i < 3; ++i) {
-      const SurfaceVertexIndex v = surface_M.element(f).vertex(i);
-      if (p_MQ == surface_M.vertex(v).r_MV()) {
-        *face = f;
-        *vertex = SurfaceMesh<double>::Barycentric::Zero();
-        (*vertex)(i) = 1.;
-        return true;
-      }
+// @tparam  SurfaceMesh or VolumeMesh
+template <class Mesh>
+bool FindVertex(Vector3d p_MQ, const Mesh& mesh_M,
+                typename Mesh::VertexIndex* vertex) {
+  for (typename Mesh::VertexIndex v(0); v < mesh_M.num_vertices(); ++v) {
+    if ((p_MQ - mesh_M.vertex(v).r_MV()).norm() < 1e-14) {
+      *vertex = v;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Find the tetrahedral element of the volume mesh M that contains
+// a query point Q. It reports the index of the tetrahedral element E and the
+// barycentric coordinate b_EQ of Q in the tetrahedron E. It naively performs
+// an exhaustive search and is not suitable for production use. It handles
+// numerical roundings in limited ways.
+//
+// @param[in] p_MQ
+//     The position of query point Q measured and expressed in M's frame.
+// @param[in] volume_M
+//     The volume mesh with vertex positions expressed in M's frame.
+// @param[out] element_E
+//     The index of the tetrahedral element E that contains Q.
+// @param[out] b_EQ
+//     Barycentric coordinates of the query point Q in the tetrahedral
+//     element E.
+// @return
+//     true if found.
+// @note It may incorrectly classify Q slightly outside a tetrahedron as
+//       being inside due to numerical roundings.
+bool FindElement(Vector3d p_MQ, const VolumeMesh<double>& volume_M,
+                 VolumeElementIndex* element_E,
+                 VolumeMesh<double>::Barycentric* b_EQ) {
+  for (VolumeElementIndex e(0); e < volume_M.num_elements(); ++e) {
+    VolumeMesh<double>::Barycentric b = volume_M.CalcBarycentric(p_MQ, e);
+    if ((b.array() >= -1e-14).all()) {
+      *element_E = e;
+      *b_EQ = b;
+      return true;
     }
   }
   return false;
@@ -940,45 +1055,58 @@ bool FindFaceVertex(Vector3d p_MQ, const SurfaceMesh<double>& surface_M,
 //  We should check the scalar field and the vector field in a more
 //  comprehensive way.
 GTEST_TEST(MeshIntersectionTest, ComputeContactSurfaceSoftRigidMoving) {
-  auto id_S = GeometryId::get_new_id();
-  auto id_R = GeometryId::get_new_id();
-  auto soft_mesh = OctahedronVolume<double>();
-  // TODO(edrumwri) Fix the disparity here: OctahedronPressureField claims to
-  // be a pressure field but it is treated like a strain field.
-  auto soft_epsilon = OctahedronPressureField<double>(soft_mesh.get());
-  auto rigid_mesh = PyramidSurface<double>();
+  // Soft octahedron volume S with pressure field.
+  auto s_id = GeometryId::get_new_id();
+  auto s_mesh_S = OctahedronVolume<double>();
+  auto s_pressure_S = OctahedronPressureField<double>(s_mesh_S.get());
+  // Rigid pyramid surface R.
+  auto r_id = GeometryId::get_new_id();
+  auto r_mesh_R = PyramidSurface<double>();
 
-  const double kEps = std::numeric_limits<double>::epsilon();
+  // We use 1e-14 instead of std::numeric_limits<double>::epsilon() to
+  // compensate for the rounding due to general rigid transform.
+  const double kEps = 1e-14;
 
-  // The relationship between the frames for the soft body and the
-  // world frame is irrelevant for this test.
-  const auto X_WS = RigidTransformd::Identity();
+  // Pose of the soft octahedron S in World frame.
+  const auto X_WS =
+      RigidTransformd(RollPitchYawd(M_PI / 6., 2. * M_PI / 3., M_PI / 4.),
+                      Vector3d{1., -0.5, 3.});
 
-  // Tests translation. Move the rigid pyramid down, so its apex is at the
-  // center of the soft octahedron.  Check the field values at that point.
-  // We expect that the contact surface must include the zero vertex.
+  // Tests translation. Set the pose of the rigid pyramid R in S's frame as
+  // the one-unit downward translation, so that the apex of the rigid pyramid R
+  // is at the center of the soft octahedron S.
   {
     const auto X_SR = RigidTransformd(-Vector3d::UnitZ());
     const auto X_WR = X_WS * X_SR;
-    auto contact_SR_W =
-        mesh_intersection::ComputeContactSurfaceFromSoftVolumeRigidSurface(
-            id_S, *soft_epsilon, X_WS, id_R, *rigid_mesh, X_WR);
+    // Contact surface C is expressed in World frame.
+    const auto contact = ComputeContactSurfaceFromSoftVolumeRigidSurface(
+        s_id, *s_pressure_S, X_WS, r_id, *r_mesh_R, X_WR);
     // TODO(DamrongGuoy): More comprehensive checks on the mesh of the contact
     //  surface. Here we only check the number of triangles.
-    EXPECT_EQ(12, contact_SR_W->mesh_W().num_faces());
+    EXPECT_EQ(12, contact->mesh_W().num_faces());
 
-    const Vector3d p_MQ = Vector3d::Zero();
-    SurfaceFaceIndex face_Q;
-    SurfaceMesh<double>::Barycentric b_Q;
-    bool found = FindFaceVertex(p_MQ, contact_SR_W->mesh_W(), &face_Q, &b_Q);
-    ASSERT_TRUE(found);
-    const auto epsilon_SR = contact_SR_W->EvaluateE_MN(face_Q, b_Q);
-    EXPECT_NEAR(1.0, epsilon_SR, kEps);
+    // Point Q is at the center vertex of the soft mesh s_mesh_S. Check that
+    // the contact surface C also has a vertex coincident with Q with the same
+    // pressure value.
+    {
+      const Vector3d p_SQ = Vector3d::Zero();
+      const Vector3d p_WQ = X_WS * p_SQ;
+      // Index of contact surface C's vertex coincident with Q.
+      SurfaceVertexIndex c_vertex;
+      ASSERT_TRUE(FindVertex(p_WQ, contact->mesh_W(), &c_vertex));
+      const double c_pressure = contact->EvaluateE_MN(c_vertex);
+      // Index of soft octahedron S's vertex coincident with Q.
+      VolumeVertexIndex s_vertex;
+      ASSERT_TRUE(FindVertex(p_SQ, s_pressure_S->mesh(), &s_vertex));
+      const double s_pressure = s_pressure_S->EvaluateAtVertex(s_vertex);
+
+      EXPECT_NEAR(c_pressure, s_pressure, kEps * s_pressure);
+    }
   }
 
-  // Tests rotation. First we rotate the rigid pyramid 90 degrees around
-  // X-axis, so it will fit the left half of the soft octahedron, instead of
-  // the top half of the octahedron.  The pyramid vertices will look like this:
+  // Tests rotation. First we rotate the rigid pyramid R 90 degrees around
+  // X-axis of the soft octahedron S, so R will fit in the left half, instead
+  // of the top half, of S. R's vertices will look like this in S's frame:
   //
   //                +Z   -X
   //                 |   /
@@ -993,29 +1121,37 @@ GTEST_TEST(MeshIntersectionTest, ComputeContactSurfaceSoftRigidMoving) {
   //           +X    |
   //                -Z
   //
+  // To avoid the "double counting" problem, we then translate R half a unit
+  // length in -Y direction of S's frame.
   //
-  // To  avoid "double counting" problem, we then translate the pyramid a bit in
-  // the -Y direction. The center of the contact surface will be at (0, -1/2, 0)
-  // in the soft octahedron's frame.
+  // Verify that the contact surface C passes through point Q at (0, -1/2, 0)
+  // in S's frame. Notice that Q is coincident with a vertex of C, and Q is
+  // on the middle of an edge of a tetrahedron of S.
+  //
   {
     const auto X_SR =
         RigidTransformd(RollPitchYawd(M_PI / 2., 0., 0.), Vector3d{0, -0.5, 0});
     const auto X_WR = X_WS * X_SR;
-    auto contact_SR_W =
-        mesh_intersection::ComputeContactSurfaceFromSoftVolumeRigidSurface(
-            id_S, *soft_epsilon, X_WS, id_R, *rigid_mesh, X_WR);
+    auto contact = ComputeContactSurfaceFromSoftVolumeRigidSurface(
+        s_id, *s_pressure_S, X_WS, r_id, *r_mesh_R, X_WR);
     // TODO(DamrongGuoy): More comprehensive checks on the mesh of the contact
     //  surface.  Here we only check the number of triangles.
-    EXPECT_EQ(12, contact_SR_W->mesh_W().num_faces());
+    EXPECT_EQ(12, contact->mesh_W().num_faces());
 
-    const Vector3d p_MQ{0, -0.5,
-                        0};  // The center vertex of the pyramid "bottom".
-    SurfaceFaceIndex face_Q;
-    SurfaceMesh<double>::Barycentric b_Q;
-    bool found = FindFaceVertex(p_MQ, contact_SR_W->mesh_W(), &face_Q, &b_Q);
-    ASSERT_TRUE(found);
-    const auto e_SR = contact_SR_W->EvaluateE_MN(face_Q, b_Q);
-    EXPECT_NEAR(0.5, e_SR, kEps);
+    const Vector3d p_SQ{0, -0.5, 0};
+    const Vector3d p_WQ = X_WS * p_SQ;
+    // Index of C's vertex coincident with Q.
+    SurfaceVertexIndex c_vertex;
+    ASSERT_TRUE(FindVertex(p_WQ, contact->mesh_W(), &c_vertex));
+    const double c_pressure = contact->EvaluateE_MN(c_vertex);
+
+    // Find the tetrahedral element of S containing Q.
+    VolumeElementIndex tetrahedron;
+    VolumeMesh<double>::Barycentric b_Q;
+    ASSERT_TRUE(FindElement(p_SQ, s_pressure_S->mesh(), &tetrahedron, &b_Q));
+    const double s_pressure = s_pressure_S->Evaluate(tetrahedron, b_Q);
+
+    EXPECT_NEAR(c_pressure, s_pressure, kEps * s_pressure);
   }
 }
 
@@ -1039,7 +1175,129 @@ GTEST_TEST(MeshIntersectionTest, DoubleAutoDiffMixed) {
       "currently supported");
 }
 
+// Checks if two surfaces meshes are equivalent. To be equivalent, there must be
+// a bijective mapping between the two sets of triangles such that each mapped
+// pair of triangles spans the same domain with the same winding (i.e., normal
+// direction). Note that equivalence is a generous relationship. For example, a
+// "triangle-soup" mesh and a watertight topology which represent the same
+// manifold would be considered equivalent. Similarly, a mesh with extraneous,
+// unreferenced vertices would also be considered equivalent. Those details are
+// irrelevant for this test.
+bool IsEquivalent(const SurfaceMesh<double>& mesh_a,
+                  const SurfaceMesh<double>& mesh_b) {
+  // The number of triangles should be equal.
+  if (mesh_a.num_elements() != mesh_b.num_elements()) {
+    return false;
+  }
+
+  // Check that the triangles are equivalent in that they consist of vertices in
+  // the same domain. We do this by representing each triangle by a vector of
+  // its 3 vertices, sorting them in a consistent manner, and comparing them
+  // across both meshes. We also keep metadata of the face index so that we
+  // can use the original 3 vertices to test face winding order later.
+  using SurfaceFacePair = std::pair<SurfaceFaceIndex, std::array<Vector3d, 3>>;
+  std::vector<SurfaceFacePair> tri_vertices_a;
+  std::vector<SurfaceFacePair> tri_vertices_b;
+  // Comparison function that defines a lexical ordering for Vector3d.
+  auto vector_comp = [](const Vector3d& vector_a,
+                        const Vector3d& vector_b) -> bool {
+    // Sort based on x, then y, then z values.
+    if (vector_a[0] < vector_b[0]) {
+      return true;
+    } else if (vector_a[0] > vector_b[0]) {
+      return false;
+    } else if (vector_a[1] < vector_b[1]) {
+      return true;
+    } else if (vector_a[1] > vector_b[1]) {
+      return false;
+    } else {
+      return vector_a[2] < vector_b[2];
+    }
+  };
+  for (SurfaceFaceIndex f(0); f < mesh_a.num_elements(); ++f) {
+    std::array<Vector3d, 3> vectors_a;
+    std::array<Vector3d, 3> vectors_b;
+    for (int v = 0; v < 3; ++v) {
+      vectors_a[v] = mesh_a.vertex(mesh_a.element(f).vertex(v)).r_MV();
+      vectors_b[v] = mesh_b.vertex(mesh_b.element(f).vertex(v)).r_MV();
+    }
+    std::sort(vectors_a.begin(), vectors_a.end(), vector_comp);
+    std::sort(vectors_b.begin(), vectors_b.end(), vector_comp);
+    tri_vertices_a.emplace_back(f, vectors_a);
+    tri_vertices_b.emplace_back(f, vectors_b);
+  }
+  // Comparison function that defines a lexical ordering for SurfaceFacePair.
+  auto comp = [&vector_comp](const SurfaceFacePair& pair_a,
+                             const SurfaceFacePair& pair_b) -> bool {
+    // Sort according to the first vertex, followed by the second and so on if
+    // there is a tie.
+    if (!CompareMatrices(pair_a.second[0], pair_b.second[0])) {
+      return vector_comp(pair_a.second[0], pair_b.second[0]);
+    } else if (!CompareMatrices(pair_a.second[1], pair_b.second[1])) {
+      return vector_comp(pair_a.second[1], pair_b.second[1]);
+    } else {
+      return vector_comp(pair_a.second[2], pair_b.second[2]);
+    }
+  };
+  std::sort(tri_vertices_a.begin(), tri_vertices_a.end(), comp);
+  std::sort(tri_vertices_b.begin(), tri_vertices_b.end(), comp);
+
+  // Now we can compare matching triangles across the two meshes.
+  const double kEps = std::numeric_limits<double>::epsilon();
+  for (std::vector<SurfaceFacePair>::size_type i = 0; i < tri_vertices_a.size();
+       ++i) {
+    // Compare that the vertices span the same domain.
+    for (int v = 0; v < 3; ++v) {
+      if (!CompareMatrices(tri_vertices_a[i].second[v],
+                           tri_vertices_b[i].second[v])) {
+        return false;
+      }
+    }
+    // Since we kept track of the face index metadata, we can retrieve the
+    // original triangles and and check on face winding order by comparing the
+    // cross product (normal) between the two.
+    const Vector3d& face_normal_a = mesh_a.face_normal(tri_vertices_a[i].first);
+    const Vector3d& face_normal_b = mesh_b.face_normal(tri_vertices_b[i].first);
+    // Since they've been normalised to unit vectors we can check that the dot
+    // product should be almost equal to 1, bar an epsilon tolerance.
+    if (face_normal_a.dot(face_normal_b) < (1 - kEps)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// Tests ComputeContactSurfaceFromSoftVolumeRigidSurface using BVH broadphase
+// culling produces an equivalent contact surface.
+GTEST_TEST(MeshIntersectionTest, ComputeContactSurfaceSoftRigidBVH) {
+  auto id_S = GeometryId::get_new_id();
+  auto id_R = GeometryId::get_new_id();
+  auto mesh_S = OctahedronVolume<double>();
+  auto field_S = OctahedronPressureField<double>(mesh_S.get());
+  auto surface_R = PyramidSurface<double>();
+  // Move the rigid pyramid up, so only its square base intersects the top
+  // part of the soft octahedron.
+  const auto X_SR = RigidTransformd(Vector3d(0, 0, 0.5));
+
+  // The relationship between the frames for the soft body and the
+  // world frame is irrelevant for this test.
+  const auto X_WS = RigidTransformd::Identity();
+  const auto X_WR = X_WS * X_SR;
+
+  auto contact_SR = ComputeContactSurfaceFromSoftVolumeRigidSurface(
+      id_S, *field_S, X_WS, id_R, *surface_R, X_WR);
+
+  // Compute the contact surface using the BVHs.
+  auto bvh_S = BoundingVolumeHierarchy<VolumeMesh<double>>(*mesh_S);
+  auto bvh_R = BoundingVolumeHierarchy<SurfaceMesh<double>>(*surface_R);
+  auto bvh_contact_SR = ComputeContactSurfaceFromSoftVolumeRigidSurface(
+      id_S, *field_S, bvh_S, X_WS, id_R, *surface_R, bvh_R, X_WR);
+
+  EXPECT_TRUE(IsEquivalent(contact_SR->mesh_W(), bvh_contact_SR->mesh_W()));
+}
+
 }  // namespace
-}  // namespace mesh_intersection
+}  // namespace internal
 }  // namespace geometry
 }  // namespace drake

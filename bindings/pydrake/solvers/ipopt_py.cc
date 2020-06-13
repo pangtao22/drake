@@ -1,3 +1,4 @@
+#include "pybind11/eigen.h"
 #include "pybind11/pybind11.h"
 
 #include "drake/bindings/pydrake/common/value_pybind.h"
@@ -15,8 +16,8 @@ PYBIND11_MODULE(ipopt, m) {
 
   m.doc() = "Ipopt solver bindings for MathematicalProgram";
 
+  py::module::import("pydrake.common.value");
   py::module::import("pydrake.solvers.mathematicalprogram");
-  py::module::import("pydrake.systems.framework");
 
   py::class_<IpoptSolver, SolverInterface>(
       m, "IpoptSolver", doc.IpoptSolver.doc)
@@ -24,14 +25,14 @@ PYBIND11_MODULE(ipopt, m) {
 
   py::class_<IpoptSolverDetails>(
       m, "IpoptSolverDetails", doc.IpoptSolverDetails.doc)
-      .def_readwrite("status", &IpoptSolverDetails::status,
+      .def_readonly("status", &IpoptSolverDetails::status,
           doc.IpoptSolverDetails.status.doc)
-      .def_readwrite(
+      .def_readonly(
           "z_L", &IpoptSolverDetails::z_L, doc.IpoptSolverDetails.z_L.doc)
-      .def_readwrite(
+      .def_readonly(
           "z_U", &IpoptSolverDetails::z_U, doc.IpoptSolverDetails.z_U.doc)
-      .def_readwrite("g", &IpoptSolverDetails::g, doc.IpoptSolverDetails.g.doc)
-      .def_readwrite("lambda", &IpoptSolverDetails::lambda,
+      .def_readonly("g", &IpoptSolverDetails::g, doc.IpoptSolverDetails.g.doc)
+      .def_readonly("lambda_val", &IpoptSolverDetails::lambda,
           doc.IpoptSolverDetails.lambda.doc)
       .def("ConvertStatusToString", &IpoptSolverDetails::ConvertStatusToString,
           doc.IpoptSolverDetails.ConvertStatusToString.doc);

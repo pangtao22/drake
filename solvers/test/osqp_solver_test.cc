@@ -21,6 +21,7 @@ GTEST_TEST(QPtest, TestUnconstrainedQP) {
     const double tol = 1E-10;
     EXPECT_NEAR(result.GetSolution(x(0)), 0, tol);
     EXPECT_NEAR(result.get_optimal_cost(), 0, tol);
+    EXPECT_EQ(result.get_solver_details<OsqpSolver>().y.rows(), 0);
   }
 
   // Add additional quadratic costs
@@ -32,6 +33,7 @@ GTEST_TEST(QPtest, TestUnconstrainedQP) {
     EXPECT_NEAR(result.GetSolution(x(0)), 0, tol);
     EXPECT_NEAR(result.GetSolution(x(1)) + result.GetSolution(x(2)), 2, tol);
     EXPECT_NEAR(result.get_optimal_cost(), 0, tol);
+    EXPECT_EQ(result.get_solver_details<OsqpSolver>().y.rows(), 0);
   }
 
   // Add linear costs.
@@ -44,6 +46,7 @@ GTEST_TEST(QPtest, TestUnconstrainedQP) {
     EXPECT_NEAR(result.GetSolution(x(0)), -2, tol);
     EXPECT_NEAR(result.GetSolution(x(1)) + result.GetSolution(x(2)), 2, tol);
     EXPECT_NEAR(result.get_optimal_cost(), 1, tol);
+    EXPECT_EQ(result.get_solver_details<OsqpSolver>().y.rows(), 0);
   }
 }
 
@@ -104,7 +107,38 @@ GTEST_TEST(QPtest, TestInfeasible) {
               SolutionResult::kInfeasibleConstraints);
     EXPECT_EQ(result.get_optimal_cost(),
               MathematicalProgram::kGlobalInfeasibleCost);
+    EXPECT_EQ(result.get_solver_details<OsqpSolver>().y.rows(), 0);
   }
+}
+
+GTEST_TEST(OsqpSolverTest, DualSolution1) {
+  // Test GetDualSolution().
+  OsqpSolver solver;
+  TestQPDualSolution1(solver);
+}
+
+GTEST_TEST(OsqpSolverTest, DualSolution2) {
+  // Test GetDualSolution().
+  // This QP has non-zero dual solution for linear inequality constraint.
+  OsqpSolver solver;
+  TestQPDualSolution2(solver);
+}
+
+GTEST_TEST(OsqpSolverTest, DualSolution3) {
+  // Test GetDualSolution().
+  // This QP has non-zero dual solution for the bounding box constraint.
+  OsqpSolver solver;
+  TestQPDualSolution3(solver);
+}
+
+GTEST_TEST(OsqpSolverTest, EqualityConstrainedQPDualSolution1) {
+  OsqpSolver solver;
+  TestEqualityConstrainedQPDualSolution1(solver);
+}
+
+GTEST_TEST(OsqpSolverTest, EqualityConstrainedQPDualSolution2) {
+  OsqpSolver solver;
+  TestEqualityConstrainedQPDualSolution2(solver);
 }
 
 GTEST_TEST(OsqpSolverTest, SolverOptionsTest) {
@@ -122,6 +156,9 @@ GTEST_TEST(OsqpSolverTest, SolverOptionsTest) {
     osqp_solver.Solve(prog, {}, {}, &result);
     const int OSQP_SOLVED = 1;
     EXPECT_EQ(result.get_solver_details<OsqpSolver>().status_val, OSQP_SOLVED);
+    // OSQP is not very accurate, use a loose tolerance.
+    EXPECT_TRUE(CompareMatrices(result.get_solver_details<OsqpSolver>().y,
+                                Eigen::Vector3d(0, 0, -0.0619621), 1E-5));
 
     // Now only allow half the iterations in the OSQP solver. The solver should
     // not be able to solve the problem accurately.

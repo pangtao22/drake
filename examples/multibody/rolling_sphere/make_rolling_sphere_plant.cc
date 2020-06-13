@@ -1,5 +1,8 @@
 #include "drake/examples/multibody/rolling_sphere/make_rolling_sphere_plant.h"
 
+#include <utility>
+
+#include "drake/geometry/proximity_properties.h"
 #include "drake/multibody/tree/uniform_gravity_field_element.h"
 
 namespace drake {
@@ -7,21 +10,26 @@ namespace examples {
 namespace multibody {
 namespace bouncing_ball {
 
+using drake::geometry::AddContactMaterial;
+using drake::geometry::AddRigidHydroelasticProperties;
+using drake::geometry::AddSoftHydroelasticProperties;
+using drake::geometry::AddSoftHydroelasticPropertiesForHalfSpace;
+using drake::geometry::ProximityProperties;
+using drake::geometry::SceneGraph;
+using drake::geometry::Sphere;
 using drake::multibody::CoulombFriction;
 using drake::multibody::MultibodyPlant;
 using drake::multibody::RigidBody;
 using drake::multibody::SpatialInertia;
 using drake::multibody::UnitInertia;
-using math::RigidTransformd;
-using geometry::Sphere;
-using geometry::HalfSpace;
-using geometry::SceneGraph;
+using drake::math::RigidTransformd;
 
 std::unique_ptr<drake::multibody::MultibodyPlant<double>> MakeBouncingBallPlant(
     double radius, double mass, double elastic_modulus, double dissipation,
     const CoulombFriction<double>& surface_friction,
-    const Vector3<double>& gravity_W, SceneGraph<double>* scene_graph) {
-  auto plant = std::make_unique<MultibodyPlant<double>>();
+    const Vector3<double>& gravity_W, bool rigid_sphere, bool soft_ground,
+    SceneGraph<double>* scene_graph) {
+  auto plant = std::make_unique<MultibodyPlant<double>>(0.0);
 
   UnitInertia<double> G_Bcm = UnitInertia<double>::SolidSphere(radius);
   SpatialInertia<double> M_Bcm(mass, Vector3<double>::Zero(), G_Bcm);
@@ -31,27 +39,36 @@ std::unique_ptr<drake::multibody::MultibodyPlant<double>> MakeBouncingBallPlant(
   if (scene_graph != nullptr) {
     plant->RegisterAsSourceForSceneGraph(scene_graph);
 
-    Vector3<double> normal_W(0, 0, 1);
-    Vector3<double> point_W(0, 0, 0);
-
-    const RigidTransformd X_WG(HalfSpace::MakePose(normal_W, point_W));
-    // A half-space for the ground geometry.
-    plant->RegisterCollisionGeometry(plant->world_body(), X_WG, HalfSpace(),
-                                     "collision", surface_friction);
-
+    const RigidTransformd X_WG;  // identity.
+    ProximityProperties ground_props;
+    if (soft_ground) {
+      AddSoftHydroelasticPropertiesForHalfSpace(1.0, &ground_props);
+    } else {
+      AddRigidHydroelasticProperties(&ground_props);
+    }
+    AddContactMaterial(elastic_modulus, dissipation, surface_friction,
+                       &ground_props);
+    plant->RegisterCollisionGeometry(plant->world_body(), X_WG,
+                                     geometry::HalfSpace{}, "collision",
+                                     std::move(ground_props));
     // Add visual for the ground.
-    plant->RegisterVisualGeometry(plant->world_body(), X_WG, HalfSpace(),
-                                  "visual");
+    plant->RegisterVisualGeometry(plant->world_body(), X_WG,
+                                  geometry::HalfSpace{}, "visual");
 
     // Add sphere geometry for the ball.
     // Pose of sphere geometry S in body frame B.
     const RigidTransformd X_BS = RigidTransformd::Identity();
-    geometry::GeometryId sphere_geometry = plant->RegisterCollisionGeometry(
-        ball, X_BS, Sphere(radius), "collision", surface_friction);
-
     // Set material properties for hydroelastics.
-    plant->set_elastic_modulus(sphere_geometry, elastic_modulus);
-    plant->set_hunt_crossley_dissipation(sphere_geometry, dissipation);
+    ProximityProperties ball_props;
+    AddContactMaterial(elastic_modulus, dissipation, surface_friction,
+                       &ball_props);
+    if (rigid_sphere) {
+      AddRigidHydroelasticProperties(radius, &ball_props);
+    } else {
+      AddSoftHydroelasticProperties(radius, &ball_props);
+    }
+    plant->RegisterCollisionGeometry(ball, X_BS, Sphere(radius), "collision",
+                                     std::move(ball_props));
 
     // Add visual for the ball.
     const Vector4<double> orange(1.0, 0.55, 0.0, 1.0);

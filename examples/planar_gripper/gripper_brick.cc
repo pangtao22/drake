@@ -55,7 +55,7 @@ std::unique_ptr<systems::Diagram<T>> ConstructDiagram(
     geometry::SceneGraph<T>** scene_graph) {
   systems::DiagramBuilder<T> builder;
   std::tie(*plant, *scene_graph) =
-      multibody::AddMultibodyPlantSceneGraph(&builder);
+      multibody::AddMultibodyPlantSceneGraph(&builder, 0.0);
   const std::string gripper_path =
       FindResourceOrThrow("drake/examples/planar_gripper/planar_gripper.sdf");
   multibody::Parser parser(*plant, *scene_graph);
@@ -199,11 +199,22 @@ geometry::GeometryId GripperBrickHelper<T>::finger_tip_sphere_geometry_id(
 template <typename T>
 multibody::CoulombFriction<T>
 GripperBrickHelper<T>::GetFingerTipBrickCoulombFriction(Finger finger) const {
-  const multibody::CoulombFriction<T>& brick_friction =
-      plant_->default_coulomb_friction(
+  const geometry::ProximityProperties& brick_props =
+      *scene_graph_->model_inspector().GetProximityProperties(
           plant_->GetCollisionGeometriesForBody(brick_frame().body())[0]);
-  const multibody::CoulombFriction<double>& finger_tip_friction =
-      plant_->default_coulomb_friction(finger_tip_sphere_geometry_id(finger));
+
+  const geometry::ProximityProperties& finger_props =
+      *scene_graph_->model_inspector().GetProximityProperties(
+          finger_tip_sphere_geometry_id(finger));
+
+  const multibody::CoulombFriction<T>& brick_friction =
+      brick_props.GetProperty<multibody::CoulombFriction<T>>(
+          "material", "coulomb_friction");
+
+  const multibody::CoulombFriction<T>& finger_tip_friction =
+      finger_props.GetProperty<multibody::CoulombFriction<T>>(
+          "material", "coulomb_friction");
+
   return multibody::CalcContactFrictionFromSurfaceProperties(
       brick_friction, finger_tip_friction);
 }

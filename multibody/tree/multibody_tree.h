@@ -19,7 +19,7 @@
 #include "drake/common/random.h"
 #include "drake/math/rigid_transform.h"
 #include "drake/multibody/tree/acceleration_kinematics_cache.h"
-#include "drake/multibody/tree/articulated_body_force_bias_cache.h"
+#include "drake/multibody/tree/articulated_body_force_cache.h"
 #include "drake/multibody/tree/articulated_body_inertia_cache.h"
 #include "drake/multibody/tree/multibody_forces.h"
 #include "drake/multibody/tree/multibody_tree_system.h"
@@ -72,16 +72,7 @@ template <typename T> class QuaternionFloatingMobilizer;
 /// Multibody dynamics elements include bodies, joints, force elements and
 /// constraints.
 ///
-/// @tparam T The scalar type. Must be a valid Eigen scalar.
-///
-/// Instantiated templates for the following kinds of T's are provided:
-///
-/// - double
-/// - AutoDiffXd
-/// - symbolic::Expression
-///
-/// They are already available to link against in the containing library.
-/// No other values for T are currently supported.
+/// @tparam_default_scalar
 template <typename T>
 class MultibodyTree {
  public:
@@ -473,7 +464,7 @@ class MultibodyTree {
   ///     model.AddBody<RigidBody>(SpatialInertia<double>(...));
   ///   const Body<double>& child_body =
   ///     model.AddBody<RigidBody>(SpatialInertia<double>(...));
-  ///   // Define the pose X_BM of a frame M rigidly atached to child body B.
+  ///   // Define the pose X_BM of a frame M rigidly attached to child body B.
   ///   const RevoluteJoint<double>& elbow =
   ///     model.AddJoint<RevoluteJoint>(
   ///       "Elbow",                /* joint name */
@@ -1320,7 +1311,23 @@ class MultibodyTree {
       const Frame<T>& frame_F,
       const Eigen::Ref<const MatrixX<T>>& p_FP_list,
       const Frame<T>& frame_A,
-      const Frame<T>& frame_E) const;
+      const Frame<T>& frame_E) const {
+    const int num_points = p_FP_list.cols();
+    DRAKE_THROW_UNLESS(num_points > 0 && p_FP_list.rows() == 3);
+
+    const Matrix3X<T> asBias_AFp_E = CalcBiasTranslationalAcceleration(
+        context, with_respect_to, frame_F, p_FP_list, frame_A, frame_E);
+
+    // This deprecated method needs to return a VectorX<T>.
+    VectorX<T> asBias_AFp_E_as_VectorX(3 * num_points);
+    for (int i = 0;  i < num_points; ++i) {
+      const Vector3<T> acceleration_bias_i = asBias_AFp_E.col(i);
+      for (int j = 0; j < 3;  ++j)
+        asBias_AFp_E_as_VectorX(3*i + j) = acceleration_bias_i(j);
+    }
+
+    return asBias_AFp_E_as_VectorX;
+  }
 
   /// See MultibodyPlant method.
   Vector6<T> CalcBiasForJacobianSpatialVelocity(
@@ -1329,7 +1336,11 @@ class MultibodyTree {
       const Frame<T>& frame_F,
       const Eigen::Ref<const Vector3<T>>& p_FoFp_F,
       const Frame<T>& frame_A,
-      const Frame<T>& frame_E) const;
+      const Frame<T>& frame_E) const {
+    const SpatialAcceleration<T> Abias_WFp = CalcBiasSpatialAcceleration(
+        context, with_respect_to, frame_F, p_FoFp_F, frame_A, frame_E);
+    return Abias_WFp.get_coeffs();
+  }
 
   /// See MultibodyPlant method.
   void CalcJacobianSpatialVelocity(
@@ -1337,7 +1348,7 @@ class MultibodyTree {
       JacobianWrtVariable with_respect_to,
       const Frame<T>& frame_B, const Eigen::Ref<const Vector3<T>>& p_BP,
       const Frame<T>& frame_A, const Frame<T>& frame_E,
-      EigenPtr<MatrixX<T>> Jw_ABp_E) const;
+      EigenPtr<MatrixX<T>> Js_V_ABp_E) const;
 
   /// See MultibodyPlant method.
   void CalcJacobianAngularVelocity(const systems::Context<T>& context,
@@ -1392,6 +1403,34 @@ class MultibodyTree {
       const Frame<T>& frame_E,
       EigenPtr<MatrixX<T>> Js_v_ABi_E) const;
 
+  /// See MultibodyPlant method.
+  void CalcJacobianCenterOfMassTranslationalVelocity(
+      const systems::Context<T>& context, JacobianWrtVariable with_respect_to,
+      const Frame<T>& frame_A, const Frame<T>& frame_E,
+      EigenPtr<Matrix3X<T>> Js_v_ACcm_E) const;
+
+  /// See MultibodyPlant method.
+  Vector3<T> CalcBiasCenterOfMassTranslationalAcceleration(
+      const systems::Context<T>& context, JacobianWrtVariable with_respect_to,
+      const Frame<T>& frame_A, const Frame<T>& frame_E) const;
+
+  /// See MultibodyPlant method.
+  Matrix3X<T> CalcBiasTranslationalAcceleration(
+      const systems::Context<T>& context,
+      JacobianWrtVariable with_respect_to,
+      const Frame<T>& frame_B,
+      const Eigen::Ref<const Matrix3X<T>>& p_BoBi_B,
+      const Frame<T>& frame_A,
+      const Frame<T>& frame_E) const;
+
+  /// See MultibodyPlant method.
+  SpatialAcceleration<T> CalcBiasSpatialAcceleration(
+      const systems::Context<T>& context,
+      JacobianWrtVariable with_respect_to,
+      const Frame<T>& frame_B,
+      const Eigen::Ref<const Vector3<T>>& p_BoBp_B,
+      const Frame<T>& frame_A,
+      const Frame<T>& frame_E) const;
   /// @}
   // End of multibody Jacobian methods section.
 
@@ -1400,7 +1439,7 @@ class MultibodyTree {
   /// compute kinematics, forward and inverse dynamics, and Jacobian matrices,
   /// among others.
   /// These methods follow Drake's naming scheme for methods performing a
-  /// computation and therefore are named `CalcXXX()`, where `XXX` corresponds
+  /// computation and therefore are named `CalcFoo()`, where `Foo` corresponds
   /// to the quantity or object of interest to be computed. They all take a
   /// `systems::Context` as an input argument storing the state of the multibody
   /// system.
@@ -1660,15 +1699,34 @@ class MultibodyTree {
       const VelocityKinematicsCache<T>& vc,
       MultibodyForces<T>* forces) const;
 
-  /// See MultibodyPlant method.
+  // TODO(sherm1) Revise the comments below as #12942 is addressed.
+
+  /// See System method. Currently includes only gravity and explicit
+  /// ForceElement sources; potential energy of contact is ignored.
+  /// See issue #12942.
   T CalcPotentialEnergy(const systems::Context<T>& context) const;
 
-  /// See MultibodyPlant method.
+  /// See System method.
+  T CalcKineticEnergy(const systems::Context<T>& context) const;
+
+  /// See System method. Currently includes only gravity and explicit
+  /// ForceElement sources; potential energy of contact is ignored.
+  /// See issue #12942.
   T CalcConservativePower(const systems::Context<T>& context) const;
+
+  /// See System method. Currently includes only explicit ForceElement sources.
+  /// Power from joint dampers, actuators, input ports, and contact are
+  /// not included.
+  /// See issue #12942.
+  T CalcNonConservativePower(const systems::Context<T>& context) const;
 
   /// See MultibodyPlant method.
   void CalcMassMatrixViaInverseDynamics(
-      const systems::Context<T>& context, EigenPtr<MatrixX<T>> H) const;
+      const systems::Context<T>& context, EigenPtr<MatrixX<T>> M) const;
+
+  /// See MultibodyPlant method.
+  void CalcMassMatrix(const systems::Context<T>& context,
+                      EigenPtr<MatrixX<T>> M) const;
 
   /// See MultibodyPlant method.
   void CalcBiasTerm(
@@ -1699,13 +1757,13 @@ class MultibodyTree {
   1. CalcArticulatedBodyInertiaCache(): which performs a tip-to-base pass to
      compute the ArticulatedBodyInertia for each body along with other ABA
      quantities that are configuration dependent only.
-  2. CalcArticulatedBodyForceBiasCache(): a second tip-to-base pass which
+  2. CalcArticulatedBodyForceCache(): a second tip-to-base pass which
      essentially computes the bias terms in the ABA equations. These are a
      function of the full state x = [q; v] and externally applied actuation and
      forces.
   3. CalcArticulatedBodyAccelerations(): which performs a final base-to-tip
      recursion to compute the acceleration of each body in the model. These
-     accelerations are a function of the ArticulatedBodyForceBiasCache
+     accelerations are a function of the ArticulatedBodyForceCache
      previously computed by CalcArticulatedBodyForces(). That is, accelerations
      are a function of state x and applied forces.
 
@@ -1953,9 +2011,9 @@ class MultibodyTree {
   /// `x = [q; v]`, stored in `context`, and externally applied `forces`.
   /// Refer to @ref abi_and_bias_force "Articulated Body Inertia and Force Bias"
   /// for further details.
-  void CalcArticulatedBodyForceBiasCache(
+  void CalcArticulatedBodyForceCache(
       const systems::Context<T>& context, const MultibodyForces<T>& forces,
-      ArticulatedBodyForceBiasCache<T>* aba_force_bias_cache) const;
+      ArticulatedBodyForceCache<T>* aba_force_cache) const;
 
   /// Performs the final base-to-tip pass of ABA to compute the acceleration of
   /// each body in the model into output `ac`.
@@ -1963,8 +2021,28 @@ class MultibodyTree {
   /// further details.
   void CalcArticulatedBodyAccelerations(
     const systems::Context<T>& context,
-    const ArticulatedBodyForceBiasCache<T>& aba_force_bias_cache,
+    const ArticulatedBodyForceCache<T>& aba_force_cache,
     AccelerationKinematicsCache<T>* ac) const;
+
+  /// For a body B, computes the spatial acceleration bias term `Ab_WB` as it
+  /// appears in the acceleration level motion constraint imposed by body B's
+  /// mobilizer `A_WB = Aplus_WB + Ab_WB + H_PB_W * vdot_B`, with `Aplus_WB =
+  /// Φᵀ(p_PB) * A_WP` the rigidly shifted spatial acceleration of the inboard
+  /// body P and `H_PB_W` and `vdot_B` its mobilizer's hinge matrix and
+  /// mobilities, respectively. See @ref abi_computing_accelerations for further
+  /// details. On output `Ab_WB_cache[body_node_index]`
+  /// contains `Ab_WB` for the body with node index `body_node_index`.
+  void CalcSpatialAccelerationBiasCache(
+      const systems::Context<T>& context,
+      std::vector<SpatialAcceleration<T>>* Ab_WB_cache)
+      const;
+
+  /// Computes the articulated body force bias `Zb_Bo_W = Pplus_PB_W * Ab_WB`
+  /// for each articulated body B. On output `Zb_Bo_W_cache[body_node_index]`
+  /// contains `Zb_Bo_W` for the body B with node index `body_node_index`.
+  void CalcArticulatedBodyForceBiasCache(
+      const systems::Context<T>& context,
+      std::vector<SpatialForce<T>>* Zb_Bo_W_cache) const;
 
   /// @}
 
@@ -2443,29 +2521,37 @@ class MultibodyTree {
   // mobilizer, even after Finalize().
   void AddQuaternionFreeMobilizerToAllBodiesWithNoMobilizer();
 
-  // Helper method for CalcBiasForJacobianTranslationalVelocity() and
-  // CalcBiasForJacobianSpatialVelocity() which shifts the spatial acceleration
-  // bias term from point Fo (the origin of a frame F) to point Fp (fixed on F),
-  // where frame F is fixed to a body B.
-  // @param[in] context The state of the multibody system, which includes the
-  // generalized positions q and generalized velocities v.
-  // @param[in] frame_F The frame on which point Fp is fixed/welded.
-  // @param[in] X_BF rigid transform relating body B's frame to frame F.
-  // @param[in] p_FoFp_F position vector from Fo (frame F's origin) to Fp,
-  // expressed in frame F.
-  // @param[in] Abias_WBo_W spatial acceleration bias of Bo (body B's origin) in
-  // world W, expressed in W.
-  // expressed in frame F.
-  // @param[in] frame_E The frame in which `Abias_WFp` is expressed on output.
-  // @returns Abias_WFp_E  Fp's spatial acceleration bias in world frame W,
-  // expressed in frame_E.
-  SpatialAcceleration<T> CalcSpatialAccelerationBiasShift(
+  // Shift bias spatial acceleration from the origin Ao of body A to a
+  // point Bp of (fixed to) a frame B, where frame B is fixed/welded to body A.
+  // @param[in] context The state of the multibody system.
+  // @param[in] frame_B The frame on which point Bp is fixed/welded.
+  // @param[in] p_BoBp_B Position vector from Bo (frame_B's origin) to a point
+  // Bp (regarded as fixed to B), expressed in frame_B.
+  // @param[in] body_A The body on which frame_B is fixed/welded.
+  // @param[in] A𝑠Bias_WA_W Point Ao's spatial acceleration bias in frame W
+  // with respect to speeds 𝑠 (𝑠 = q̇ or 𝑠 = v), expressed in the world frame W.
+  // @returns  A𝑠Bias_WBp_W Point Bp's spatial acceleration bias in frame W
+  // with respect to speeds 𝑠 (𝑠 = q̇ or 𝑠 = v), expressed in the world frame W.
+  SpatialAcceleration<T> ShiftSpatialAccelerationBiasInWorld(
       const systems::Context<T>& context,
-      const Frame<T>& frame_F,
-      const math::RigidTransform<T>& X_BF,
-      const Vector3<T>& p_FoFp_F,
-      const SpatialAcceleration<T>& Abias_WBo_W,
-      const Frame<T>& frame_E) const;
+      const Body<T>& body_A,
+      const Frame<T>& frame_B,
+      const Eigen::Ref<const Vector3<T>>& p_BoBp_B,
+      const SpatialAcceleration<T>& AsBias_WA_W) const;
+
+  // Calculate a body_A's bias spatial acceleration in the world frame W.
+  // @param[in] context The state of the multibody system.
+  // @param[in] with_respect_to Enum equal to JacobianWrtVariable::kQDot or
+  // JacobianWrtVariable::kV, indicating whether the spatial acceleration bias
+  // is with respect to 𝑠 = q̇ or 𝑠 = v.
+  // @param[in] body_A The body whose bias spatial acceleration is calculated.
+  // @returns A𝑠Bias_WA_W body_A's spatial acceleration bias in frame W
+  // with respect to speeds 𝑠 (𝑠 = q̇ or 𝑠 = v), expressed in the world frame W.
+  // @throws std::exception if with_respect_to is not JacobianWrtVariable::kV
+  SpatialAcceleration<T> CalcBodyBiasSpatialAccelerationInWorld(
+      const systems::Context<T>& context,
+      JacobianWrtVariable with_respect_to,
+      const Body<T>& body_A) const;
 
   // Helper method to access the mobilizer of a free body.
   // If `body` is a free body in the model, this method will return the
@@ -2508,6 +2594,20 @@ class MultibodyTree {
       const systems::Context<T>& context) const {
     DRAKE_ASSERT(tree_system_ != nullptr);
     return tree_system_->EvalDynamicBiasCache(context);
+  }
+
+  // See CalcSpatialAccelerationBiasCache() for details.
+  const std::vector<SpatialAcceleration<T>>& EvalSpatialAccelerationBiasCache(
+      const systems::Context<T>& context) const {
+    DRAKE_ASSERT(tree_system_ != nullptr);
+    return tree_system_->EvalSpatialAccelerationBiasCache(context);
+  }
+
+  // See CalcArticulatedBodyForceBiasCache() for details.
+  const std::vector<SpatialForce<T>>& EvalArticulatedBodyVelocityBiasCache(
+      const systems::Context<T>& context) const {
+    DRAKE_ASSERT(tree_system_ != nullptr);
+    return tree_system_->EvalArticulatedBodyVelocityBiasCache(context);
   }
 
   // Given the state of this model in `context` and a known vector
@@ -2592,19 +2692,6 @@ class MultibodyTree {
   // than having to deal with damping in a special way.
   void AddJointDampingForces(
       const systems::Context<T>& context, MultibodyForces<T>* forces) const;
-
-  // Implementation of CalcPotentialEnergy().
-  // It is assumed that the position kinematics cache pc is in sync with
-  // context.
-  T DoCalcPotentialEnergy(const systems::Context<T>& context,
-                          const PositionKinematicsCache<T>& pc) const;
-
-  // Implementation of CalcConservativePower().
-  // It is assumed that the position kinematics cache pc and the velocity
-  // kinematics cache vc are in sync with context.
-  T DoCalcConservativePower(const systems::Context<T>& context,
-                            const PositionKinematicsCache<T>& pc,
-                            const VelocityKinematicsCache<T>& vc) const;
 
   void CreateBodyNode(BodyNodeIndex body_node_index);
 

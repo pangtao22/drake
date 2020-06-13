@@ -1,4 +1,16 @@
-"""Python bindings for Drake.
+"""
+Python bindings for
+`Drake: Model-Based Design and Verification for Robotics
+<https://drake.mit.edu/>`_.
+
+This Python API documentation is a work in progress. Most of it is generated
+automatically from the C++ API documentation, and thus may have some
+C++-specific artifacts. For general overview and API documentation, please see
+the `Doxygen C++ Documentation
+<https://drake.mit.edu/doxygen_cxx/index.html>`_.
+
+For examples and tutorials that tie in and use this API, please see
+`here <https://drake.mit.edu/#tutorials-and-examples>`_.
 """
 
 import os
@@ -41,6 +53,9 @@ def getDrakePath():
 def _execute_extra_python_code(m):
     # See `ExecuteExtraPythonCode` in `pydrake_pybind.h` for usage details and
     # rationale.
+    if m.__name__ not in sys.modules:
+        # N.B. This is necessary for C++ extensions in Python 3.
+        sys.modules[m.__name__] = m
     module_path = m.__name__.split(".")
     if len(module_path) == 1:
         raise RuntimeError((
@@ -63,6 +78,23 @@ def _setattr_kwargs(obj, kwargs):
     # For `ParamInit` in `pydrake_pybind.h`.
     for name, value in kwargs.items():
         setattr(obj, name, value)
+
+
+def _import_cc_module_vars(cc_module, py_module_name):
+    # Imports the cc_module's public symbols into the named py module
+    # (py_module_name), resetting their __module__ to be the py module in the
+    # process.
+    # Returns a list[str] of the public symbol names imported.
+    py_module = sys.modules[py_module_name]
+    var_list = []
+    for name, value in cc_module.__dict__.items():
+        if name.startswith("_"):
+            continue
+        if getattr(value, "__module__", None) == cc_module.__name__:
+            value.__module__ = py_module_name
+        setattr(py_module, name, value)
+        var_list.append(name)
+    return var_list
 
 
 class _DrakeImportWarning(Warning):

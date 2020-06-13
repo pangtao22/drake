@@ -8,7 +8,7 @@ def dreal_repository(
     github_archive(
         name = name,
         repository = "dreal/dreal4",
-        commit = "4.19.10.3",
-        sha256 = "ebababd6db551014c97933d909a6822ee8f65959be8eb32c8c285c7692d3617e",  # noqa
+        commit = "4.20.04.1",
+        sha256 = "25f5bc0c15f902882fad8bb5ac0c432efddf974766a18f9ccb964c2907674806",  # noqa
         mirrors = mirrors,
     )

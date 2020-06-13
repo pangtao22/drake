@@ -32,7 +32,7 @@ class DifferentialInverseKinematicsTest : public ::testing::Test {
  protected:
   void SetUp() {
     // Load the IIWA SDF, welding link_0 to the world.
-    plant_ = std::make_unique<MultibodyPlant<double>>();
+    plant_ = std::make_unique<MultibodyPlant<double>>(0.0);
     multibody::Parser parser(plant_.get());
     const std::string filename = FindResourceOrThrow(
         "drake/manipulation/models/"
@@ -173,9 +173,9 @@ TEST_F(DifferentialInverseKinematicsTest, OverConstrainedTest) {
 TEST_F(DifferentialInverseKinematicsTest, GainTest) {
   const VectorXd q = plant_->GetPositions(*context_);
 
-  const math::RigidTransform<double> X_WE =
-      frame_E_->CalcPoseInWorld(*context_);
-  const math::RotationMatrix<double> R_EW = X_WE.rotation().transpose();
+  const math::RotationMatrix<double> R_WE =
+      frame_E_->CalcRotationMatrixInWorld(*context_);
+  const math::RotationMatrix<double> R_EW = R_WE.inverse();
 
   const multibody::SpatialVelocity<double> V_WE_W_desired(
     Vector3d(0.1, -0.2, 0.3) / 2, Vector3d(-0.3, 0.2, -0.1) / 2);

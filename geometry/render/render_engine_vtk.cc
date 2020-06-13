@@ -1,11 +1,12 @@
 #include "drake/geometry/render/render_engine_vtk.h"
 
+#include <fstream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
 #include <vtkCamera.h>
-#include <vtkCubeSource.h>
 #include <vtkCylinderSource.h>
 #include <vtkOBJReader.h>
 #include <vtkOpenGLPolyDataMapper.h>
@@ -27,6 +28,7 @@ namespace drake {
 namespace geometry {
 namespace render {
 
+using Eigen::Vector2d;
 using Eigen::Vector4d;
 using std::make_unique;
 using math::RigidTransformd;
@@ -252,11 +254,9 @@ void RenderEngineVtk::ImplementGeometry(const HalfSpace&,
 }
 
 void RenderEngineVtk::ImplementGeometry(const Box& box, void* user_data) {
-  vtkNew<vtkCubeSource> cube;
-  cube->SetXLength(box.width());
-  cube->SetYLength(box.depth());
-  cube->SetZLength(box.height());
-  ImplementGeometry(cube.GetPointer(), user_data);
+  const RegistrationData* data = static_cast<RegistrationData*>(user_data);
+  ImplementGeometry(CreateVtkBox(box, data->properties).GetPointer(),
+                    user_data);
 }
 
 void RenderEngineVtk::ImplementGeometry(const Capsule& capsule,
@@ -342,18 +342,22 @@ RenderEngineVtk::RenderEngineVtk(const RenderEngineVtk& other)
       vtkActor& source = *source_actors[i];
       vtkActor& clone = *clone_actors[i];
 
+      // NOTE: The clone renderer and original renderer *share* polygon data
+      // (via the shared mapper) and all textures. If the meshes or textures get
+      // modified _in place_ in a clone, the change would be visible to all
+      // copies of the renderer. If that proves to be problematic we'll have to
+      // make the copy "deeper" as appropriate.
       if (source.GetTexture() == nullptr) {
         clone.GetProperty()->SetColor(source.GetProperty()->GetColor());
         clone.GetProperty()->SetOpacity(source.GetProperty()->GetOpacity());
       } else {
         clone.SetTexture(source.GetTexture());
       }
+      const auto& source_textures = source.GetProperty()->GetAllTextures();
+      for (auto& [name, texture] : source_textures) {
+        clone.GetProperty()->SetTexture(name.c_str(), texture);
+      }
 
-      // NOTE: The clone renderer and original renderer *share* polygon
-      // data. If the meshes were *deformable* this would be invalid.
-      // Furthermore, even if dynamic adding/removing of geometry were
-      // valid, VTK's reference counting preserves the underlying geometry
-      // in the copy that still references it.
       clone.SetMapper(source.GetMapper());
       clone.SetUserTransform(source.GetUserTransform());
       // This is necessary because *terrain* has its lighting turned off. To
@@ -388,6 +392,15 @@ void RenderEngineVtk::InitializePipelines() {
   const vtkSmartPointer<vtkTransform> vtk_identity =
       ConvertToVtkTransform(RigidTransformd::Identity());
 
+  // TODO(SeanCurtis-TRI): Things like configuring lights should *not* be part
+  //  of initializing the pipelines. When we support light declaration, this
+  //  will get moved out.
+  light_->SetLightTypeToCameraLight();
+  light_->SetConeAngle(45.0);
+  light_->SetAttenuationValues(1.0, 0.0, 0.0);
+  light_->SetIntensity(1);
+  light_->SetTransformMatrix(vtk_identity->GetMatrix());
+
   // Generic configuration of pipelines.
   for (auto& pipeline : pipelines_) {
     // Multisampling disabled by design for label and depth. It's turned off for
@@ -418,6 +431,8 @@ void RenderEngineVtk::InitializePipelines() {
     pipeline->filter->SetInputBufferTypeToRGBA();
     pipeline->exporter->SetInputData(pipeline->filter->GetOutput());
     pipeline->exporter->ImageLowerLeftOff();
+
+    pipeline->renderer->AddLight(light_);
   }
 
   // Pipeline-specific tweaks.
@@ -535,11 +550,15 @@ void RenderEngineVtk::ImplementGeometry(vtkPolyDataAlgorithm* source,
     }
   }
   if (!texture_name.empty()) {
+    const Vector2d& uv_scale = data.properties.GetPropertyOrDefault(
+        "phong", "diffuse_scale", Vector2d{1, 1});
     vtkNew<vtkPNGReader> texture_reader;
     texture_reader->SetFileName(texture_name.c_str());
     texture_reader->Update();
     vtkNew<vtkOpenGLTexture> texture;
     texture->SetInputConnection(texture_reader->GetOutputPort());
+    const bool need_repeat = uv_scale[0] > 1 || uv_scale[1] > 1;
+    texture->SetRepeat(need_repeat);
     texture->InterpolateOn();
     color_actor->SetTexture(texture.Get());
   } else {
@@ -561,6 +580,10 @@ void RenderEngineVtk::ImplementGeometry(vtkPolyDataAlgorithm* source,
 
   // Take ownership of the actors.
   actors_.insert({data.id, std::move(actors)});
+}
+
+void RenderEngineVtk::SetDefaultLightPosition(const Vector3<double>& X_DL) {
+  light_->SetPosition(X_DL[0], X_DL[1], X_DL[2]);
 }
 
 void RenderEngineVtk::PerformVtkUpdate(const RenderingPipeline& p) {

@@ -9,8 +9,10 @@ def meshcat_repository(
     github_archive(
         name = name,
         repository = "rdeits/meshcat",
-        commit = "2b516ed00b36bf71c00e000c5be73c840fb97333",
-        sha256 = "87b4f285a05a7dde34fc5b1ee58fd046b15524972d7fdc298d581382f668e78f",  # noqa
+        # Updating this commit requires local testing; see
+        # drake/tools/workspace/meshcat/README.md for details.
+        commit = "02b605b6def67f198d7a86ae60c8bb977ba7ef13",
+        sha256 = "0e818ade5ef037f4db735aef1f67baf146ace0f458324da76367a66a72faf729",  # noqa
         build_file = "@drake//tools/workspace/meshcat:package.BUILD.bazel",  # noqa
         mirrors = mirrors,
     )

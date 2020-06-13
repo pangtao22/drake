@@ -44,6 +44,8 @@ class LeafContextTest : public ::testing::Test {
  protected:
   void SetUp() override {
     context_.SetTime(kTime);
+    internal::SystemBaseContextBaseAttorney::set_system_id(
+        &context_, internal::SystemId::get_new_id());
 
     // Set up slots for input and output ports.
     AddInputPorts(kNumInputPorts, &context_);
@@ -494,6 +496,13 @@ TEST_F(LeafContextTest, Clone) {
   // Verify that the time was copied.
   EXPECT_EQ(kTime, clone->get_time());
 
+  // Verify that the system id was copied.
+  EXPECT_TRUE(context_.get_system_id().is_valid());
+  EXPECT_EQ(context_.get_system_id(), clone->get_system_id());
+  ContinuousState<double>& xc = clone->get_mutable_continuous_state();
+  EXPECT_TRUE(xc.get_system_id().is_valid());
+  EXPECT_EQ(xc.get_system_id(), context_.get_system_id());
+
   // Verify that the cloned input ports contain the same data,
   // but are different pointers.
   EXPECT_EQ(kNumInputPorts, clone->num_input_ports());
@@ -511,7 +520,6 @@ TEST_F(LeafContextTest, Clone) {
 
   // Verify that changes to the cloned state do not affect the original state.
   // -- Continuous
-  ContinuousState<double>& xc = clone->get_mutable_continuous_state();
   xc.get_mutable_generalized_velocity()[1] = 42.0;
   EXPECT_EQ(42.0, xc[3]);
   EXPECT_EQ(5.0, context_.get_continuous_state_vector()[3]);
@@ -572,6 +580,11 @@ TEST_F(LeafContextTest, BadClone) {
 TEST_F(LeafContextTest, CloneState) {
   std::unique_ptr<State<double>> clone = context_.CloneState();
   VerifyClonedState(*clone);
+
+  // Verify that the system id was copied.
+  const ContinuousState<double>& xc = clone->get_continuous_state();
+  EXPECT_TRUE(xc.get_system_id().is_valid());
+  EXPECT_EQ(xc.get_system_id(), context_.get_system_id());
 }
 
 // Tests that the State can be copied from another State.
@@ -709,6 +722,7 @@ TEST_F(LeafContextTest, Invalidation) {
   context_.SetTime(context_.get_time() + 1);  // Ensure this is a change.
   CheckAllCacheValuesUpToDateExcept(cache,
       {depends[internal::kTimeTicket],
+       depends[internal::kAllSourcesExceptInputPortsTicket],
        depends[internal::kAllSourcesTicket]});
 
   // Accuracy.
@@ -718,6 +732,7 @@ TEST_F(LeafContextTest, Invalidation) {
       {depends[internal::kAccuracyTicket],
        depends[internal::kConfigurationTicket],
        depends[internal::kKinematicsTicket],
+       depends[internal::kAllSourcesExceptInputPortsTicket],
        depends[internal::kAllSourcesTicket]});
 
   // This is everything that depends on generalized positions q.
@@ -725,6 +740,7 @@ TEST_F(LeafContextTest, Invalidation) {
       depends[internal::kQTicket], depends[internal::kXcTicket],
       depends[internal::kXTicket], depends[internal::kConfigurationTicket],
       depends[internal::kKinematicsTicket],
+      depends[internal::kAllSourcesExceptInputPortsTicket],
       depends[internal::kAllSourcesTicket]};
 
   // This is everything that depends on generalized velocities v and misc. z.
@@ -733,6 +749,7 @@ TEST_F(LeafContextTest, Invalidation) {
       depends[internal::kXcTicket], depends[internal::kXTicket],
       depends[internal::kConfigurationTicket],
       depends[internal::kKinematicsTicket],
+      depends[internal::kAllSourcesExceptInputPortsTicket],
       depends[internal::kAllSourcesTicket]};
 
   // This is everything that depends on continuous state.
@@ -811,6 +828,7 @@ TEST_F(LeafContextTest, Invalidation) {
        depends[internal::kXTicket],
        depends[internal::kConfigurationTicket],
        depends[internal::kKinematicsTicket],
+       depends[internal::kAllSourcesExceptInputPortsTicket],
        depends[internal::kAllSourcesTicket]};
   MarkAllCacheValuesUpToDate(&cache);
   context_.get_mutable_discrete_state();
@@ -839,6 +857,7 @@ TEST_F(LeafContextTest, Invalidation) {
        depends[internal::kXTicket],
        depends[internal::kConfigurationTicket],
        depends[internal::kKinematicsTicket],
+       depends[internal::kAllSourcesExceptInputPortsTicket],
        depends[internal::kAllSourcesTicket]};
   MarkAllCacheValuesUpToDate(&cache);
   context_.get_mutable_abstract_state();
@@ -858,6 +877,7 @@ TEST_F(LeafContextTest, Invalidation) {
        depends[internal::kConfigurationTicket],
        depends[internal::kKinematicsTicket],
        depends[internal::kAllParametersTicket],
+       depends[internal::kAllSourcesExceptInputPortsTicket],
        depends[internal::kAllSourcesTicket]};
 
   const std::set<CacheIndex> pa_dependent
@@ -865,6 +885,7 @@ TEST_F(LeafContextTest, Invalidation) {
        depends[internal::kConfigurationTicket],
        depends[internal::kKinematicsTicket],
        depends[internal::kAllParametersTicket],
+       depends[internal::kAllSourcesExceptInputPortsTicket],
        depends[internal::kAllSourcesTicket]};
 
   std::set<CacheIndex> p_dependent(pn_dependent);
@@ -930,6 +951,23 @@ TEST_F(LeafContextTest, TestStateSettingSugar) {
   DRAKE_EXPECT_THROWS_MESSAGE(
       context_.SetAbstractState(0, std::string("hello")), std::logic_error,
       ".*cast to.*std::string.*failed.*actual type.*int.*");
+}
+
+// Check that hidden internal functionality needed by Simulator::Initialize()
+// and CalcNextUpdateTime() is functional in the Context.
+TEST_F(LeafContextTest, PerturbTime) {
+  // This is a hidden method. Should set time to perturbed_time but current
+  // time to true_time.
+  const double true_time = 2.;
+  const double perturbed_time = true_time - 1e-14;
+  ASSERT_NE(perturbed_time, true_time);  // Watch for fatal roundoff.
+  context_.PerturbTime(perturbed_time, true_time);
+  EXPECT_EQ(context_.get_time(), perturbed_time);
+  EXPECT_EQ(*context_.get_true_time(), true_time);  // This is an std::optional.
+
+  // Setting time the normal way clears the "true time".
+  context_.SetTime(1.);
+  EXPECT_FALSE(context_.get_true_time());
 }
 
 }  // namespace

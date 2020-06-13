@@ -1,9 +1,9 @@
 #include "drake/solvers/mosek_solver.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
-#include <cstdlib>
 #include <limits>
 #include <list>
 #include <stdexcept>
@@ -17,6 +17,7 @@
 
 #include "drake/common/never_destroyed.h"
 #include "drake/common/scoped_singleton.h"
+#include "drake/common/text_logging.h"
 #include "drake/solvers/mathematical_program.h"
 
 namespace drake {
@@ -1199,8 +1200,7 @@ MSKrescodee AddEqualityConstraintBetweenMatrixVariablesForSameDecisionVariable(
 class MosekSolver::License {
  public:
   License() {
-    const char* moseklm_license_file = std::getenv("MOSEKLM_LICENSE_FILE");
-    if (moseklm_license_file == nullptr) {
+    if (!MosekSolver::is_enabled()) {
       throw std::runtime_error(
           "Could not locate MOSEK license file because MOSEKLM_LICENSE_FILE "
           "environment variable was not set.");
@@ -1256,6 +1256,11 @@ void MosekSolver::DoSolve(const MathematicalProgram& prog,
                           const Eigen::VectorXd& initial_guess,
                           const SolverOptions& merged_options,
                           MathematicalProgramResult* result) const {
+  if (!prog.GetVariableScaling().empty()) {
+    static const logging::Warn log_once(
+      "MosekSolver doesn't support the feature of variable scaling.");
+  }
+
   // num_decision_vars is the total number of decision variables in @p prog. It
   // includes both the matrix variables (for psd matrix variables) and
   // non-matrix variables.

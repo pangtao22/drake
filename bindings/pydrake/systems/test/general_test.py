@@ -3,22 +3,27 @@
 import pydrake.systems.framework as mut
 
 import copy
+from textwrap import dedent
 import warnings
 
 import unittest
 import numpy as np
 
 from pydrake.autodiffutils import AutoDiffXd
+from pydrake.common import RandomGenerator
+from pydrake.common.test_utilities.deprecation import catch_drake_warnings
 from pydrake.examples.pendulum import PendulumPlant
 from pydrake.examples.rimless_wheel import RimlessWheel
 from pydrake.symbolic import Expression
 from pydrake.systems.analysis import (
+    GetIntegrationSchemes,
     IntegratorBase, IntegratorBase_,
+    PrintSimulatorStatistics,
+    ResetIntegratorFromFlags,
     RungeKutta2Integrator, RungeKutta3Integrator,
     SimulatorStatus, Simulator, Simulator_,
     )
 from pydrake.systems.framework import (
-    AbstractValue,
     BasicVector, BasicVector_,
     Context, Context_,
     ContinuousState, ContinuousState_,
@@ -27,6 +32,7 @@ from pydrake.systems.framework import (
     DiscreteUpdateEvent, DiscreteUpdateEvent_,
     DiscreteValues, DiscreteValues_,
     Event, Event_,
+    EventStatus,
     InputPort, InputPort_,
     kUseDefaultName,
     LeafContext, LeafContext_,
@@ -39,6 +45,7 @@ from pydrake.systems.framework import (
     Subvector, Subvector_,
     Supervector, Supervector_,
     System, System_,
+    SystemBase,
     SystemOutput, SystemOutput_,
     VectorBase, VectorBase_,
     TriggerType,
@@ -55,6 +62,9 @@ from pydrake.systems.primitives import (
     SignalLogger,
     ZeroOrderHold,
     )
+
+with catch_drake_warnings(expected_count=2):
+    from pydrake.systems.framework import AbstractValue, Value
 
 # TODO(eric.cousineau): The scope of this test file and and `custom_test.py`
 # is poor. Move these tests into `framework_test` and `analysis_test`, and
@@ -88,6 +98,14 @@ class TestGeneral(unittest.TestCase):
     def test_system_base_api(self):
         # Test a system with a different number of inputs from outputs.
         system = Adder(3, 10)
+        self.assertIsInstance(system, SystemBase)
+        self.assertEqual(
+            system.GetSystemType(),
+            "drake::systems::Adder<double>")
+        system.set_name(name="adder")
+        self.assertEqual(system.get_name(), "adder")
+        self.assertEqual(system.GetSystemName(), "adder")
+        self.assertEqual(system.GetSystemPathname(), "::adder")
         self.assertEqual(system.num_input_ports(), 3)
         self.assertEqual(system.num_output_ports(), 1)
         u1 = system.GetInputPort("u1")
@@ -96,7 +114,11 @@ class TestGeneral(unittest.TestCase):
         self.assertEqual(u1.get_index(), 1)
         self.assertEqual(u1.size(), 10)
         self.assertIsNotNone(u1.ticket())
-        self.assertEqual(system.GetOutputPort("sum").get_index(), 0)
+        self.assertIs(u1.get_system(), system)
+        y = system.GetOutputPort("sum")
+        self.assertEqual(y.get_index(), 0)
+        self.assertIsInstance(y.Allocate(), Value[BasicVector])
+        self.assertIs(y.get_system(), system)
         # TODO(eric.cousineau): Consolidate the main API tests for `System`
         # to this test point.
 
@@ -112,6 +134,9 @@ class TestGeneral(unittest.TestCase):
         self.assertIsInstance(
             context.get_mutable_continuous_state_vector(), VectorBase)
         system.SetDefaultContext(context)
+
+        # Check random context method.
+        system.SetRandomContext(context=context, generator=RandomGenerator())
 
         context = system.CreateDefaultContext()
         self.assertIsInstance(
@@ -160,14 +185,25 @@ class TestGeneral(unittest.TestCase):
         # abstract parameter to actually call this method.
         self.assertTrue(hasattr(context, "get_abstract_parameter"))
         self.assertTrue(hasattr(context, "get_mutable_abstract_parameter"))
+        context.DisableCaching()
+        context.EnableCaching()
+        context.SetAllCacheEntriesOutOfDate()
+        context.FreezeCache()
+        self.assertTrue(context.is_cache_frozen())
+        context.UnfreezeCache()
+        self.assertFalse(context.is_cache_frozen())
         x = np.array([0.1, 0.2])
         context.SetContinuousState(x)
+        np.testing.assert_equal(
+            context.get_continuous_state().CopyToVector(), x)
         np.testing.assert_equal(
             context.get_continuous_state_vector().CopyToVector(), x)
         context.SetTimeAndContinuousState(0.3, 2*x)
         np.testing.assert_equal(context.get_time(), 0.3)
         np.testing.assert_equal(
             context.get_continuous_state_vector().CopyToVector(), 2*x)
+        self.assertNotEqual(pendulum.EvalPotentialEnergy(context=context), 0)
+        self.assertNotEqual(pendulum.EvalKineticEnergy(context=context), 0)
 
         # RimlessWheel has a single discrete variable and a bool abstract
         # variable.
@@ -227,11 +263,16 @@ class TestGeneral(unittest.TestCase):
         self.assertIsInstance(periodic_data.Clone(), PeriodicEventData)
         periodic_data.period_sec()
         periodic_data.offset_sec()
+        is_diff_eq, period = system1.IsDifferenceEquationSystem()
+        self.assertTrue(is_diff_eq)
+        self.assertEqual(period, periodic_data.period_sec())
 
         # Simple continuous-time system.
         system2 = LinearSystem(A=[1], B=[1], C=[1], D=[1], time_period=0.0)
         periodic_data = system2.GetUniquePeriodicDiscreteUpdateAttribute()
         self.assertIsNone(periodic_data)
+        is_diff_eq, period = system2.IsDifferenceEquationSystem()
+        self.assertFalse(is_diff_eq)
 
     def test_instantiations(self):
         # Quick check of instantiations for given types.
@@ -299,6 +340,7 @@ class TestGeneral(unittest.TestCase):
                 self.assertEqual(u[0].Evaluate(), 1.)
 
     def test_simulator_ctor(self):
+        # TODO(eric.cousineau): Move this to `analysis_test.py`.
         # Tests a simple simulation for supported scalar types.
         for T in [float, AutoDiffXd]:
             # Create simple system.
@@ -330,6 +372,11 @@ class TestGeneral(unittest.TestCase):
                             simulator.get_mutable_context())
             check_output(simulator.get_context())
             simulator.AdvanceTo(1)
+            simulator.ResetStatistics()
+            simulator.AdvanceTo(2)
+
+            self.assertEqual(simulator.get_target_realtime_rate(), 0)
+            self.assertTrue(simulator.get_actual_realtime_rate() > 0.)
 
             # Create simulator specifying context.
             context = system.CreateDefaultContext()
@@ -358,19 +405,51 @@ class TestGeneral(unittest.TestCase):
         for context_copy in context_copies:
             self.assertTrue(context_copy is not context)
 
+    def test_str(self):
+        """
+        Tests str() methods. See ./value_test.py for testing str() and
+        repr() specific to BasicVector.
+        """
+        # Context.
+        integrator = Integrator(3)
+        integrator.set_name("integrator")
+        context = integrator.CreateDefaultContext()
+        # N.B. This is only to show behavior of C++ string formatting in
+        # Python. It is OK to update this when the upstream C++ code changes.
+        self.assertEqual(
+            str(context),
+            dedent("""\
+            ::integrator Context
+            ---------------------
+            Time: 0
+            States:
+              3 continuous states
+                0 0 0
+
+            """),
+        )
+        # TODO(eric.cousineau): Add more.
+
     def test_diagram_simulation(self):
+        # TODO(eric.cousineau): Move this to `analysis_test.py`.
         # Similar to: //systems/framework:diagram_test, ExampleDiagram
         size = 3
 
         builder = DiagramBuilder()
+        self.assertTrue(builder.empty())
         adder0 = builder.AddSystem(Adder(2, size))
         adder0.set_name("adder0")
+        self.assertFalse(builder.empty())
 
         adder1 = builder.AddSystem(Adder(2, size))
         adder1.set_name("adder1")
 
         integrator = builder.AddSystem(Integrator(size))
         integrator.set_name("integrator")
+
+        self.assertEqual(
+            builder.GetMutableSystems(),
+            [adder0, adder1, integrator])
 
         builder.Connect(adder0.get_output_port(0), adder1.get_input_port(0))
         builder.Connect(adder1.get_output_port(0),
@@ -385,6 +464,9 @@ class TestGeneral(unittest.TestCase):
         diagram = builder.Build()
         self.assertEqual(adder0.get_name(), "adder0")
         self.assertEqual(diagram.GetSubsystemByName("adder0"), adder0)
+        self.assertEqual(
+            diagram.GetSystems(),
+            [adder0, adder1, integrator])
         # TODO(eric.cousineau): Figure out unicode handling if needed.
         # See //systems/framework/test/diagram_test.cc:349 (sha: bc84e73)
         # for an example name.
@@ -404,10 +486,6 @@ class TestGeneral(unittest.TestCase):
         input2 = BasicVector([0.003, 0.004, 0.005])
         diagram.get_input_port(2).FixValue(context, input2)
 
-        # Test __str__ methods.
-        self.assertRegexpMatches(str(context), "integrator")
-        self.assertEqual(str(input2), "[0.003, 0.004, 0.005]")
-
         # Initialize integrator states.
         integrator_xc = (
             diagram.GetMutableSubsystemState(integrator, context)
@@ -426,6 +504,9 @@ class TestGeneral(unittest.TestCase):
             # Record snapshot of *entire* context.
             context_log.append(context.Clone())
 
+        # Test binding for PrintSimulatorStatistics
+        PrintSimulatorStatistics(simulator)
+
         xc_initial = np.array([0, 1, 2])
         xc_final = np.array([0.123, 1.234, 2.345])
 
@@ -433,11 +514,12 @@ class TestGeneral(unittest.TestCase):
             t = times[i]
             self.assertEqual(context_i.get_time(), t)
             xc = context_i.get_continuous_state_vector().CopyToVector()
-            xc_expected = (float(i) / (n - 1) * (xc_final - xc_initial) +
-                           xc_initial)
+            xc_expected = (float(i) / (n - 1) * (xc_final - xc_initial)
+                           + xc_initial)
             self.assertTrue(np.allclose(xc, xc_expected))
 
     def test_simulator_context_manipulation(self):
+        # TODO(eric.cousineau): Move this to `analysis_test.py`.
         system = ConstantVectorSource([1])
         # Use default-constructed context.
         simulator = Simulator(system)
@@ -456,6 +538,7 @@ class TestGeneral(unittest.TestCase):
         self.assertFalse(simulator.has_context())
 
     def test_simulator_integrator_manipulation(self):
+        # TODO(eric.cousineau): Move this to `analysis_test.py`.
         system = ConstantVectorSource([1])
 
         # Create simulator with basic constructor.
@@ -493,19 +576,34 @@ class TestGeneral(unittest.TestCase):
             system=system, max_step_size=0.01)
         test_integrator = RungeKutta3Integrator(system=system)
 
-        # Test simulator's reset_integrator,
-        # and also the full constructors for
+        # Test simulator's reset_integrator, and also the full constructors for
         # all integrator types.
-        simulator.reset_integrator(
-            RungeKutta2Integrator(
-                system=system,
-                max_step_size=0.01,
-                context=simulator.get_mutable_context()))
+        rk2 = RungeKutta2Integrator(
+            system=system,
+            max_step_size=0.01,
+            context=simulator.get_mutable_context())
+        with catch_drake_warnings(expected_count=1):
+            # TODO(12873) We need an API for this that isn't deprecated.
+            simulator.reset_integrator(rk2)
 
-        simulator.reset_integrator(
-            RungeKutta3Integrator(
-                system=system,
-                context=simulator.get_mutable_context()))
+        rk3 = RungeKutta3Integrator(
+            system=system,
+            context=simulator.get_mutable_context())
+        with catch_drake_warnings(expected_count=1):
+            # TODO(12873) We need an API for this that isn't deprecated.
+            simulator.reset_integrator(rk3)
+
+    def test_simulator_flags(self):
+        # TODO(eric.cousineau): Move this to `analysis_test.py`.
+        system = ConstantVectorSource([1])
+        simulator = Simulator(system)
+
+        ResetIntegratorFromFlags(simulator, "runge_kutta2", 0.00123)
+        integrator = simulator.get_integrator()
+        self.assertEqual(type(integrator), RungeKutta2Integrator)
+        self.assertEqual(integrator.get_maximum_step_size(), 0.00123)
+
+        self.assertGreater(len(GetIntegrationSchemes()), 5)
 
     def test_abstract_output_port_eval(self):
         model_value = AbstractValue.Make("Hello World")
@@ -627,7 +725,7 @@ class TestGeneral(unittest.TestCase):
         self.assertEqual(type(value), int)
         self.assertEqual(value, 1)
 
-        # Fixing to an explicitly-typed Value instantation is an error ...
+        # Fixing to an explicitly-typed Value instantiation is an error ...
         with self.assertRaises(RuntimeError):
             input_port.FixValue(context, AbstractValue.Make("string"))
         # ... but implicit typing works just fine.
@@ -699,3 +797,25 @@ class TestGeneral(unittest.TestCase):
             period_sec=dt, abstract_model_value=model_value.Clone())
         context_abstract = system_abstract.CreateDefaultContext()
         context_abstract.FixInputPort(index=0, value=model_value.Clone())
+
+    def test_event_status(self):
+        system = ZeroOrderHold(period_sec=0.1, vector_size=1)
+        # Existence check.
+        EventStatus.Severity.kDidNothing
+        EventStatus.Severity.kSucceeded
+        EventStatus.Severity.kReachedTermination
+        EventStatus.Severity.kFailed
+
+        self.assertIsInstance(EventStatus.DidNothing(), EventStatus)
+        self.assertIsInstance(EventStatus.Succeeded(), EventStatus)
+        status = EventStatus.ReachedTermination(system=system, message="done")
+        # Check API.
+        self.assertIsInstance(status, EventStatus)
+        self.assertEqual(
+            status.severity(), EventStatus.Severity.kReachedTermination)
+        self.assertIs(status.system(), system)
+        self.assertEqual(status.message(), "done")
+        self.assertIsInstance(
+            status.KeepMoreSevere(candidate=status), EventStatus)
+        status = EventStatus.Failed(system=system, message="failed")
+        self.assertIsInstance(status, EventStatus)

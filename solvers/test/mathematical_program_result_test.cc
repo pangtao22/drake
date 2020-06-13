@@ -8,6 +8,7 @@
 #include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/solvers/cost.h"
 #include "drake/solvers/osqp_solver.h"
+#include "drake/solvers/snopt_solver.h"
 
 namespace drake {
 namespace solvers {
@@ -87,6 +88,47 @@ TEST_F(MathematicalProgramResultTest, Setters) {
   EXPECT_TRUE(msol[1].EqualTo(x_val(1) * x_extra));
 }
 
+TEST_F(MathematicalProgramResultTest, DualSolution) {
+  MathematicalProgramResult result;
+  auto bb_con = std::make_shared<BoundingBoxConstraint>(Eigen::Vector2d(0, 1),
+                                                        Eigen::Vector2d(2, 4));
+  Binding<BoundingBoxConstraint> binding1(
+      bb_con, Vector2<symbolic::Variable>(x0_, x1_));
+  const Eigen::Vector2d dual_solution1(5, 6);
+  result.set_dual_solution(binding1, dual_solution1);
+  EXPECT_TRUE(
+      CompareMatrices(result.GetDualSolution(binding1), dual_solution1));
+
+  auto lin_con = std::make_shared<LinearConstraint>(Eigen::Matrix2d::Identity(),
+                                                    Eigen::Vector2d(-1, -3),
+                                                    Eigen::Vector2d(2, 4));
+  Binding<LinearConstraint> binding2(lin_con,
+                                     Vector2<symbolic::Variable>(x0_, x1_));
+  const Eigen::Vector2d dual_solution2(3, -2);
+  result.set_dual_solution(binding2, dual_solution2);
+  EXPECT_TRUE(
+      CompareMatrices(result.GetDualSolution(binding2), dual_solution2));
+
+  auto lin_eq_con = std::make_shared<LinearEqualityConstraint>(
+      Eigen::Matrix2d::Identity(), Eigen::Vector2d(2, 4));
+  Binding<LinearEqualityConstraint> binding3(
+      lin_eq_con, Vector2<symbolic::Variable>(x0_, x1_));
+  const Eigen::Vector2d dual_solution3(4, -1);
+  result.set_dual_solution(binding3, dual_solution3);
+  EXPECT_TRUE(
+      CompareMatrices(result.GetDualSolution(binding3), dual_solution3));
+
+  // GetDualSolution for a binding whose dual solution has not been set yet.
+  Binding<LinearEqualityConstraint> binding4(
+      lin_eq_con, Vector2<symbolic::Variable>(x1_, x0_));
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      result.GetDualSolution(binding4), std::invalid_argument,
+      fmt::format("Either this constraint does not belong to the "
+                  "mathematical program for which the result is obtained, or "
+                  "{} does not currently support getting dual solution yet.",
+                  result.get_solver_id()));
+}
+
 struct DummySolverDetails {
   int data{0};
 };
@@ -146,6 +188,69 @@ GTEST_TEST(TestMathematicalProgramResult, InfeasibleProblem) {
     EXPECT_TRUE(std::isnan(result.GetSolution(x(1))));
     EXPECT_EQ(result.get_optimal_cost(),
               MathematicalProgram::kGlobalInfeasibleCost);
+  }
+}
+
+GTEST_TEST(TestMathematicalProgramResult, GetInfeasibleConstraintNames) {
+  if (SnoptSolver::is_available()) {
+    MathematicalProgram prog;
+    auto x = prog.NewContinuousVariables<1>();
+    auto b0 = prog.AddBoundingBoxConstraint(0, 0, x);
+    auto b1 = prog.AddBoundingBoxConstraint(1, 1, x);
+
+    SnoptSolver solver;
+    MathematicalProgramResult result = solver.Solve(prog, {}, {});
+    EXPECT_FALSE(result.is_success());
+
+    std::vector<std::string> infeasible =
+        result.GetInfeasibleConstraintNames(prog);
+    EXPECT_EQ(infeasible.size(), 1);
+
+    // If no description is set, we should see the NiceTypeName of the
+    // Constraint.
+    auto matcher = [](const std::string& s, const std::string& re) {
+      return std::regex_match(s, std::regex(re));
+    };
+    EXPECT_PRED2(matcher, infeasible[0],
+                 "drake::solvers::BoundingBoxConstraint.*");
+
+    // If a description for the constraint has been set, then that description
+    // should be returned instead. There is no reason a priori for b0 or b1 to
+    // be the infeasible one, so set both descriptions.
+    b0.evaluator()->set_description("Test");
+    b1.evaluator()->set_description("Test");
+    infeasible = result.GetInfeasibleConstraintNames(prog);
+    EXPECT_PRED2(matcher, infeasible[0], "Test.*");
+  }
+}
+
+GTEST_TEST(TestMathematicalProgramResult, GetInfeasibleConstraintBindings) {
+  MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables<2>();
+  auto constraint1 = prog.AddBoundingBoxConstraint(0, 0, x);
+  auto constraint2 = prog.AddBoundingBoxConstraint(1, 1, x);
+  SnoptSolver solver;
+  if (solver.is_available()) {
+    const auto result = solver.Solve(prog);
+    EXPECT_FALSE(result.is_success());
+    const std::vector<Binding<Constraint>> infeasible_bindings =
+        result.GetInfeasibleConstraints(prog);
+    const std::unordered_set<Binding<Constraint>> infeasible_bindings_set(
+        infeasible_bindings.begin(), infeasible_bindings.end());
+    const double x_val = result.GetSolution(x)(0);
+    EXPECT_TRUE(infeasible_bindings_set.size() == 1 ||
+                infeasible_bindings.size() == 2);
+    if (std::abs(x_val) > 1e-4) {
+      EXPECT_GT(infeasible_bindings_set.count(constraint1), 0);
+    }
+    if (std::abs(x_val - 1) > 1e-4) {
+      EXPECT_GT(infeasible_bindings_set.count(constraint2), 0);
+    }
+    // If I relax the tolerance, then GetInfeasibleConstraintBindings returns an
+    // empty vector.
+    const std::vector<Binding<Constraint>> infeasible_bindings_relaxed =
+        result.GetInfeasibleConstraints(prog, 2);
+    EXPECT_EQ(infeasible_bindings_relaxed.size(), 0);
   }
 }
 

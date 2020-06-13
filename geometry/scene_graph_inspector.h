@@ -1,11 +1,13 @@
 #pragma once
 
+#include <memory>
 #include <set>
 #include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "drake/geometry/geometry_instance.h"
 #include "drake/geometry/geometry_roles.h"
 #include "drake/geometry/geometry_state.h"
 #include "drake/geometry/shape_specification.h"
@@ -114,21 +116,21 @@ class SceneGraphInspector {
    indicated role.  */
   int NumGeometriesWithRole(Role role) const {
     DRAKE_DEMAND(state_ != nullptr);
-    return state_->GetNumGeometriesWithRole(role);
+    return state_->NumGeometriesWithRole(role);
   }
 
   /** Reports the total number of _dynamic_ geometries in the scene graph.  */
-  int GetNumDynamicGeometries() const {
+  int NumDynamicGeometries() const {
     DRAKE_DEMAND(state_ != nullptr);
-    return state_->GetNumDynamicGeometries();
+    return state_->NumDynamicGeometries();
   }
 
   /** Reports the total number of _anchored_ geometries. This should provide
-   the same answer as calling GetNumFrameGeometries() with the world frame id.
+   the same answer as calling NumGeometriesForFrame() with the world frame id.
    */
-  int GetNumAnchoredGeometries() const {
+  int NumAnchoredGeometries() const {
     DRAKE_DEMAND(state_ != nullptr);
-    return state_->GetNumAnchoredGeometries();
+    return state_->NumAnchoredGeometries();
   }
 
   /** Returns all pairs of geometries that are candidates for collision (in no
@@ -152,14 +154,14 @@ class SceneGraphInspector {
   /** Reports `true` if the given `id` maps to a registered source.  */
   bool SourceIsRegistered(SourceId id) const {
     DRAKE_DEMAND(state_ != nullptr);
-    return state_->source_is_registered(id);
+    return state_->SourceIsRegistered(id);
   }
 
   /** Reports the name for the source with the given `id`.
    @throws std::logic_error if `id` does not map to a registered source.  */
   const std::string& GetSourceName(SourceId id) const {
     DRAKE_DEMAND(state_ != nullptr);
-    return state_->get_source_name(id);
+    return state_->GetName(id);
   }
 
   /** Reports the number of frames registered to the source with the given `id`.
@@ -174,7 +176,7 @@ class SceneGraphInspector {
    @throws std::logic_error if `id` does not map to a registered source.  */
   const std::unordered_set<FrameId>& FramesForSource(SourceId id) const {
     DRAKE_DEMAND(state_ != nullptr);
-    return state_->GetFramesForSource(id);
+    return state_->FramesForSource(id);
   }
 
   //@}
@@ -209,7 +211,7 @@ class SceneGraphInspector {
    */
   const std::string& GetName(FrameId id) const {
     DRAKE_DEMAND(state_ != nullptr);
-    return state_->get_frame_name(id);
+    return state_->GetName(id);
   }
 
   /** Reports the frame group for the frame with the given `id`.
@@ -217,7 +219,7 @@ class SceneGraphInspector {
    @internal This value is equivalent to the old "model instance id".  */
   int GetFrameGroup(FrameId id) const {
     DRAKE_DEMAND(state_ != nullptr);
-    return state_->get_frame_group(id);
+    return state_->GetFrameGroup(id);
   }
 
   /** Reports the number of geometries affixed to the frame with the given `id`.
@@ -226,7 +228,7 @@ class SceneGraphInspector {
    @throws std::logic_error if `id` does not map to a registered frame.  */
   int NumGeometriesForFrame(FrameId id) const {
     DRAKE_DEMAND(state_ != nullptr);
-    return state_->GetNumFrameGeometries(id);
+    return state_->NumGeometriesForFrame(id);
   }
 
   /** Reports the total number of geometries with the given `role` directly
@@ -235,7 +237,7 @@ class SceneGraphInspector {
    @throws std::logic_error if `id` does not map to a registered frame.  */
   int NumGeometriesForFrameWithRole(FrameId id, Role role) const {
     DRAKE_DEMAND(state_ != nullptr);
-    return state_->GetNumFrameGeometriesWithRole(id, role);
+    return state_->NumGeometriesForFrameWithRole(id, role);
   }
 
   /** Reports the id of the geometry with the given `name` and `role`, attached
@@ -253,7 +255,7 @@ class SceneGraphInspector {
   GeometryId GetGeometryIdByName(FrameId id, Role role,
                                  const std::string& name) const {
     DRAKE_DEMAND(state_ != nullptr);
-    return state_->GetGeometryFromName(id, role, name);
+    return state_->GetGeometryIdByName(id, role, name);
   }
 
   //@}
@@ -385,6 +387,15 @@ class SceneGraphInspector {
     DRAKE_DEMAND(state_ != nullptr);
     state_->GetShape(id).Reify(reifier);
   }
+
+  /** Obtains a new GeometryInstance that copies the geometry indicated by the
+   given `id`.
+   @return A new GeometryInstance that is ready to be added as a new geometry.
+           All roles/properties will be copied, the shape will be cloned based
+           off of the original, but the returned id() will completely unique.
+   @throws std::logic_error if the `id` does not refer to a valid geometry.  */
+  std::unique_ptr<GeometryInstance>
+  CloneGeometryInstance(GeometryId id) const;
 
   //@}
 

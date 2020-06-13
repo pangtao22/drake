@@ -1,8 +1,8 @@
 #include "pybind11/eigen.h"
 #include "pybind11/pybind11.h"
 
+#include "drake/bindings/pydrake/attic/documentation_pybind.h"
 #include "drake/bindings/pydrake/common/value_pybind.h"
-#include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
 #include "drake/multibody/rigid_body_plant/drake_visualizer.h"
 #include "drake/multibody/rigid_body_plant/rigid_body_plant.h"
@@ -96,7 +96,8 @@ PYBIND11_MODULE(rigid_body_plant, m) {
             cls_doc.get_num_contacts.doc)
         .def("get_contact_info", &Class::get_contact_info,
             py_reference_internal, cls_doc.get_contact_info.doc)
-        .def("set_generalized_contact_force",
+        .def(
+            "set_generalized_contact_force",
             [](Class* self, const Eigen::VectorXd& f) {
               self->set_generalized_contact_force(f);
             },
@@ -253,7 +254,8 @@ PYBIND11_MODULE(rigid_body_plant, m) {
             cls_doc.kinematics_results_output_port.doc)
         .def("contact_results_output_port", &Class::contact_results_output_port,
             py_reference_internal, cls_doc.contact_results_output_port.doc)
-        .def("GetStateVector",
+        .def(
+            "GetStateVector",
             [](const Class* self,
                 const Context<T>& context) -> Eigen::Ref<const VectorX<T>> {
               return self->GetStateVector(context);

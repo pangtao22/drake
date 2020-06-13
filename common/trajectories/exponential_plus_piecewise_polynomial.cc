@@ -18,6 +18,8 @@ ExponentialPlusPiecewisePolynomial<T>::
       alpha_(MatrixX<T>::Zero(
           1, piecewise_polynomial_part.get_number_of_segments())),
       piecewise_polynomial_part_(piecewise_polynomial_part) {
+  using std::isfinite;
+  DRAKE_DEMAND(isfinite(piecewise_polynomial_part.start_time()));
   DRAKE_ASSERT(piecewise_polynomial_part.cols() == 1);
 }
 
@@ -28,7 +30,7 @@ std::unique_ptr<Trajectory<T>> ExponentialPlusPiecewisePolynomial<T>::Clone()
 }
 
 template <typename T>
-MatrixX<T> ExponentialPlusPiecewisePolynomial<T>::value(double t) const {
+MatrixX<T> ExponentialPlusPiecewisePolynomial<T>::value(const T& t) const {
   int segment_index = this->get_segment_index(t);
   MatrixX<T> ret = piecewise_polynomial_part_.value(t);
   double tj = this->start_time(segment_index);

@@ -6,6 +6,7 @@
 #include "drake/common/autodiff.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/multibody/plant/test/kuka_iiwa_model_tests.h"
+#include "drake/multibody/test_utilities/add_fixed_objects_to_plant.h"
 #include "drake/multibody/tree/body.h"
 #include "drake/multibody/tree/frame.h"
 
@@ -13,6 +14,7 @@ namespace drake {
 
 namespace multibody {
 
+using math::RigidTransformd;
 using test::KukaIiwaModelTests;
 
 namespace {
@@ -30,6 +32,30 @@ TEST_F(KukaIiwaModelTests, FramesKinematics) {
       X_WH.GetAsMatrix34(), X_WH_expected.GetAsMatrix34(),
       kTolerance, MatrixCompareType::relative));
 
+  // Alternatively, we can get the pose X_WE using the plant's output port for
+  // poses.
+  const auto& X_WB_all =
+      plant_->get_body_poses_output_port()
+          .Eval<std::vector<RigidTransform<double>>>(*context_);
+  ASSERT_EQ(X_WB_all.size(), plant_->num_bodies());
+  const RigidTransform<double>& X_WE_from_port =
+      X_WB_all[end_effector_link_->index()];
+  EXPECT_TRUE(CompareMatrices(
+      X_WE.GetAsMatrix34(), X_WE_from_port.GetAsMatrix34(),
+      kTolerance, MatrixCompareType::relative));
+
+  // Verify the invariance X_WB_all[0] = RigidTransform<double>::Identity().
+  EXPECT_TRUE(
+      CompareMatrices(X_WB_all[0].GetAsMatrix34(),
+                      RigidTransform<double>::Identity().GetAsMatrix34(),
+                      kTolerance, MatrixCompareType::relative));
+
+  const RotationMatrix<double> R_WH =
+      frame_H_->CalcRotationMatrixInWorld(*context_);
+  const RotationMatrix<double> R_WH_expected = X_WH_expected.rotation();
+  EXPECT_TRUE(CompareMatrices(R_WH.matrix(), R_WH_expected.matrix(), kTolerance,
+                              MatrixCompareType::relative));
+
   const Body<double>& link3 = plant_->GetBodyByName("iiwa_link_3");
   const RigidTransform<double> X_HL3 =
       link3.body_frame().CalcPose(*context_, *frame_H_);
@@ -39,6 +65,14 @@ TEST_F(KukaIiwaModelTests, FramesKinematics) {
   EXPECT_TRUE(CompareMatrices(
       X_HL3.GetAsMatrix34(), X_HL3_expected.GetAsMatrix34(),
       kTolerance, MatrixCompareType::relative));
+
+  const RotationMatrix<double> R_HL3 =
+      link3.body_frame().CalcRotationMatrix(*context_, *frame_H_);
+  const RotationMatrix<double> R_WL3 =
+      link3.body_frame().CalcRotationMatrixInWorld(*context_);
+  const RotationMatrix<double> R_HL3_expected = R_WH.inverse() * R_WL3;
+  EXPECT_TRUE(CompareMatrices(R_HL3.matrix(), R_HL3_expected.matrix(),
+                              kTolerance, MatrixCompareType::relative));
 
   const SpatialVelocity<double> V_WE =
       end_effector_link_->EvalSpatialVelocityInWorld(*context_);
@@ -52,6 +86,16 @@ TEST_F(KukaIiwaModelTests, FramesKinematics) {
   EXPECT_TRUE(CompareMatrices(
       V_WH.get_coeffs(), V_WH_expected.get_coeffs(),
       kTolerance, MatrixCompareType::relative));
+
+  // Alternatively, we can get the spatial velocity V_WE using the plant's
+  // output port for spatial velocities.
+  const auto& V_WB_all =
+      plant_->get_body_spatial_velocities_output_port()
+          .Eval<std::vector<SpatialVelocity<double>>>(*context_);
+  ASSERT_EQ(V_WB_all.size(), plant_->num_bodies());
+  const SpatialVelocity<double>& V_WE_from_port =
+      V_WB_all[end_effector_link_->index()];
+  EXPECT_EQ(V_WE.get_coeffs(), V_WE_from_port.get_coeffs());
 
   // Spatial velocity of link 3 measured in the H frame and expressed in the
   // end-effector frame E.
@@ -71,6 +115,49 @@ TEST_F(KukaIiwaModelTests, FramesKinematics) {
   EXPECT_TRUE(CompareMatrices(
       V_HL3_E.get_coeffs(), V_HL3_E_expected.get_coeffs(),
       kTolerance, MatrixCompareType::relative));
+}
+
+GTEST_TEST(MultibodyPlantTest, FixedWorldKinematics) {
+  // Numerical tolerance used to verify numerical results.
+  const double kTolerance = 10 * std::numeric_limits<double>::epsilon();
+
+  MultibodyPlant<double> plant(0.0);
+  test::AddFixedObjectsToPlant(&plant);
+  plant.Finalize();
+  std::unique_ptr<Context<double>> context = plant.CreateDefaultContext();
+
+  // The point of this test is that we can compute poses and spatial velocities
+  // even for a model with zero dofs.
+  ASSERT_EQ(plant.num_positions(), 0);
+  ASSERT_EQ(plant.num_velocities(), 0);
+  // However the world is non-empty.
+  ASSERT_NE(plant.num_bodies(), 0);
+
+  const Body<double>& mug = plant.GetBodyByName("main_body");
+
+  // The objects frame O is affixed to a robot table defined by
+  // test::AddFixedObjectsToPlant().
+  const Frame<double>& objects_frame = plant.GetFrameByName("objects_frame");
+
+  // This will trigger the computation of position kinematics.
+  const RigidTransformd& X_WM = mug.EvalPoseInWorld(*context);
+
+  // From test::AddFixedObjectsToPlant() we know the fixed pose of the mug frame
+  // M in the objects frame O.
+  const RigidTransformd X_OM = Translation3d(0.0, 0.0, 0.05);
+  // Therefore we expect the pose of the mug to be:
+  const RigidTransformd& X_WM_expected =
+      objects_frame.CalcPoseInWorld(*context) * X_OM;
+
+  // We verify the results.
+  EXPECT_TRUE(CompareMatrices(X_WM.GetAsMatrix34(),
+                              X_WM_expected.GetAsMatrix34(), kTolerance));
+
+  // Now we evaluate some velocity kinematics.
+  const SpatialVelocity<double>& V_WM =
+      mug.EvalSpatialVelocityInWorld(*context);
+  // Since all bodies are anchored, they all have zero spatial velocity.
+  EXPECT_EQ(V_WM.get_coeffs(), Vector6<double>::Zero());
 }
 
 }  // namespace

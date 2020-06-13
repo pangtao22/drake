@@ -3,6 +3,7 @@
 
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
+#include "drake/examples/acrobot/acrobot_geometry.h"
 #include "drake/examples/acrobot/acrobot_plant.h"
 #include "drake/examples/acrobot/gen/acrobot_input.h"
 #include "drake/examples/acrobot/gen/acrobot_params.h"
@@ -36,10 +37,6 @@ PYBIND11_MODULE(acrobot, m) {
   py::class_<AcrobotPlant<T>, LeafSystem<T>>(
       m, "AcrobotPlant", doc.AcrobotPlant.doc)
       .def(py::init<>(), doc.AcrobotPlant.ctor.doc)
-      .def("CalcPotentialEnergy", &AcrobotPlant<T>::CalcPotentialEnergy,
-          doc.AcrobotPlant.DoCalcPotentialEnergy.doc)
-      .def("CalcKineticEnergy", &AcrobotPlant<T>::CalcKineticEnergy,
-          doc.AcrobotPlant.DoCalcKineticEnergy.doc)
       .def("DynamicsBiasTerm", &AcrobotPlant<T>::DynamicsBiasTerm,
           doc.AcrobotPlant.DynamicsBiasTerm.doc)
       .def("SetMITAcrobotParameters", &AcrobotPlant<T>::SetMITAcrobotParameters,
@@ -132,6 +129,29 @@ PYBIND11_MODULE(acrobot, m) {
       .def("set_balancing_threshold",
           &SpongControllerParams<T>::set_balancing_threshold,
           doc.SpongControllerParams.set_balancing_threshold.doc);
+
+  py::class_<AcrobotGeometry, LeafSystem<double>>(
+      m, "AcrobotGeometry", doc.AcrobotGeometry.doc)
+      .def_static("AddToBuilder",
+          py::overload_cast<systems::DiagramBuilder<double>*,
+              const systems::OutputPort<double>&, const AcrobotParams<double>&,
+              geometry::SceneGraph<double>*>(&AcrobotGeometry::AddToBuilder),
+          py::arg("builder"), py::arg("acrobot_state_port"),
+          py::arg("acrobot_params"), py::arg("scene_graph"),
+          // Keep alive, ownership: `return` keeps `builder` alive.
+          py::keep_alive<0, 1>(),
+          // See #11531 for why `py_reference` is needed.
+          py_reference, doc.AcrobotGeometry.AddToBuilder.doc_4args)
+      .def_static("AddToBuilder",
+          py::overload_cast<systems::DiagramBuilder<double>*,
+              const systems::OutputPort<double>&,
+              geometry::SceneGraph<double>*>(&AcrobotGeometry::AddToBuilder),
+          py::arg("builder"), py::arg("acrobot_state_port"),
+          py::arg("scene_graph"),
+          // Keep alive, ownership: `return` keeps `builder` alive.
+          py::keep_alive<0, 1>(),
+          // See #11531 for why `py_reference` is needed.
+          py_reference, doc.AcrobotGeometry.AddToBuilder.doc_3args);
 }
 
 }  // namespace pydrake

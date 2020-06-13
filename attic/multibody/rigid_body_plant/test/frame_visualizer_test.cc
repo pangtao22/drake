@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "drake/common/find_resource.h"
-#include "drake/lcm/drake_mock_lcm.h"
+#include "drake/lcm/drake_lcm.h"
 #include "drake/lcmt_viewer_draw.hpp"
 #include "drake/multibody/parsers/urdf_parser.h"
 
@@ -35,7 +35,7 @@ GTEST_TEST(FrameVisualizerTests, TestMessageGeneration) {
       RigidBodyFrame<double>("iiwa_link_ee",
           tree.FindBody("iiwa_link_ee"), X_BF));
 
-  drake::lcm::DrakeMockLcm lcm;
+  drake::lcm::DrakeLcm lcm;
 
   for (int i = 0; i < 2; ++i) {
     drake::log()->debug("i: {}", i);
@@ -55,11 +55,8 @@ GTEST_TEST(FrameVisualizerTests, TestMessageGeneration) {
     // Initializes the system's input vector to contain all zeros.
     const int vector_size =
         tree.get_num_positions() + tree.get_num_velocities();
-    auto input_data =
-        std::make_unique<systems::BasicVector<double>>(vector_size);
     VectorX<double> x = VectorX<double>::Zero(vector_size);
-    input_data->set_value(x);
-    context->FixInputPort(0, std::move(input_data));
+    dut.get_input_port(0).FixValue(context.get(), x);
     dut.Publish(*context);
 
     KinematicsCache<double> cache = tree.CreateKinematicsCache();

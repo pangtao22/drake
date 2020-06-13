@@ -18,7 +18,7 @@ struct SnoptSolverDetails {
   /**
    * The exit condition of the solver. Please refer to section "EXIT conditions"
    * in "User's Guide for SNOPT Version 7: Software for Large-Scale Nonlinear
-   * Programming" by Philip E. Gill to interprete the exit condition.
+   * Programming" by Philip E. Gill to interpret the exit condition.
    */
   int info{};
 
@@ -45,13 +45,6 @@ class SnoptSolver final : public SolverBase  {
   SnoptSolver();
   ~SnoptSolver() final;
 
-  /// @return true.
-  /// variables, hence it is not thread safe. SNOPT fortran interface is thread
-  /// safe.
-  DRAKE_DEPRECATED("2020-02-01",
-      "The SnoptSolver::is_thread_safe always returns true.")
-  static bool is_thread_safe();
-
   /// For some reason, SNOPT 7.4 fails to detect a simple LP being unbounded.
   static bool is_bounded_lp_broken();
 
@@ -59,6 +52,7 @@ class SnoptSolver final : public SolverBase  {
   //@{
   static SolverId id();
   static bool is_available();
+  static bool is_enabled();
   static bool ProgramAttributesSatisfied(const MathematicalProgram&);
   //@}
 

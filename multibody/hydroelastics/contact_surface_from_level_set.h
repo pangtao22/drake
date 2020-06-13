@@ -22,6 +22,10 @@ namespace multibody {
 namespace hydroelastics {
 #ifndef DRAKE_DOXYGEN_CXX
 namespace internal {
+
+// TODO(SeanCurtis-TRI): The contents of this file are no longer used. Refactor
+//  this into geometry as appropriate.
+
 // This table essentially assigns an index to each edge in the tetrahedron. Each
 // edge is represented by its pair of vertex indexes.
 using Edge = std::pair<int, int>;
@@ -303,7 +307,7 @@ std::unique_ptr<geometry::SurfaceMesh<T>> CalcZeroLevelSetInMeshDomain(
     }
     // IntersectTetWithLevelSet() uses a different convention than
     // geometry::VolumeMesh to index the vertices of a tetrahedra and therefore
-    // we swap vertexes 1 and 2.
+    // we swap vertices 1 and 2.
     // TODO(amcastro-tri): re-write IntersectTetWithLevelSet() to use the
     // convention in geometry::VolumeMesh.
     std::swap(tet_vertices_N[1], tet_vertices_N[2]);

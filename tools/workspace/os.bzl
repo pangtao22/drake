@@ -70,7 +70,7 @@ def _determine_linux(repository_ctx):
     sed = exec_using_which(repository_ctx, [
         "sed",
         "-n",
-        "/^\(NAME\|VERSION_ID\)=/{s/[^=]*=//;s/\"//g;p}",
+        r"/^\(NAME\|VERSION_ID\)=/{s/[^=]*=//;s/\"//g;p}",
         "/etc/os-release",
     ])
     if sed.error != None:
@@ -82,7 +82,7 @@ def _determine_linux(repository_ctx):
 
     # Match supported Ubuntu release(s). These should match those listed in
     # both doc/developers.rst the root CMakeLists.txt.
-    for ubuntu_release in ["18.04"]:
+    for ubuntu_release in ["18.04", "20.04"]:
         if distro == "Ubuntu " + ubuntu_release:
             return _make_result(ubuntu_release = ubuntu_release)
 

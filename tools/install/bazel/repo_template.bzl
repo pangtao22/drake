@@ -54,7 +54,6 @@ def _drake_impl(repo_ctx):
     required_files = [
         "include/drake/common/drake_assert.h",
         "lib/libdrake.so",
-        "share/drake/setup/install_prereqs",
     ]
     for required_file in required_files:
         if not repo_ctx.path(str(prefix) + "/" + required_file).exists:
@@ -78,6 +77,16 @@ def _drake_impl(repo_ctx):
     # the path for runfiles via our BUILD files.
     for relpath in _MANIFEST["runfiles"]["drake"]:
         repo_ctx.symlink(str(share_drake) + "/" + relpath, relpath)
+
+    # Symlink all drake LCM types to this repository's root package, since it
+    # should be named `drake` (see bazelbuild/bazel#3998).
+    if repo_ctx.name != "drake":
+        print("WARNING: Drake LCM types will not be importable via `drake` " +
+              "if this repository is not named `drake`.")
+    python_site_packages_relpath = _MANIFEST["python_site_packages_relpath"]
+    drake_lcmtypes_package = "." + python_site_packages_relpath + "/drake"
+    for relpath in _MANIFEST["lcmtypes_drake_py"]:
+        repo_ctx.symlink(drake_lcmtypes_package + "/" + relpath, relpath)
 
     # Emit the manifest for later loading.
     manifest_bzl = "MANIFEST = " + struct(**_MANIFEST).to_json()

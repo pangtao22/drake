@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include "drake/geometry/render/render_engine.h"
 
@@ -46,6 +47,10 @@ struct RenderEngineOsprayParams {
    higher quality at increased cost. Only has an effect if mode is
    OsprayMode::kPathTracer.  */
   int samples_per_pixel{1};
+
+  /** Whether to turn on shadows when in the `OsprayMode::kRayTracer` rendering
+   mode. It is ignored in other modes.  */
+  bool use_shadows{true};
 };
 
 /** Constructs a RenderEngine implementation which uses an OSPRay-based

@@ -14,16 +14,13 @@ class TestAll(unittest.TestCase):
         self.assertTrue("pydrake.all" not in sys.modules)
         # - While this may be redundant, let's do it for good measure.
         self.assertTrue("pydrake.all" not in sys.modules)
-        # Enable *all* warnings, and ensure that we don't trigger them.
-        with warnings.catch_warnings():
-            # TODO(eric.cousineau): Figure out a more conservative filter to
-            # avoid issues on different machines, but still catch meaningful
-            # warnings.
-            warnings.simplefilter("error", Warning)
+        # Catch all warnings using their normal specification.
+        with warnings.catch_warnings(record=True) as w:
             warnings.filterwarnings(
                 "ignore", message="Matplotlib is building the font cache",
                 category=UserWarning)
             import pydrake.all
+            self.assertEqual(len(w), 0, w)
 
     def test_usage_no_all(self):
         from pydrake.common import FindResourceOrThrow
@@ -33,7 +30,7 @@ class TestAll(unittest.TestCase):
         from pydrake.systems.framework import DiagramBuilder
 
         builder = DiagramBuilder()
-        plant, _ = AddMultibodyPlantSceneGraph(builder)
+        plant, _ = AddMultibodyPlantSceneGraph(builder, 0.0)
         Parser(plant).AddModelFromFile(
             FindResourceOrThrow("drake/examples/pendulum/Pendulum.urdf"))
         plant.Finalize()
@@ -46,7 +43,7 @@ class TestAll(unittest.TestCase):
             Parser, Simulator)
 
         builder = DiagramBuilder()
-        plant, _ = AddMultibodyPlantSceneGraph(builder)
+        plant, _ = AddMultibodyPlantSceneGraph(builder, 0.0)
         Parser(plant).AddModelFromFile(
             FindResourceOrThrow("drake/examples/pendulum/Pendulum.urdf"))
         plant.Finalize()
@@ -57,7 +54,8 @@ class TestAll(unittest.TestCase):
         import pydrake.all
 
         builder = pydrake.systems.framework.DiagramBuilder()
-        plant, _ = pydrake.multibody.plant.AddMultibodyPlantSceneGraph(builder)
+        plant, _ = pydrake.multibody.plant.AddMultibodyPlantSceneGraph(
+            builder, 0.0)
         pydrake.multibody.parsing.Parser(plant).AddModelFromFile(
             pydrake.common.FindResourceOrThrow(
                 "drake/examples/pendulum/Pendulum.urdf"))
@@ -75,14 +73,6 @@ class TestAll(unittest.TestCase):
         expected_symbols = (
             # __init__
             "getDrakePath",
-            # attic
-            # - solvers
-            "RigidBodyConstraint",
-            # - systems
-            # - - controllers
-            "RbtInverseDynamics",
-            # - - sensors
-            "RgbdCamera",
             # autodiffutils
             "AutoDiffXd",
             # common
@@ -124,25 +114,19 @@ class TestAll(unittest.TestCase):
             "PackageMap",
             # - plant
             "MultibodyPlant",
-            # - rigid_body_plant
-            "RigidBodyPlant",
-            # - rigid_body_tree
-            "RigidBodyTree",
-            # - shapes
-            # TODO(eric.cousineau): Avoid collision with `collision.Element`.
-            # Import modules, since these names are generic.
-            "Element",
             # - tree
             "MultibodyForces",
             # perception
             "PointCloud",
             # solvers
+            # - mixed_integer_optimization_util
+            "AddLogarithmicSos2Constraint",
             # - gurobi
             "GurobiSolver",
-            # - ik
-            "IKResults",
             # - ipopt
             "IpoptSolver",
+            # - branch_and_bound
+            "MixedIntegerBranchAndBound",
             # - mathematicalprogram
             "MathematicalProgram",
             # - mosek

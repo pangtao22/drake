@@ -1,5 +1,7 @@
 #include "drake/systems/framework/system_base.h"
 
+#include <atomic>
+
 #include <fmt/format.h>
 
 #include "drake/systems/framework/fixed_input_port_value.h"
@@ -18,6 +20,10 @@ namespace systems {
 
 SystemBase::~SystemBase() {}
 
+internal::SystemId SystemBase::get_next_id() {
+  return internal::SystemId::get_new_id();
+}
+
 std::string SystemBase::GetSystemPathname() const {
   const std::string parent_path =
       get_parent_service() ? get_parent_service()->GetParentPathname()
@@ -26,7 +32,7 @@ std::string SystemBase::GetSystemPathname() const {
          GetSystemName();
 }
 
-const CacheEntry& SystemBase::DeclareCacheEntry(
+CacheEntry& SystemBase::DeclareCacheEntry(
     std::string description, CacheEntry::AllocCallback alloc_function,
     CacheEntry::CalcCallback calc_function,
     std::set<DependencyTicket> prerequisites_of_calc) {
@@ -36,7 +42,7 @@ const CacheEntry& SystemBase::DeclareCacheEntry(
       std::move(prerequisites_of_calc));
 }
 
-const CacheEntry& SystemBase::DeclareCacheEntryWithKnownTicket(
+CacheEntry& SystemBase::DeclareCacheEntryWithKnownTicket(
     DependencyTicket known_ticket, std::string description,
     CacheEntry::AllocCallback alloc_function,
     CacheEntry::CalcCallback calc_function,
@@ -48,7 +54,7 @@ const CacheEntry& SystemBase::DeclareCacheEntryWithKnownTicket(
       this, index, known_ticket, std::move(description),
       std::move(alloc_function), std::move(calc_function),
       std::move(prerequisites_of_calc)));
-  const CacheEntry& new_entry = *cache_entries_.back();
+  CacheEntry& new_entry = *cache_entries_.back();
   return new_entry;
 }
 
@@ -63,6 +69,8 @@ void SystemBase::InitializeContextBase(ContextBase* context_ptr) const {
 
   internal::SystemBaseContextBaseAttorney::set_system_name(
       &context, get_name());
+  internal::SystemBaseContextBaseAttorney::set_system_id(
+      &context, system_id_);
 
   // Add the independent-source trackers and wire them up appropriately. That
   // includes input ports since their dependencies are external.
@@ -85,6 +93,9 @@ void SystemBase::InitializeContextBase(ContextBase* context_ptr) const {
     // TODO(sherm1) Supply initial value on creation instead and get rid of
     // this separate call.
     cache_value.SetInitialValue(entry.Allocate());
+
+    if (entry.is_disabled_by_default())
+      cache_value.disable_caching();
   }
 
   // Create the output port trackers yᵢ here. Nothing in this System may

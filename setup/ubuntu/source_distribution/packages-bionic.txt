@@ -1,11 +1,11 @@
 bash-completion
 clang
-clang-format
+clang-9
+clang-format-9
 coinor-libclp-dev
 coinor-libipopt-dev
 default-jdk
 diffstat
-doxygen
 file
 fonts-dejavu-core
 fonts-dejavu-extra
@@ -13,12 +13,12 @@ gdb
 gfortran
 git
 jupyter
-kcov-35
 libblas-dev
 libbz2-dev
-libclang-6.0-dev
+libclang-9-dev
 libexpat1-dev
 libfreetype6-dev
+libgflags-dev
 libglib2.0-dev
 libglu1-mesa-dev
 libhdf5-dev
@@ -38,6 +38,7 @@ libtheora-dev
 libtiff5-dev
 libtinyxml-dev
 libtool
+libx11-dev
 libxml2-dev
 libxt-dev
 libyaml-cpp-dev
@@ -56,7 +57,6 @@ python3-lxml-dbg
 python3-matplotlib-dbg
 python3-numpy-dbg
 python3-pandas
-python3-protobuf
 python3-pydot
 python3-scipy-dbg
 python3-sphinx
@@ -64,7 +64,6 @@ python3-sphinx-rtd-theme
 python3-tk-dbg
 python3-yaml-dbg
 python3-zmq-dbg
-ruby
 unzip
 valgrind
 valgrind-dbg

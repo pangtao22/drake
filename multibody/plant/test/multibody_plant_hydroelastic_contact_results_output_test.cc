@@ -18,19 +18,8 @@ using geometry::SurfaceVertexIndex;
 using geometry::SurfaceMesh;
 
 namespace multibody {
-
-class MultibodyPlantTester {
- public:
-  MultibodyPlantTester() = delete;
-
-  static std::vector<geometry::ContactSurface<double>> ComputeContactSurfaces(
-      const MultibodyPlant<double>& plant,
-      const geometry::QueryObject<double>& query_object) {
-    return plant.hydroelastics_engine_.ComputeContactSurfaces(query_object);
-  }
-};
-
 namespace {
+
 class HydroelasticContactResultsOutputTester : public ::testing::Test {
  protected:
   void SetUp() {
@@ -56,10 +45,12 @@ class HydroelasticContactResultsOutputTester : public ::testing::Test {
     geometry::SceneGraph<double>& scene_graph =
         *builder.AddSystem<geometry::SceneGraph<double>>();
     scene_graph.set_name("scene_graph");
+    // TODO(SeanCurtis-TRI): This should _not_ be using code from the examples/
+    //  directory. Examples code shouldn't feed back into other code.
     plant_ = builder.AddSystem(
         examples::multibody::bouncing_ball::MakeBouncingBallPlant(
             radius, mass, elastic_modulus, dissipation, friction, gravity_W,
-            &scene_graph));
+            false /* rigid_sphere */, false /* soft_ground */, &scene_graph));
     plant_->set_contact_model(ContactModel::kHydroelasticsOnly);
     plant_->Finalize();
 
@@ -111,7 +102,7 @@ class HydroelasticContactResultsOutputTester : public ::testing::Test {
 };
 
 // Checks that the ContactSurface from the output port is equivalent to that
-// returned from the HydroelasticEngine.
+// computed by SceneGraph.
 TEST_F(HydroelasticContactResultsOutputTester, ContactSurfaceEquivalent) {
   // Get the query object so that we can compute the contact surfaces.
   const auto& query_object =
@@ -120,7 +111,7 @@ TEST_F(HydroelasticContactResultsOutputTester, ContactSurfaceEquivalent) {
 
   // Compute the contact surface using the hydroelastic engine.
   std::vector<geometry::ContactSurface<double>> contact_surfaces =
-      MultibodyPlantTester::ComputeContactSurfaces(*plant_, query_object);
+      query_object.ComputeContactSurfaces();
 
   // Check that the two contact surfaces are equivalent.
   ASSERT_EQ(contact_surfaces.size(), 1);

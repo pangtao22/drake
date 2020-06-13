@@ -146,9 +146,9 @@ class RenderEngine : public ShapeReifier {
   bool has_geometry(GeometryId id) const;
 
   /** Updates the poses of all geometries marked as "needing update" (see
- RegisterVisual()).
+   RegisterVisual()).
 
- @param  X_WGs   The poses of *all* geometries in SceneGraph (measured and
+   @param X_WGs  The poses of *all* geometries in SceneGraph (measured and
                  expressed in the world frame). The pose for a geometry is
                  accessed by that geometry's id.  */
   template <typename T>
@@ -290,6 +290,15 @@ class RenderEngine : public ShapeReifier {
   }
 
   //@}
+
+  /** Provides access to the light for manual configuration since it's currently
+   bound to the camera position. This is a temporary measure to facilitate
+   benchmarking and create visible shadows, and should not be used publicly.
+   @param X_DL The pose of the light in a frame D that is attached to the camera
+               position. In this frame D, the camera is located at (0, 0, 1),
+               looking towards (0, 0, 0) at a distance of 1, with up being
+               (0, 1, 0).  */
+  virtual void SetDefaultLightPosition(const Vector3<double>& X_DL);
 
  private:
   friend class RenderEngineTester;

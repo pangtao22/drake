@@ -94,7 +94,12 @@ drake_cc_library(
     testonly = 1,
     hdrs = ["implicit_integrator_test.h"],
     deps = [
+        ":discontinuous_spring_mass_damper_system",
+        ":linear_scalar_system",
         ":my_spring_mass_system",
+        ":robertson_system",
+        ":stationary_system",
+        ":stiff_double_mass_spring_system",
         "//common/test_utilities:expect_no_throw",
     ],
 )
@@ -190,8 +195,10 @@ drake_cc_library(
 drake_cc_library(
     name = "stationary_system",
     testonly = 1,
+    srcs = ["stationary_system.cc"],
     hdrs = ["stationary_system.h"],
     deps = [
+        "//common:default_scalars",
         "//systems/framework",
     ],
 )

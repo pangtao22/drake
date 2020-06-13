@@ -44,13 +44,7 @@ namespace math {
 /// @authors Paul Mitiguy (2018) Original author.
 /// @authors Drake team (see https://drake.mit.edu/credits).
 ///
-/// @tparam T The underlying scalar type. Must be a valid Eigen scalar.
-///
-/// Instantiated templates for the following kinds of T's are provided:
-///
-/// - double
-/// - AutoDiffXd
-/// - symbolic::Expression
+/// @tparam_default_scalar
 template <typename T>
 class RotationMatrix {
  public:
@@ -141,7 +135,7 @@ class RotationMatrix {
   /// Vice-versa, there are high-accuracy RollPitchYaw constructor/methods that
   /// form a RollPitchYaw from a rotation matrix.
   explicit RotationMatrix(const RollPitchYaw<T>& rpy) {
-    // TODO(@mitiguy) Add publically viewable documentation on how Sherm and
+    // TODO(@mitiguy) Add publicly viewable documentation on how Sherm and
     // Goldstein like to visualize/conceptualize rotation sequences.
     const T& r = rpy.roll_angle();
     const T& p = rpy.pitch_angle();

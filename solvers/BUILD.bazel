@@ -96,6 +96,7 @@ drake_cc_library(
     hdrs = ["binding.h"],
     deps = [
         ":decision_variable",
+        ":evaluator_base",
     ],
 )
 
@@ -128,6 +129,7 @@ drake_cc_library(
         ":function",
         "//common:autodiff",
         "//common:essential",
+        "//common:nice_type_name",
         "//common:polynomial",
         "//common:symbolic",
         "//math:autodiff",
@@ -147,6 +149,7 @@ drake_cc_library(
         "//common:essential",
         "//common:polynomial",
         "//common:symbolic",
+        "//math:gradient",
         "//math:matrix_util",
     ],
 )
@@ -254,8 +257,14 @@ drake_cc_library(
 
 drake_cc_library(
     name = "solver_options",
-    srcs = ["solver_options.cc"],
-    hdrs = ["solver_options.h"],
+    srcs = [
+        "common_solver_option.cc",
+        "solver_options.cc",
+    ],
+    hdrs = [
+        "common_solver_option.h",
+        "solver_options.h",
+    ],
     deps = [
         ":solver_id",
     ],
@@ -310,9 +319,7 @@ drake_cc_library(
         ":decision_variable",
         ":function",
         ":indeterminate",
-        ":mathematical_program_result",
         ":program_attribute",
-        ":solution_result",
         ":solver_id",
         ":solver_options",
         ":sos_basis_generator",
@@ -330,6 +337,8 @@ drake_cc_library(
     hdrs = ["mathematical_program_result.h"],
     deps = [
         ":binding",
+        ":constraint",
+        ":mathematical_program",
         ":solution_result",
         ":solver_id",
         "//common:symbolic",
@@ -360,6 +369,7 @@ drake_cc_library(
     srcs = ["branch_and_bound.cc"],
     hdrs = ["branch_and_bound.h"],
     deps = [
+        ":choose_best_solver",
         ":gurobi_solver",
         ":mathematical_program",
         ":scs_solver",
@@ -779,12 +789,6 @@ drake_cc_library(
         ],
     }),
     hdrs = ["snopt_solver.h"],
-    copts = select({
-        "//tools:with_snopt_fortran": [
-            "-DWITH_SNOPT_FORTRAN=1",
-        ],
-        "//conditions:default": [],
-    }),
     deps = select({
         "//tools:with_snopt": [
             ":mathematical_program",
@@ -1012,6 +1016,7 @@ drake_cc_googletest(
         ":binding",
         ":constraint",
         ":cost",
+        "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:symbolic_test_util",
     ],
 )
@@ -1043,6 +1048,7 @@ drake_cc_googletest(
         ":constraint",
         "//common:symbolic",
         "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
         "//common/test_utilities:symbolic_test_util",
         "//math:gradient",
     ],
@@ -1154,6 +1160,7 @@ drake_cc_googletest(
     deps = [
         ":mathematical_program",
         ":mathematical_program_test_util",
+        ":quadratic_program_examples",
         ":solve",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
@@ -1520,6 +1527,17 @@ drake_cc_googletest(
     ],
 )
 
+# TODO(jwnimmer-tri) Remove this test on 2020-09-01 when the deprecated
+# SolverBase constructor is also removed.
+drake_cc_googletest(
+    name = "solver_base_deprecated_test",
+    copts = ["-Wno-deprecated-declarations"],
+    deps = [
+        ":mathematical_program",
+        ":solver_base",
+    ],
+)
+
 drake_cc_googletest(
     name = "solver_id_test",
     deps = [
@@ -1629,6 +1647,7 @@ drake_cc_googletest(
         ":cost",
         ":mathematical_program_result",
         ":osqp_solver",
+        ":snopt_solver",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
     ],

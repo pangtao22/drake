@@ -2,7 +2,7 @@
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 
-#include "drake/bindings/pydrake/documentation_pybind.h"
+#include "drake/bindings/pydrake/attic/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
 #include "drake/multibody/ik_options.h"
 #include "drake/multibody/rigid_body_ik.h"
@@ -20,7 +20,8 @@ PYBIND11_MODULE(ik, m) {
 
   py::class_<SingleTimeKinematicConstraint, RigidBodyConstraint>(
       m, "SingleTimeKinematicConstraint")
-      .def("eval",
+      .def(
+          "eval",
           [](const SingleTimeKinematicConstraint& self, double t,
               KinematicsCache<double>& cache) {
             Eigen::VectorXd c;
@@ -30,7 +31,8 @@ PYBIND11_MODULE(ik, m) {
           },
           py::arg("t"), py::arg("cache"),
           doc.SingleTimeKinematicConstraint.eval.doc)
-      .def("bounds",
+      .def(
+          "bounds",
           [](const SingleTimeKinematicConstraint& self, double t) {
             Eigen::VectorXd lb, ub;
             self.bounds(&t, lb, ub);

@@ -4,9 +4,12 @@
 tap 'dreal-deps/ibex'
 tap 'robotlocomotion/director'
 
+cask 'adoptopenjdk' unless system '/usr/libexec/java_home --version 1.8+ --failfast &> /dev/null'
+
 brew 'boost'
 brew 'cmake'
 brew 'dreal-deps/ibex/ibex@2.7.4'  # N.B. Matches drake/tools/workspace/ibex/version.bzl.
+brew 'eigen'
 brew 'gcc'
 brew 'gflags'
 brew 'glew'
@@ -18,9 +21,11 @@ brew 'lz4'
 brew 'nlopt'
 brew 'numpy'
 brew 'openblas'
-brew 'protobuf'
 brew 'pkg-config'
-brew 'python'
+# TODO(jamiesnape): Remove "unless" condition when the python formula is updated to 3.8.
+brew 'python' unless MacOS.version >= :catalina
+# TODO(jamiesnape): Remove python@3.8 when the python formula is updated to 3.8.
+brew 'python@3.8'
 brew 'scipy'
 brew 'suite-sparse'
 brew 'tinyxml'
@@ -28,7 +33,5 @@ brew 'tinyxml2'
 brew 'robotlocomotion/director/vtk@8.2'
 brew 'yaml-cpp'
 brew 'zeromq'
-
-cask 'adoptopenjdk' unless system '/usr/libexec/java_home --version 1.8+ --failfast &> /dev/null'
 
 mas 'Xcode', id: 497799835 unless File.exist? '/Applications/Xcode.app'

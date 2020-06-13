@@ -16,6 +16,7 @@ class StubSolverBase final : public SolverBase {
   StubSolverBase() : SolverBase(
       &id,
       [this](){ return available_; },
+      [this](){ return enabled_; },
       [this](const auto& prog){ return satisfied_; }) {}
 
   void DoSolve(
@@ -43,6 +44,7 @@ class StubSolverBase final : public SolverBase {
 
   // The return values for stubbed methods.
   bool available_{true};
+  bool enabled_{true};
   bool satisfied_{true};
 };
 
@@ -54,6 +56,11 @@ GTEST_TEST(SolverBaseTest, Accessors) {
   EXPECT_FALSE(dut.available());
   dut.available_ = true;
   EXPECT_TRUE(dut.available());
+
+  dut.enabled_ = false;
+  EXPECT_FALSE(dut.enabled());
+  dut.enabled_ = true;
+  EXPECT_TRUE(dut.enabled());
 
   const MathematicalProgram prog;
   dut.satisfied_ = false;
@@ -102,7 +109,7 @@ GTEST_TEST(SolverBaseTest, SolveAsOutputArgument) {
   EXPECT_EQ(result.get_x_val()[1], 41.0);
 }
 
-// Check the error message when the solver is not avilable.
+// Check the error message when the solver is not available.
 GTEST_TEST(SolverBaseTest, AvailableError) {
   const MathematicalProgram prog;
   StubSolverBase dut;
@@ -129,9 +136,22 @@ GTEST_TEST(SolverBaseTest, SolveAndReturn) {
   const MathematicalProgramResult result = dut.Solve(prog, {}, {});
   EXPECT_EQ(result.get_solver_id(), StubSolverBase::id());
   EXPECT_TRUE(result.is_success());
+  // Confirm that default arguments work, too.
+  const MathematicalProgramResult result2 = dut.Solve(prog);
+  EXPECT_TRUE(result2.is_success());
+
   // We don't bother checking additional result details here, because we know
   // that the solve-and-return method is implemented as a thin shim atop the
   // solve-as-output-argument method.
+}
+
+GTEST_TEST(SolverBaseTest, InitialGuessSizeError) {
+  MathematicalProgram prog;
+  prog.NewContinuousVariables<2>();
+  StubSolverBase dut;
+  DRAKE_EXPECT_THROWS_MESSAGE(dut.Solve(prog, Eigen::VectorXd(3), {}),
+                              std::invalid_argument,
+                              "Solve expects initial guess of size 2, got 3.");
 }
 
 }  // namespace

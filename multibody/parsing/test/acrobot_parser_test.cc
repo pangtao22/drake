@@ -28,7 +28,7 @@ class AcrobotModelTests :
   void SetUp() override {
     const std::string base_name = "drake/multibody/benchmarks/acrobot/acrobot";
     auto load_model = GetParam();
-    plant_ = std::make_unique<MultibodyPlant<double>>();
+    plant_ = std::make_unique<MultibodyPlant<double>>(0.0);
     load_model(base_name, plant_.get(), nullptr);
     // We are done adding models.
     plant_->Finalize();
@@ -141,6 +141,11 @@ TEST_P(AcrobotModelTests, ModelBasics) {
   EXPECT_EQ(shoulder_joint.child_body().name(), parameters_.link1_name());
   EXPECT_EQ(elbow_joint.parent_body().name(), parameters_.link1_name());
   EXPECT_EQ(elbow_joint.child_body().name(), parameters_.link2_name());
+
+  // Get actuators by name.
+  const JointActuator<double>& elbow_actuator =
+      plant_->GetJointActuatorByName("ElbowJoint");
+  EXPECT_TRUE(std::isinf(elbow_actuator.effort_limit()));
 
   // Get frames by name.
   const Frame<double>& link1_frame = plant_->GetFrameByName("Link1");

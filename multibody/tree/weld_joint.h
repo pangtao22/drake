@@ -17,16 +17,7 @@ namespace multibody {
 /// This Joint fixes the relative pose between two frames as if "welding" them
 /// together.
 ///
-/// @tparam T The scalar type. Must be a valid Eigen scalar.
-///
-/// Instantiated templates for the following kinds of T's are provided:
-///
-/// - double
-/// - AutoDiffXd
-/// - symbolic::Expression
-///
-/// They are already available to link against in the containing library.
-/// No other values for T are currently supported.
+/// @tparam_default_scalar
 template <typename T>
 class WeldJoint final : public Joint<T> {
  public:
@@ -113,9 +104,6 @@ class WeldJoint final : public Joint<T> {
   // WeldJoint<T> so that CloneToScalar<ToAnyOtherScalar>() can access
   // private members of WeldJoint<T>.
   template <typename> friend class WeldJoint;
-
-  // Friend class to facilitate testing.
-  friend class JointTester;
 
   // Returns the mobilizer implementing this joint.
   // The internal implementation of this joint could change in a future version.

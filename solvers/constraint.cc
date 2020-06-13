@@ -5,6 +5,9 @@
 #include <set>
 #include <unordered_map>
 
+#include <fmt/format.h>
+
+#include "drake/math/autodiff_gradient.h"
 #include "drake/math/matrix_util.h"
 #include "drake/solvers/symbolic_extraction.h"
 
@@ -12,6 +15,8 @@ using std::abs;
 
 namespace drake {
 namespace solvers {
+
+const double kInf = std::numeric_limits<double>::infinity();
 
 namespace {
 // Returns `True` if lb is -∞. Otherwise returns a symbolic formula `lb <= e`.
@@ -33,7 +38,42 @@ symbolic::Formula MakeUpperBound(const symbolic::Expression& e,
     return e <= ub;
   }
 }
+
+std::ostream& DisplayConstraint(const Constraint& constraint, std::ostream& os,
+                                const std::string& name,
+                                const VectorX<symbolic::Variable>& vars,
+                                bool equality) {
+  os << name;
+  VectorX<symbolic::Expression> e(constraint.num_constraints());
+  constraint.Eval(vars, &e);
+  // Append the description (when provided).
+  const std::string& description = constraint.get_description();
+  if (!description.empty()) {
+    os << " described as '" << description << "'";
+  }
+  os << "\n";
+  for (int i = 0; i < constraint.num_constraints(); ++i) {
+    if (equality) {
+      os << e(i) << " == " << constraint.upper_bound()(i) << "\n";
+    } else {
+      os << constraint.lower_bound()(i) << " <= " << e(i)
+         << " <= " << constraint.upper_bound()(i) << "\n";
+    }
+  }
+  return os;
+}
 }  // namespace
+
+void Constraint::check(int num_constraints) const {
+  if (lower_bound_.size() != num_constraints ||
+      upper_bound_.size() != num_constraints) {
+    throw std::invalid_argument(
+        fmt::format("Constraint {} expects lower and upper bounds of size {}, "
+                    "got lower bound of size {} and upper bound of size {}.",
+                    this->get_description(), num_constraints,
+                    lower_bound_.size(), upper_bound_.size()));
+  }
+}
 
 symbolic::Formula Constraint::DoCheckSatisfied(
     const Eigen::Ref<const VectorX<symbolic::Variable>>& x) const {
@@ -71,13 +111,81 @@ void QuadraticConstraint::DoEval(
   DoEvalGeneric(x, y);
 }
 
+std::ostream& QuadraticConstraint::DoDisplay(
+    std::ostream& os, const VectorX<symbolic::Variable>& vars) const {
+  return DisplayConstraint(*this, os, "QuadraticConstraint", vars, false);
+}
+
+namespace {
+int get_lorentz_cone_constraint_size(
+    LorentzConeConstraint::EvalType eval_type) {
+  return eval_type == LorentzConeConstraint::EvalType::kNonconvex ? 2 : 1;
+}
+}  // namespace
+
+LorentzConeConstraint::LorentzConeConstraint(
+    const Eigen::Ref<const Eigen::MatrixXd>& A,
+    const Eigen::Ref<const Eigen::VectorXd>& b, EvalType eval_type)
+    : Constraint(
+          get_lorentz_cone_constraint_size(eval_type), A.cols(),
+          Eigen::VectorXd::Zero(get_lorentz_cone_constraint_size(eval_type)),
+          Eigen::VectorXd::Constant(get_lorentz_cone_constraint_size(eval_type),
+                                    kInf)),
+      A_(A.sparseView()),
+      A_dense_(A),
+      b_(b),
+      eval_type_{eval_type} {
+  DRAKE_DEMAND(A_.rows() >= 2);
+  DRAKE_ASSERT(A_.rows() == b_.rows());
+}
+
+namespace {
+template <typename DerivedX>
+void LorentzConeConstraintEvalConvex2Autodiff(
+    const Eigen::MatrixXd& A_dense, const Eigen::VectorXd& b,
+    const Eigen::MatrixBase<DerivedX>& x, VectorX<AutoDiffXd>* y) {
+  const Eigen::VectorXd x_val = math::autoDiffToValueMatrix(x);
+  const Eigen::VectorXd z_val = A_dense * x_val + b;
+  const double z_tail_squared_norm = z_val.tail(z_val.rows() - 1).squaredNorm();
+  Vector1d y_val(z_val(0) - std::sqrt(z_tail_squared_norm));
+  Eigen::RowVectorXd dy_dz(z_val.rows());
+  dy_dz(0) = 1;
+  // We use a small value epsilon to approximate the gradient of sqrt(z) as
+  // ∂sqrt(zᵀz) / ∂z ≈ z(i) / sqrt(zᵀz + eps)
+  const double eps = 1E-12;
+  dy_dz.tail(z_val.rows() - 1) =
+      -z_val.tail(z_val.rows() - 1) / std::sqrt(z_tail_squared_norm + eps);
+  Eigen::RowVectorXd dy = dy_dz * A_dense * math::autoDiffToGradientMatrix(x);
+  (*y) = math::initializeAutoDiffGivenGradientMatrix(y_val, dy);
+}
+}  // namespace
+
 template <typename DerivedX, typename ScalarY>
 void LorentzConeConstraint::DoEvalGeneric(const Eigen::MatrixBase<DerivedX>& x,
                                           VectorX<ScalarY>* y) const {
+  using std::pow;
+
   const VectorX<ScalarY> z = A_dense_ * x.template cast<ScalarY>() + b_;
   y->resize(num_constraints());
-  (*y)(0) = z(0);
-  (*y)(1) = pow(z(0), 2) - z.tail(z.size() - 1).squaredNorm();
+  switch (eval_type_) {
+    case EvalType::kConvex: {
+      (*y)(0) = z(0) - z.tail(z.rows() - 1).norm();
+      break;
+    }
+    case EvalType::kConvexSmooth: {
+      if constexpr (std::is_same<ScalarY, AutoDiffXd>::value) {
+        LorentzConeConstraintEvalConvex2Autodiff(A_dense_, b_, x, y);
+      } else {
+        (*y)(0) = z(0) - z.tail(z.rows() - 1).norm();
+      }
+      break;
+    }
+    case EvalType::kNonconvex: {
+      (*y)(0) = z(0);
+      (*y)(1) = pow(z(0), 2) - z.tail(z.size() - 1).squaredNorm();
+      break;
+    }
+  }
 }
 
 void LorentzConeConstraint::DoEval(const Eigen::Ref<const Eigen::VectorXd>& x,
@@ -145,6 +253,16 @@ void LinearConstraint::DoEval(
   DoEvalGeneric(x, y);
 }
 
+std::ostream& LinearConstraint::DoDisplay(
+    std::ostream& os, const VectorX<symbolic::Variable>& vars) const {
+  return DisplayConstraint(*this, os, "LinearConstraint", vars, false);
+}
+
+std::ostream& LinearEqualityConstraint::DoDisplay(
+    std::ostream& os, const VectorX<symbolic::Variable>& vars) const {
+  return DisplayConstraint(*this, os, "LinearEqualityConstraint", vars, true);
+}
+
 template <typename DerivedX, typename ScalarY>
 void BoundingBoxConstraint::DoEvalGeneric(const Eigen::MatrixBase<DerivedX>& x,
                                           VectorX<ScalarY>* y) const {
@@ -165,6 +283,11 @@ void BoundingBoxConstraint::DoEval(
     const Eigen::Ref<const VectorX<symbolic::Variable>>& x,
     VectorX<symbolic::Expression>* y) const {
   DoEvalGeneric(x, y);
+}
+
+std::ostream& BoundingBoxConstraint::DoDisplay(
+    std::ostream& os, const VectorX<symbolic::Variable>& vars) const {
+  return DisplayConstraint(*this, os, "BoundingBoxConstraint", vars, false);
 }
 
 template <typename DerivedX, typename ScalarY>

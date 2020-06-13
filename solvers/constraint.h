@@ -169,13 +169,7 @@ class Constraint : public EvaluatorBase {
       const Eigen::Ref<const VectorX<symbolic::Variable>>& x) const;
 
  private:
-  void check(int num_constraints) {
-    static_cast<void>(num_constraints);
-    DRAKE_ASSERT(lower_bound_.size() == num_constraints &&
-                 "Size of lower bound must match number of constraints.");
-    DRAKE_ASSERT(upper_bound_.size() == num_constraints &&
-                 "Size of upper bound must match number of constraints.");
-  }
+  void check(int num_constraints) const;
 
   Eigen::VectorXd lower_bound_;
   Eigen::VectorXd upper_bound_;
@@ -260,6 +254,9 @@ class QuadraticConstraint : public Constraint {
   void DoEval(const Eigen::Ref<const VectorX<symbolic::Variable>>& x,
               VectorX<symbolic::Expression>* y) const override;
 
+  std::ostream& DoDisplay(std::ostream&,
+                          const VectorX<symbolic::Variable>&) const override;
+
   Eigen::MatrixXd Q_;
   Eigen::VectorXd b_;
 };
@@ -276,33 +273,39 @@ class QuadraticConstraint : public Constraint {
  where A ∈ ℝ ⁿˣᵐ, b ∈ ℝ ⁿ are given matrices.
  Ideally this constraint should be handled by a second-order cone solver.
  In case the user wants to enforce this constraint through general nonlinear
- optimization, with smooth gradient, we alternatively impose the following
- constraint, with smooth gradient everywhere
- @f[
- a_0^Tx+b_0\ge 0\\
- (a_0^Tx+b_0)^2-(a_1^Tx+b_1)^2-...-(a_{n-1}^Tx+b_{n-1})^2 \ge 0
- @f]
- where @f$ a_i^T@f$ is the i'th row of matrix @f$ A@f$. @f$ b_i @f$ is the i'th
- entry of vector @f$ b @f$.
-
- For more information and visualization, please refer to
+ optimization, we provide three different formulations on the Lorentz cone
+ constraint
+ 1. g(z) = z₀ - sqrt(z₁² + ... + zₙ₋₁²) ≥ 0
+    This formulation is not differentiable at z₁=...=zₙ₋₁=0
+ 2. g(z) = z₀ - sqrt(z₁² + ... + zₙ₋₁²) ≥ 0
+    but the gradient of g(z) is approximated as
+    ∂g(z)/∂z = [1, -z₁/sqrt(z₁² + ... zₙ₋₁² + ε), ...,
+ -zₙ₋₁/sqrt(z₁²+...+zₙ₋₁²+ε)] where ε is a small positive number.
+ 3. z₀²-(z₁²+...+zₙ₋₁²) ≥ 0
+    z₀ ≥ 0
+    This constraint is differentiable everywhere, but z₀²-(z₁²+...+zₙ₋₁²) ≥ 0 is
+ non-convex. The default is to use the first formulation. For more information
+ and visualization, please refer to
  https://inst.eecs.berkeley.edu/~ee127a/book/login/l_socp_soc.html
  */
 class LorentzConeConstraint : public Constraint {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(LorentzConeConstraint)
 
+  /**
+   * We provide three possible Eval functions to represent the Lorentz cone
+   * constraint z₀ ≥ sqrt(z₁² + ... + zₙ₋₁²). For more explanation on the three
+   * formulations, refer to LorentzConeConstraint documentation.
+   */
+  enum class EvalType {
+    kConvex,  ///< The constraint is g(z) = z₀ - sqrt(z₁² + ... + zₙ₋₁²) ≥ 0
+    kConvexSmooth,  ///< Same as kConvex1, but with approximated gradient.
+    kNonconvex  ///< Nonconvex constraint z₀²-(z₁²+...+zₙ₋₁²) ≥ 0 and z₀ ≥ 0
+  };
+
   LorentzConeConstraint(const Eigen::Ref<const Eigen::MatrixXd>& A,
-                        const Eigen::Ref<const Eigen::VectorXd>& b)
-      : Constraint(
-            2, A.cols(), Eigen::Vector2d::Constant(0.0),
-            Eigen::Vector2d::Constant(std::numeric_limits<double>::infinity())),
-        A_(A.sparseView()),
-        A_dense_(A),
-        b_(b) {
-    DRAKE_DEMAND(A_.rows() >= 2);
-    DRAKE_ASSERT(A_.rows() == b_.rows());
-  }
+                        const Eigen::Ref<const Eigen::VectorXd>& b,
+                        EvalType eval_type = EvalType::kConvex);
 
   ~LorentzConeConstraint() override {}
 
@@ -334,6 +337,7 @@ class LorentzConeConstraint : public Constraint {
   // using AutoDiffXd, and return the gradient as a dense matrix.
   const Eigen::MatrixXd A_dense_;
   const Eigen::VectorXd b_;
+  const EvalType eval_type_;
 };
 
 /**
@@ -452,10 +456,10 @@ class EvaluatorConstraint : public Constraint {
 };
 
 /**
+ * A constraint on the values of multivariate polynomials.
+ *
  *  lb[i] <= P[i](x, y...) <= ub[i], where each P[i] is a multivariate
  *  polynomial in x, y...
- *
- * A constraint on the values of multivariate polynomials.
  *
  * The Polynomial class uses a different variable naming scheme; thus the
  * caller must provide a list of Polynomial::VarType variables that correspond
@@ -505,7 +509,7 @@ class LinearConstraint : public Constraint {
                    const Eigen::MatrixBase<DerivedLB>& lb,
                    const Eigen::MatrixBase<DerivedUB>& ub)
       : Constraint(a.rows(), a.cols(), lb, ub), A_(a) {
-    DRAKE_ASSERT(a.rows() == lb.rows());
+    DRAKE_DEMAND(a.rows() == lb.rows());
   }
 
   ~LinearConstraint() override {}
@@ -562,6 +566,9 @@ class LinearConstraint : public Constraint {
   void DoEval(const Eigen::Ref<const VectorX<symbolic::Variable>>& x,
               VectorX<symbolic::Expression>* y) const override;
 
+  std::ostream& DoDisplay(std::ostream&,
+                          const VectorX<symbolic::Variable>&) const override;
+
   Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> A_;
 
  private:
@@ -614,6 +621,9 @@ class LinearEqualityConstraint : public LinearConstraint {
         !std::is_same<DerivedA, DerivedA>::value,
         "This method should not be called form `LinearEqualityConstraint`");
   }
+
+  std::ostream& DoDisplay(std::ostream&,
+                          const VectorX<symbolic::Variable>&) const override;
 };
 
 /**
@@ -650,6 +660,9 @@ class BoundingBoxConstraint : public LinearConstraint {
 
   void DoEval(const Eigen::Ref<const VectorX<symbolic::Variable>>& x,
               VectorX<symbolic::Expression>* y) const override;
+
+  std::ostream& DoDisplay(std::ostream&,
+                          const VectorX<symbolic::Variable>&) const override;
 };
 
 /**

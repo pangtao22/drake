@@ -40,6 +40,8 @@ def _impl(repo_ctx):
                 result.error,
             ))
         return
+    if os_result.ubuntu_release not in ["18.04", "20.04"]:
+        fail("Operating system is NOT supported", attr = os_result)
     result = setup_new_deb_archive(repo_ctx)
     if result.error != None:
         fail("Unable to complete setup for @{} repository: {}".format(
@@ -98,6 +100,7 @@ ibex_repository = repository_rule(
             default = "@drake//tools/workspace/ibex:package-ubuntu.BUILD.bazel",  # noqa
         ),
     },
+    configure = True,
     implementation = _impl,
 )
 

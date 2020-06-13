@@ -39,18 +39,18 @@ Helpful Information
 -------------------
 
 When reporting an issue, please consider providing the following information
-(*examples in italics*):
+(*examples in italics*, ``helper command in monospace``):
 
 *   Operating system (*Ubuntu 18.04, macOS Catalina*)
 *   Language (C++, :ref:`Python <python-bindings>`)
 
-    -   C++ compiler (*GCC 7.4.0, Clang 6.0.0*)
+    -   C++ compiler (*GCC 7.5.0, GCC 9.3.0, Clang 6.0.0*)
     -   Python version (*Python 3.6.7*)
     -   Python distribution (*apt, homebrew*)
 
 *   If building from source:
 
-    -   Build system (Bazel, CMake*)
+    -   Build system (Bazel, CMake)
 
         +  Bazel version (``which bazel; bazel version``)
         +  Bazel C++ compiler (``bazel run @drake//common:print_host_settings``)

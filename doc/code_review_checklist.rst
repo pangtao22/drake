@@ -26,6 +26,10 @@ Is the code the minimal set of what you want?
   - If you are modifying an API, consider deprecating the old interface instead
     of migrating all call sites immediately.
 
+    - For deprecation, please see
+      `DRAKE_DEPRECATED <https://drake.mit.edu/doxygen_cxx/drake__deprecated_8h.html>`_ for C++
+      and `pydrake deprecation <https://drake.mit.edu/doxygen_cxx/group__python__bindings.html#PydrakeDeprecation>`_ for Python.
+
   - If you are introducing a new feature, consider adding only test cases
     now, and deferring the first application use to a follow-up PR.
 
@@ -117,6 +121,18 @@ Did you use a C-style cast by accident?
   ``nullptr``.
 - You very, very rarely want ``reinterpret_cast``.  Use with great
   caution.
+
+Did you change third-party software?
+====================================
+
+Changes to third-party software (e.g., upgrading to a newer version) are the
+most common cause of CI divergence between Ubuntu and macOS.  For PRs with such
+changes, be sure to opt-in to a pre-merge macOS build.
+
+:ref:`Schedule one on-demand build <run_specific_build>` using an "everything"
+flavor, for example:
+
+* ``@drake-jenkins-bot mac-catalina-clang-bazel-experimental-everything-release please``
 
 Have you run linting tools?
 ===========================

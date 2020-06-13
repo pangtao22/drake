@@ -1,10 +1,16 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <ostream>
+#include <sstream>
+#include <string>
 #include <utility>
 
 #include "drake/common/drake_copyable.h"
+#include "drake/common/hash.h"
 #include "drake/solvers/decision_variable.h"
+#include "drake/solvers/evaluator_base.h"
 
 namespace drake {
 namespace solvers {
@@ -63,10 +69,65 @@ class Binding {
     return vars_.size();
   }
 
+  /**
+   * Returns string representation of Binding.
+   */
+  std::string to_string() const {
+    std::ostringstream os;
+    os << *this;
+    return os.str();
+  }
+
+  /**
+   * Compare two bindings based on their evaluator pointers and the bound
+   * variables.
+   */
+  bool operator==(const Binding<C>& other) const {
+    if (this->evaluator().get() != other.evaluator().get()) {
+      return false;
+    }
+    DRAKE_DEMAND(vars_.rows() == other.vars_.rows());
+    for (int i = 0; i < vars_.rows(); ++i) {
+      if (!vars_(i).equal_to(other.vars_(i))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool operator!=(const Binding<C>& other) const {
+    return !((*this) == (other));
+  }
+
+  /** Implements the @ref hash_append concept. */
+  template <class HashAlgorithm>
+  friend void hash_append(HashAlgorithm& hasher,
+                          const Binding<C>& item) noexcept {
+    using drake::hash_append;
+    const EvaluatorBase* const base = item.evaluator().get();
+    hash_append(hasher, reinterpret_cast<std::uintptr_t>(base));
+    // We follow the pattern in
+    // http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2014/n3980.html#hash_append_vector
+    // to append the hash for a std::vector, first to append all its elements,
+    // and then append the vector size.
+    for (int i = 0; i < item.variables().rows(); ++i) {
+      hash_append(hasher, item.variables()(i));
+    }
+    hash_append(hasher, item.variables().rows());
+  }
+
  private:
   std::shared_ptr<C> evaluator_;
   VectorXDecisionVariable vars_;
 };
+
+/**
+ * Print out the Binding.
+ */
+template <typename C>
+std::ostream& operator<<(std::ostream& os, const Binding<C>& binding) {
+  return binding.evaluator()->Display(os, binding.variables());
+}
 
 namespace internal {
 
@@ -92,3 +153,8 @@ Binding<To> BindingDynamicCast(const Binding<From>& binding) {
 
 }  // namespace solvers
 }  // namespace drake
+
+namespace std {
+template <typename C>
+struct hash<drake::solvers::Binding<C>> : public drake::DefaultHash {};
+}  // namespace std

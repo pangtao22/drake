@@ -1,10 +1,13 @@
+/** @file
+ Doxygen-only documentation for @ref solvers.  */
+
 /** @addtogroup solvers
  * @{
  * Drake's MathematicalProgram class is used to solve the mathematical
  * optimization problem in the following form
  * <pre>
  *   minₓ f(x)
- *   s.t x ∈ S
+ *   s.t x ∈ S.
  * </pre>
  * Depending on the formulation of the objective function f, and the structure
  * of the constraint set S, this optimization problem can be grouped into
@@ -30,18 +33,18 @@
  * When the mathematical problem is formulated as the following linear system
  * <pre>
  * find x
- * s.t Ax = b
+ * s.t Ax = b,
  * </pre>
- * , then @ref drake::solvers::LinearSystemSolver "LinearSystemSolver" provides
+ * then @ref drake::solvers::LinearSystemSolver "LinearSystemSolver" provides
  * efficient closed form solution.
  *
  * When the mathematical problem is formulated as the following (convex)
  * quadratic program with only linear equality constraint
  * <pre>
  * min 0.5 xᵀHx + aᵀx + b
- * s.t Ax = b
+ * s.t Ax = b,
  * </pre>
- * , then @ref drake::solvers::EqualityConstrainedQPSolver
+ * then @ref drake::solvers::EqualityConstrainedQPSolver
  * "EqualityConstraintQPSolver" provides efficient closed form solution.
  *
  * <b>Convex Optimization</b>
@@ -125,7 +128,14 @@
  *    <td align="center">&diams;</td>
  *    <td></td>
  * </tr>
+ * <tr><td> &loz;
+ * @ref drake::solvers::MixedIntegerBranchAndBound "naive branch-and-bound" </td>
+ *    <td align="center">&diams;</td>
+ *    <td align="center">&diams;</td>
+ *    <td align="center">&diams;</td>
+ *    <td align="center">&diams;</td>
  * </table>
+ * &loz; We implement only the basic branch-and-bound algorithm, without cutting planes nor advanced branching heuristics. Its usefulness is likely restricted to small-sized problems with dozens of binary variables.
  *
  * <b>Nonconvex Programming</b>
  *

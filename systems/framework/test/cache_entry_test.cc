@@ -124,8 +124,15 @@ class MySystemBase final : public SystemBase {
                               &MySystemBase::CalcMyVector3,
                               {xc_ticket(), string_entry_.ticket()})) {
     set_name("cache_entry_test_system");
+
+    // We'll make entry4 disabled by default; everything else is enabled.
+    entry4_.disable_caching_by_default();
+
     EXPECT_EQ(num_cache_entries(), 8);
     EXPECT_EQ(GetSystemName(), "cache_entry_test_system");
+
+    EXPECT_FALSE(entry3_.is_disabled_by_default());
+    EXPECT_TRUE(entry4_.is_disabled_by_default());
   }
 
   const CacheEntry& entry0() const { return entry0_; }
@@ -160,8 +167,6 @@ class MySystemBase final : public SystemBase {
     return context;
   }
 
-  void DoCheckValidContext(const ContextBase&) const final {}
-
   std::function<void(const AbstractValue&)> MakeFixInputPortTypeChecker(
       InputPortIndex /* unused */) const final {
     return {};
@@ -171,14 +176,14 @@ class MySystemBase final : public SystemBase {
     throw std::logic_error("GetDirectFeedthroughs is not implemented");
   }
 
-  const CacheEntry& entry0_;
-  const CacheEntry& entry1_;
-  const CacheEntry& entry2_;
-  const CacheEntry& entry3_;
-  const CacheEntry& entry4_;
-  const CacheEntry& entry5_;
-  const CacheEntry& string_entry_;
-  const CacheEntry& vector_entry_;
+  CacheEntry& entry0_;
+  CacheEntry& entry1_;
+  CacheEntry& entry2_;
+  CacheEntry& entry3_;
+  CacheEntry& entry4_;
+  CacheEntry& entry5_;
+  CacheEntry& string_entry_;
+  CacheEntry& vector_entry_;
 };
 
 // An allocator is not permitted to return null. That should be caught when
@@ -215,6 +220,40 @@ GTEST_TEST(CacheEntryAllocTest, EmptyPrerequisiteListForbidden) {
       ".*[Cc]annot create.*empty prerequisites.*nothing_ticket.*");
 }
 
+GTEST_TEST(CacheEntryAllocTest, DetectsDefaultPrerequisites) {
+  MySystemBase system;
+  const CacheEntry& default_prereqs =
+      system.DeclareCacheEntry("default prerequisites", Alloc3, Calc99);
+  EXPECT_TRUE(default_prereqs.has_default_prerequisites());
+
+  // TODO(sherm1) Currently we treat default prerequisites and explicit
+  // all_sources_ticket() the same. That's not desirable though, just a
+  // limitation. Ideally explicit specification of anything should be considered
+  // non-default. Replace this test when that's fixed.
+  const CacheEntry& explicit_default_prereqs =
+      system.DeclareCacheEntry("explicit default prerequisites", Alloc3, Calc99,
+                               {system.all_sources_ticket()});
+  EXPECT_TRUE(
+      explicit_default_prereqs.has_default_prerequisites());  // Not good.
+
+  // This specifies exactly the same dependencies as all_sources_ticket() but
+  // in a way that is clearly non-default.
+  const CacheEntry& long_form_all_sources_prereqs = system.DeclareCacheEntry(
+      "long form all sources prerequisites", Alloc3, Calc99,
+      {system.all_sources_except_input_ports_ticket(),
+       system.all_input_ports_ticket()});
+  EXPECT_FALSE(
+      long_form_all_sources_prereqs.has_default_prerequisites());  // Good!
+
+  const CacheEntry& no_prereqs = system.DeclareCacheEntry(
+      "no prerequisites", Alloc3, Calc99, {system.nothing_ticket()});
+  EXPECT_FALSE(no_prereqs.has_default_prerequisites());
+
+  const CacheEntry& time_only_prereq = system.DeclareCacheEntry(
+      "time only prerequisite", Alloc3, Calc99, {system.time_ticket()});
+  EXPECT_FALSE(time_only_prereq.has_default_prerequisites());
+}
+
 // Allocate a System and Context and provide some convenience methods.
 class CacheEntryTest : public ::testing::Test {
  protected:
@@ -234,6 +273,16 @@ class CacheEntryTest : public ::testing::Test {
     EXPECT_EQ(entry0_tracker.prerequisites().size(), 1);
     EXPECT_EQ(entry0_tracker.prerequisites()[0],
               &context_.get_tracker(system_.all_sources_ticket()));
+
+    // Only entry4 should have been created disabled.
+    EXPECT_FALSE(entry0().is_cache_entry_disabled(context_));
+    EXPECT_FALSE(entry1().is_cache_entry_disabled(context_));
+    EXPECT_FALSE(entry2().is_cache_entry_disabled(context_));
+    EXPECT_FALSE(entry3().is_cache_entry_disabled(context_));
+    EXPECT_TRUE(entry4().is_cache_entry_disabled(context_));
+    EXPECT_FALSE(entry5().is_cache_entry_disabled(context_));
+    EXPECT_FALSE(string_entry().is_cache_entry_disabled(context_));
+    EXPECT_FALSE(vector_entry().is_cache_entry_disabled(context_));
 
     EXPECT_TRUE(entry0().is_out_of_date(context_));
     EXPECT_TRUE(entry1().is_out_of_date(context_));

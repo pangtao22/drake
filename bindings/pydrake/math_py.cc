@@ -8,8 +8,8 @@
 #include "drake/bindings/pydrake/autodiff_types_pybind.h"
 #include "drake/bindings/pydrake/common/cpp_template_pybind.h"
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
-#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/common/type_pack.h"
+#include "drake/bindings/pydrake/common/value_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
 #include "drake/bindings/pydrake/symbolic_types_pybind.h"
@@ -18,6 +18,7 @@
 #include "drake/math/continuous_lyapunov_equation.h"
 #include "drake/math/discrete_algebraic_riccati_equation.h"
 #include "drake/math/discrete_lyapunov_equation.h"
+#include "drake/math/matrix_util.h"
 #include "drake/math/orthonormal_basis.h"
 #include "drake/math/quadratic_form.h"
 #include "drake/math/rigid_transform.h"
@@ -28,6 +29,7 @@
 namespace drake {
 namespace pydrake {
 
+using std::pow;
 using symbolic::Expression;
 
 namespace {
@@ -44,7 +46,7 @@ void DoScalarDependentDefinitions(py::module m, T) {
     // inside drake/math/rigid_transform.h.
     const char* doc_rigid_transform_linear_matrix_deprecation =
         "DO NOT USE! We offer this API for backwards compatibility with "
-        "Isometry3, but it will be removed on or around 2020-04-01. "
+        "Isometry3, but it will be removed on or around 2020-07-01. "
         "See drake issue #9865 for details.";
 
     using Class = RigidTransform<T>;
@@ -104,15 +106,18 @@ void DoScalarDependentDefinitions(py::module m, T) {
         // .def("IsExactlyIdentity", ...)
         // .def("IsIdentityToEpsilon", ...)
         .def("inverse", &Class::inverse, cls_doc.inverse.doc)
-        .def("multiply",
+        .def(
+            "multiply",
             [](const Class* self, const Class& other) { return *self * other; },
             py::arg("other"), cls_doc.operator_mul.doc_1args_other)
-        .def("multiply",
+        .def(
+            "multiply",
             [](const Class* self, const Vector3<T>& p_BoQ_B) {
               return *self * p_BoQ_B;
             },
             py::arg("p_BoQ_B"), cls_doc.operator_mul.doc_1args_p_BoQ_B)
-        .def("multiply",
+        .def(
+            "multiply",
             [](const Class* self, const Matrix3X<T>& p_BoQ_B) {
               return *self * p_BoQ_B;
             },
@@ -131,6 +136,9 @@ void DoScalarDependentDefinitions(py::module m, T) {
     DefCast<T>(&cls, cls_doc.cast.doc);
     // .def("IsNearlyEqualTo", ...)
     // .def("IsExactlyEqualTo", ...)
+    AddValueInstantiation<Class>(m);
+    // Some ports need `Value<std::vector<Class>>`.
+    AddValueInstantiation<std::vector<Class>>(m);
   }
 
   {
@@ -163,13 +171,16 @@ void DoScalarDependentDefinitions(py::module m, T) {
         .def("matrix", &Class::matrix, cls_doc.matrix.doc)
         .def("row", &Class::row, py::arg("index"), cls_doc.row.doc)
         .def("col", &Class::col, py::arg("index"), cls_doc.col.doc)
-        .def("multiply",
+        .def(
+            "multiply",
             [](const Class& self, const Class& other) { return self * other; },
             py::arg("other"), cls_doc.operator_mul.doc_1args_other)
-        .def("multiply",
+        .def(
+            "multiply",
             [](const Class& self, const Vector3<T>& v_B) { return self * v_B; },
             py::arg("v_B"), cls_doc.operator_mul.doc_1args_v_B)
-        .def("multiply",
+        .def(
+            "multiply",
             [](const Class& self, const Matrix3X<T>& v_B) {
               return self * v_B;
             },
@@ -182,7 +193,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
             &Class::IsIdentityToInternalTolerance,
             cls_doc.IsIdentityToInternalTolerance.doc)
         // Does not return the quality_factor
-        .def_static("ProjectToRotationMatrix",
+        .def_static(
+            "ProjectToRotationMatrix",
             [](const Matrix3<T>& M) {
               return RotationMatrix<T>::ProjectToRotationMatrix(M);
             },
@@ -196,6 +208,9 @@ void DoScalarDependentDefinitions(py::module m, T) {
     cls.attr("__matmul__") = cls.attr("multiply");
     DefCopyAndDeepCopy(&cls);
     DefCast<T>(&cls, cls_doc.cast.doc);
+    AddValueInstantiation<Class>(m);
+    // Some ports need `Value<std::vector<Class>>`.
+    AddValueInstantiation<std::vector<Class>>(m);
   }
 
   {
@@ -274,7 +289,8 @@ void DoScalarIndependentDefinitions(py::module m) {
   using T = double;
   m.def("wrap_to", &wrap_to<T, T>, py::arg("value"), py::arg("low"),
       py::arg("high"), doc.wrap_to.doc);
-  m.def("ComputeBasisFromAxis",
+  m.def(
+      "ComputeBasisFromAxis",
       [](int axis_index, const Vector3<T>& axis) {
         return ComputeBasisFromAxis(axis_index, axis);
       },
@@ -296,7 +312,8 @@ void DoScalarIndependentDefinitions(py::module m) {
           doc.BarycentricMesh.get_mesh_point.doc_1args)
       .def("get_all_mesh_points", &BarycentricMesh<T>::get_all_mesh_points,
           doc.BarycentricMesh.get_all_mesh_points.doc)
-      .def("EvalBarycentricWeights",
+      .def(
+          "EvalBarycentricWeights",
           [](const BarycentricMesh<T>* self,
               const Eigen::Ref<const VectorX<T>>& input) {
             const int n = self->get_num_interpolants();
@@ -314,6 +331,29 @@ void DoScalarIndependentDefinitions(py::module m) {
       .def("MeshValuesFrom", &BarycentricMesh<T>::MeshValuesFrom,
           doc.BarycentricMesh.MeshValuesFrom.doc);
 
+  // Matrix Util.
+  m  // BR
+      .def(
+          "IsSymmetric",
+          [](const Eigen::Ref<const MatrixX<T>>& matrix) {
+            return IsSymmetric(matrix);
+          },
+          py::arg("matrix"), doc.IsSymmetric.doc_1args)
+      .def(
+          "IsSymmetric",
+          [](const Eigen::Ref<const MatrixX<T>>& matrix, const T& precision) {
+            return IsSymmetric(matrix, precision);
+          },
+          py::arg("matrix"), py::arg("precision"), doc.IsSymmetric.doc_2args)
+      .def(
+          "IsPositiveDefinite",
+          [](const Eigen::Ref<const Eigen::MatrixXd>& matrix,
+              double tolerance) {
+            return IsPositiveDefinite(matrix, tolerance);
+          },
+          py::arg("matrix"), py::arg("tolerance") = 0.0,
+          doc.IsPositiveDefinite.doc);
+
   // Quadratic Form.
   m  // BR
       .def("DecomposePSDmatrixIntoXtransposeTimesX",
@@ -321,7 +361,9 @@ void DoScalarIndependentDefinitions(py::module m) {
           py::arg("zero_tol"), doc.DecomposePSDmatrixIntoXtransposeTimesX.doc)
       .def("DecomposePositiveQuadraticForm", &DecomposePositiveQuadraticForm,
           py::arg("Q"), py::arg("b"), py::arg("c"), py::arg("tol") = 0,
-          doc.DecomposePositiveQuadraticForm.doc);
+          doc.DecomposePositiveQuadraticForm.doc)
+      .def("BalanceQuadraticForms", &BalanceQuadraticForms, py::arg("S"),
+          py::arg("P"), doc.BalanceQuadraticForms.doc);
 
   // Riccati and Lyapunov Equations.
   m  // BR
@@ -359,8 +401,9 @@ void DoScalarIndependentDefinitions(py::module m) {
       .def("asin", [](double x) { return asin(x); })
       .def("acos", [](double x) { return acos(x); })
       .def("atan", [](double x) { return atan(x); })
-      .def("atan2", [](double y, double x) { return atan2(y, x); },
-          py::arg("y"), py::arg("x"))
+      .def(
+          "atan2", [](double y, double x) { return atan2(y, x); }, py::arg("y"),
+          py::arg("x"))
       .def("sinh", [](double x) { return sinh(x); })
       .def("cosh", [](double x) { return cosh(x); })
       .def("tanh", [](double x) { return tanh(x); })

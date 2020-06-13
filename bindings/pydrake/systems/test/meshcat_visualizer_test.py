@@ -20,12 +20,18 @@ import meshcat
 import numpy as np
 
 from pydrake.common import FindResourceOrThrow
-from pydrake.geometry import Box, SceneGraph
+from pydrake.common.value import AbstractValue
+from pydrake.geometry import (
+    Box,
+    GeometryInstance,
+    IllustrationProperties,
+    SceneGraph
+)
 from pydrake.multibody.plant import (
     AddMultibodyPlantSceneGraph)
 from pydrake.multibody.parsing import Parser
 from pydrake.systems.analysis import Simulator
-from pydrake.systems.framework import AbstractValue, DiagramBuilder
+from pydrake.systems.framework import DiagramBuilder
 from pydrake.systems.meshcat_visualizer import (
     MeshcatVisualizer,
     MeshcatContactVisualizer,
@@ -51,7 +57,7 @@ class TestMeshcat(unittest.TestCase):
             "drake/examples/multibody/cart_pole/cart_pole.sdf")
 
         builder = DiagramBuilder()
-        cart_pole, scene_graph = AddMultibodyPlantSceneGraph(builder)
+        cart_pole, scene_graph = AddMultibodyPlantSceneGraph(builder, 0.0)
         Parser(plant=cart_pole).AddModelFromFile(file_name)
         cart_pole.Finalize()
         assert cart_pole.geometry_source_is_registered()
@@ -77,7 +83,17 @@ class TestMeshcat(unittest.TestCase):
 
         simulator = Simulator(diagram, diagram_context)
         simulator.set_publish_every_time_step(False)
+        visualizer.start_recording()
         simulator.AdvanceTo(.1)
+        visualizer.stop_recording()
+        # Should have animation "clips" for both bodies.
+        # See https://github.com/rdeits/meshcat-python/blob/c4ef22c84336d6a8eaab682f73bb47cfca5d5779/src/meshcat/animation.py#L100  # noqa
+        self.assertEqual(len(visualizer._animation.clips), 2)
+        # After .1 seconds, we should have had 4 publish events.
+        self.assertEqual(visualizer._recording_frame_num, 4)
+        visualizer.publish_recording()
+        visualizer.reset_recording()
+        self.assertEqual(len(visualizer._animation.clips), 0)
 
     def test_kuka(self):
         """Kuka IIWA with mesh geometry."""
@@ -85,7 +101,7 @@ class TestMeshcat(unittest.TestCase):
             "drake/manipulation/models/iiwa_description/sdf/"
             "iiwa14_no_collision.sdf")
         builder = DiagramBuilder()
-        kuka, scene_graph = AddMultibodyPlantSceneGraph(builder)
+        kuka, scene_graph = AddMultibodyPlantSceneGraph(builder, 0.0)
         Parser(plant=kuka).AddModelFromFile(file_name)
         kuka.Finalize()
 
@@ -125,7 +141,7 @@ class TestMeshcat(unittest.TestCase):
         non-default / non-world model instance).
         """
         builder = DiagramBuilder()
-        mbp, scene_graph = AddMultibodyPlantSceneGraph(builder)
+        mbp, scene_graph = AddMultibodyPlantSceneGraph(builder, 0.0)
         world_body = mbp.world_body()
         box_shape = Box(1., 2., 3.)
         # This rigid body will be added to the world model instance since
@@ -156,6 +172,33 @@ class TestMeshcat(unittest.TestCase):
         simulator = Simulator(diagram)
         simulator.set_publish_every_time_step(False)
         simulator.AdvanceTo(.1)
+
+    def test_custom_geometry_name_parsing(self):
+        """
+        Ensure that name parsing does not fail on programmatically added
+        anchored geometries.
+        """
+        # Make a minimal example to ensure MeshcatVisualizer loads anchored
+        # geometry.
+        builder = DiagramBuilder()
+        scene_graph = builder.AddSystem(SceneGraph())
+        meshcat = builder.AddSystem(
+            MeshcatVisualizer(scene_graph,
+                              zmq_url=ZMQ_URL,
+                              open_browser=False))
+        builder.Connect(
+            scene_graph.get_pose_bundle_output_port(),
+            meshcat.get_input_port(0))
+
+        source_id = scene_graph.RegisterSource()
+        geom_inst = GeometryInstance(RigidTransform(), Box(1., 1., 1.), "box")
+        geom_id = scene_graph.RegisterAnchoredGeometry(source_id, geom_inst)
+        # Illustration properties required to ensure geometry is parsed
+        scene_graph.AssignRole(source_id, geom_id, IllustrationProperties())
+
+        diagram = builder.Build()
+        simulator = Simulator(diagram)
+        simulator.Initialize()
 
     def test_contact_force(self):
         """A block sitting on a table."""
@@ -280,7 +323,7 @@ class TestMeshcat(unittest.TestCase):
             if use_native:
                 viz = meshcat.Visualizer(zmq_url=ZMQ_URL)
             else:
-                plant, scene_graph = AddMultibodyPlantSceneGraph(builder)
+                plant, scene_graph = AddMultibodyPlantSceneGraph(builder, 0.0)
                 plant.Finalize()
                 viz = builder.AddSystem(MeshcatVisualizer(
                     scene_graph, zmq_url=ZMQ_URL, open_browser=False))
