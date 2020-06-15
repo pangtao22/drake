@@ -242,8 +242,8 @@ PYBIND11_MODULE(trajectories, m) {
         py::arg("t"), doc.PiecewiseQuaternionSlerp.angular_velocity.doc)
     .def("angular_acceleration", &PiecewiseQuaternionSlerp<T>::angular_acceleration,
         py::arg("t"), doc.PiecewiseQuaternionSlerp.angular_acceleration.doc)
-    .def("get_quaternion_knots", &PiecewiseQuaternionSlerp<T>::get_quaternion_knots,
-        doc.PiecewiseQuaternionSlerp.get_quaternion_knots.doc)
+    .def("get_quaternion_samples", &PiecewiseQuaternionSlerp<T>::get_quaternion_samples,
+        doc.PiecewiseQuaternionSlerp.get_quaternion_samples.doc)
     .def("is_approx", &PiecewiseQuaternionSlerp<T>::is_approx,
         py::arg("other"), py::arg("tol"), doc.PiecewiseQuaternionSlerp.is_approx.doc);
 }

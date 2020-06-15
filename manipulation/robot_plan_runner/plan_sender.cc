@@ -43,7 +43,7 @@ ConnectTwoPositionsWithCubicPolynomial(
   q_knots.col(1) << (q_start + q_end) / 2;
   q_knots.col(2) << q_end;
 
-  return trajectories::PiecewisePolynomial<double>::Cubic(
+  return trajectories::PiecewisePolynomial<double>::CubicWithContinuousSecondDerivatives(
       t_knots, q_knots, Eigen::VectorXd::Zero(7), Eigen::VectorXd::Zero(7));
 }
 
