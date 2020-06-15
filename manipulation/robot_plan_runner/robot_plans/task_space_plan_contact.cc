@@ -117,9 +117,6 @@ void TaskSpacePlanContact::Step(
     prog->AddLinearConstraint(
         -(J_u_pinv.array() * joint_stiffness_).matrix().transpose(),
         -std::numeric_limits<double>::infinity(), f_desired, dq);
-
-//    prog->AddLinearConstraint(J_u / control_period,
-//                              -std::numeric_limits<double>::infinity(), 0, dq);
   }
   // tracking error cost
   prog->AddL2NormCost(Jt / control_period, x_dot_desired_, dq);
