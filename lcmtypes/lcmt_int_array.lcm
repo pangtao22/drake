@@ -1,0 +1,7 @@
+package drake;
+
+struct lcmt_int_array {
+    int64_t  timestamp;
+    int32_t  num_values;
+    int32_t  values[num_values];
+}
