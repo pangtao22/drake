@@ -301,7 +301,7 @@ drake_lcm_cc_library(
     lcm_package = "drake",
     lcm_srcs = [
         "lcmt_contact_info.lcm",
-        "lcmt_int_array.lcm",
+        "lcmt_contact_discrimination.lcm",
     ],
 )
 

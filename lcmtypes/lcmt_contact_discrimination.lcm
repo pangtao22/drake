@@ -1,0 +1,17 @@
+package drake;
+
+struct lcmt_contact_discrimination {
+    int64_t  timestamp;
+    int32_t  num_links;
+    int32_t  num_per_link;
+    int32_t  max_num_small_cost_per_link;
+    int32_t  max_num_converged_per_link;
+
+    double   optimal_cost[num_links][num_per_link];
+
+    int32_t  num_small_cost_per_link[num_links];
+    int32_t  small_cost_indices[num_links][max_num_small_cost_per_link];
+
+    int32_t  num_converged_per_link[num_links];
+    double   points_L[num_links][max_num_converged_per_link][3];
+}
