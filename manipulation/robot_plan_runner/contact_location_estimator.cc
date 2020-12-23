@@ -21,7 +21,7 @@ ContactLocationEstimator::ContactLocationEstimator()
       3, update_period_, w_cutoff_);
 
   abstract_state_index_ = this->DeclareAbstractState(
-      AbstractValue::Make<ContactInfo>(ContactInfo()));
+      *AbstractValue::Make<ContactInfo>(ContactInfo()));
 
   this->DeclareAbstractInputPort("lcmt_contact_info",
                                  Value<lcmt_contact_info>{});

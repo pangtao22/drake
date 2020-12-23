@@ -163,9 +163,9 @@ void PlanRunnerHardwareInterface::Run(double realtime_rate) {
     // Fix the contact_info input port to some fixed value.
     auto& plan_runner_sub_context = diagram_->GetMutableSubsystemContext(
         *plan_runner_, &simulator.get_mutable_context());
-    auto port_idx = plan_runner_->GetInputPort("contact_info").get_index();
-    plan_runner_sub_context.FixInputPort(
-        port_idx, AbstractValue::Make<robot_plans::ContactInfo>(
+    plan_runner_->GetInputPort("contact_info").FixValue(
+      &plan_runner_sub_context, 
+      *AbstractValue::Make<robot_plans::ContactInfo>(
                       robot_plans::ContactInfo()));
   }
 

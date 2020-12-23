@@ -57,7 +57,7 @@ PlanSender::PlanSender(const std::vector<PlanData>& plan_data_list)
   // Declare a state that does not get changed. It exists so that an abstract
   // dependency ticket can be declared.
   abstract_state_index_ =
-      this->DeclareAbstractState(AbstractValue::Make<int>(1));
+      this->DeclareAbstractState(*AbstractValue::Make<int>(1));
 
   // Input and output ports.
   this->DeclareAbstractOutputPort(
