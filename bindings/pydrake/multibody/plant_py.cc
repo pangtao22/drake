@@ -128,7 +128,10 @@ void DoScalarDependentDefinitions(py::module m, T) {
         .def("num_hydroelastic_contacts", &Class::num_hydroelastic_contacts,
             cls_doc.num_hydroelastic_contacts.doc)
         .def("hydroelastic_contact_info", &Class::hydroelastic_contact_info,
-            py::arg("i"), cls_doc.hydroelastic_contact_info.doc);
+            py::arg("i"), cls_doc.hydroelastic_contact_info.doc)
+        .def("AddContactInfo",
+            py::overload_cast<const PointPairContactInfo<T>&>(
+                &Class::AddContactInfo));
     DefCopyAndDeepCopy(&cls);
     AddValueInstantiation<Class>(m);
   }
