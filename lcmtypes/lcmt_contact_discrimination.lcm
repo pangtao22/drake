@@ -15,4 +15,5 @@ struct lcmt_contact_discrimination {
     int32_t  num_converged_per_link[num_links];
     int32_t  converged_indices[num_links][max_num_converged_per_link];
     double   points_L[num_links][max_num_converged_per_link][3];
+    double   normals_L[num_links][max_num_converged_per_link][3];
 }
