@@ -34,10 +34,10 @@ set(UNIX_DISTRIBUTION_ID)
 set(UNIX_DISTRIBUTION_CODENAME)
 
 if(APPLE)
-  if(CMAKE_SYSTEM_VERSION VERSION_LESS 18)
+  if(CMAKE_SYSTEM_VERSION VERSION_LESS 19)
     message(FATAL_ERROR
       "Darwin ${CMAKE_SYSTEM_VERSION} is NOT supported. Please use Darwin "
-      "18.x (macOS Mojave) or Darwin 19.x (macOS Catalina)."
+      "Darwin 19.x (macOS Catalina)."
     )
   endif()
 else()
@@ -91,7 +91,7 @@ endif()
 
 # The version passed to find_package(Bazel) should match the
 # minimum_bazel_version value in the call to versions.check() in WORKSPACE.
-set(MINIMUM_BAZEL_VERSION 2.0)
+set(MINIMUM_BAZEL_VERSION 3.0)
 find_package(Bazel ${MINIMUM_BAZEL_VERSION} MODULE REQUIRED)
 
 get_filename_component(C_COMPILER_REALPATH "${CMAKE_C_COMPILER}" REALPATH)
@@ -108,10 +108,9 @@ endif()
 
 # The minimum compiler versions should match those listed in both
 # doc/developers.rst and tools/workspace/cc/repository.bzl.
-# TODO(jwnimmer-tri) On 2020-07-01 update GCC min to 7.5 here and in the bzl.
 set(MINIMUM_APPLE_CLANG_VERSION 11)
-set(MINIMUM_CLANG_VERSION 6)
-set(MINIMUM_GNU_VERSION 7.4)
+set(MINIMUM_CLANG_VERSION 9)
+set(MINIMUM_GNU_VERSION 7.5)
 
 if(CMAKE_C_COMPILER_ID STREQUAL AppleClang)
   if(CMAKE_C_COMPILER_VERSION VERSION_LESS ${MINIMUM_APPLE_CLANG_VERSION})

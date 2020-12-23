@@ -27,13 +27,17 @@ namespace kinova_jaco {
 /// SDK to values appropriate for the finger joints in the Jaco description
 /// (see jaco_constants.h.)
 //
-/// @system{ JacoStatusReceiver,
-///   @input_port{lcmt_jaco_status},
-///   @output_port{state}
-///   @output_port{torque}
-///   @output_port{torque_external}
-///   @output_port{current}
-/// }
+/// @system
+/// name: JacoStatusReceiver
+/// input_ports:
+/// - lcmt_jaco_status
+/// output_ports:
+/// - state
+/// - torque
+/// - torque_external
+/// - current
+/// @endsystem
+///
 /// @see `lcmt_jaco_status.lcm` for additional documentation.
 class JacoStatusReceiver : public systems::LeafSystem<double> {
  public:
@@ -44,7 +48,6 @@ class JacoStatusReceiver : public systems::LeafSystem<double> {
 
   /// @name Named accessors for this System's input and output ports.
   //@{
-  const systems::InputPort<double>& get_input_port() const;
   const systems::OutputPort<double>& get_state_output_port() const;
   const systems::OutputPort<double>& get_torque_output_port() const;
   const systems::OutputPort<double>& get_torque_external_output_port() const;

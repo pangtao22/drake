@@ -9,11 +9,11 @@ from pydrake.common.test_utilities.deprecation import catch_drake_warnings
 _TEST_MODULE = "cpp_template_test"
 
 
-class DummyA(object):
+class DummyA:
     pass
 
 
-class DummyB(object):
+class DummyB:
     pass
 
 
@@ -25,7 +25,7 @@ def dummy_b():
     return 2
 
 
-class DummyC(object):
+class DummyC:
     def dummy_c(self):
         return (self, 3)
 
@@ -33,7 +33,7 @@ class DummyC(object):
         return (self, 4)
 
 
-class DummyD(object):
+class DummyD:
     pass
 
 
@@ -101,12 +101,12 @@ class TestCppTemplate(unittest.TestCase):
         template.add_instantiation(int, 1)
         template.add_instantiation(float, 2)
         instantiation, param = template.deprecate_instantiation(
-            int, "Example deprecation")
+            int, "Example deprecation", date="2038-01-19")
         self.assertEqual(instantiation, 1)
         self.assertEqual(param, (int,))
         with catch_drake_warnings(expected_count=1) as w:
             self.assertEqual(template[int], 1)
-        self.assertEqual(str(w[0].message), "Example deprecation")
+        self.assertIn("Example deprecation", str(w[0].message))
         # There should be no deprecations for other types.
         self.assertEqual(template[float], 2)
         # Double-deprecating should raise an error.
@@ -141,7 +141,7 @@ class TestCppTemplate(unittest.TestCase):
             # Ensure that we have deferred evaluation.
             test.assertEqual(MyTemplate.param_list, [(int,), (float,)])
 
-            class Impl(object):
+            class Impl:
                 def __init__(self):
                     self.T = T
                     self.mangled_result = self.__mangled_method()

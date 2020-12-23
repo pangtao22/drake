@@ -39,7 +39,13 @@ namespace systems {
 /// unstable since the time interval `t-n*h` could be arbitrarily close to
 /// zero. Prefer the discrete-time implementation for robustness.
 ///
-/// @system{ DiscreteDerivative, @input_port{u}, @output_port{dudt} }
+/// @system
+/// name: DiscreteDerivative
+/// input_ports:
+/// - u
+/// output_ports:
+/// - dudt
+/// @endsystem
 ///
 /// @tparam_default_scalar
 /// @ingroup primitive_systems
@@ -92,14 +98,6 @@ class DiscreteDerivative final : public LeafSystem<T> {
     set_input_history(&context->get_mutable_state(), u, u);
   }
 
-  const systems::InputPort<T>& get_input_port() const {
-    return System<T>::get_input_port(0);
-  }
-
-  const systems::OutputPort<T>& get_output_port() const {
-    return System<T>::get_output_port(0);
-  }
-
   double time_step() const { return time_step_; }
 
   /// Returns the `suppress_initial_transient` passed to the constructor.
@@ -134,10 +132,13 @@ class DiscreteDerivative final : public LeafSystem<T> {
 ///                 └────────────┘
 /// ```
 ///
-/// @system{ StateInterpolatorWithDiscreteDerivative,
-///          @input_port{position},
-///          @output_port{state}
-/// }
+/// @system
+/// name: StateInterpolatorWithDiscreteDerivative
+/// input_ports:
+/// - position
+/// output_ports:
+/// - state
+/// @endsystem
 ///
 /// @tparam_default_scalar
 /// @ingroup primitive_systems
@@ -154,14 +155,6 @@ class StateInterpolatorWithDiscreteDerivative final : public Diagram<T> {
 
   /// Returns the `suppress_initial_transient` passed to the constructor.
   bool suppress_initial_transient() const;
-
-  const systems::InputPort<T>& get_input_port() const {
-    return System<T>::get_input_port(0);
-  }
-
-  const systems::OutputPort<T>& get_output_port() const {
-    return System<T>::get_output_port(0);
-  }
 
   /// Convenience method that sets the entire position history for the
   /// discrete-time derivative to a constant vector value (resulting in

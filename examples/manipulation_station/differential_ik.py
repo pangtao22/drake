@@ -1,3 +1,6 @@
+import numpy as np
+
+from pydrake.common.eigen_geometry import AngleAxis
 from pydrake.manipulation.planner import DoDifferentialInverseKinematics
 from pydrake.math import RigidTransform, RollPitchYaw
 from pydrake.systems.framework import BasicVector, LeafSystem, PortDataType
@@ -11,9 +14,12 @@ class DifferentialIK(LeafSystem):
     initialize the initial position commands to match the initial
     configuration of the robot.
 
-    @system{
-      @input_port{X_WE_desired},
-      @output_port{joint_position_desired}
+    System YAML
+        name: DifferentialIK
+        input_ports:
+        - X_WE_desired
+        output_ports:
+        - joint_position_desired
     """
     def __init__(self, robot, frame_E, parameters, time_step):
         """

@@ -8,6 +8,7 @@
 #include "drake/common/text_logging.h"
 #include "drake/systems/framework/subvector.h"
 #include "drake/systems/framework/system_constraint.h"
+#include "drake/systems/framework/system_visitor.h"
 
 namespace drake {
 namespace systems {
@@ -23,6 +24,56 @@ std::vector<const systems::System<T>*> Diagram<T>::GetSystems() const {
     result.push_back(system.get());
   }
   return result;
+}
+
+template <typename T>
+void Diagram<T>::Accept(SystemVisitor<T>* v) const {
+  DRAKE_DEMAND(v);
+  v->VisitDiagram(*this);
+}
+
+template <typename T>
+const std::map<typename Diagram<T>::InputPortLocator,
+               typename Diagram<T>::OutputPortLocator>&
+Diagram<T>::connection_map() const {
+  return connection_map_;
+}
+
+template <typename T>
+std::vector<typename Diagram<T>::InputPortLocator>
+Diagram<T>::GetInputPortLocators(
+    InputPortIndex port_index) const {
+  DRAKE_DEMAND(port_index >= 0 && port_index < this->num_input_ports());
+  std::vector<typename Diagram<T>::InputPortLocator> result;
+  for (const auto& map_pair : input_port_map_) {
+    if (map_pair.second == port_index) {
+      result.push_back(map_pair.first);
+    }
+  }
+  return result;
+}
+
+template <typename T>
+typename Diagram<T>::InputPortLocator
+Diagram<T>::GetArbitraryInputPortLocator(InputPortIndex port_index) const {
+  DRAKE_DEMAND(port_index >= 0 && port_index < this->num_input_ports());
+  const auto ids = GetInputPortLocators(port_index);
+  DRAKE_ASSERT(!ids.empty());
+  return ids[0];
+}
+
+template <typename T>
+typename Diagram<T>::InputPortLocator
+Diagram<T>::get_input_port_locator(InputPortIndex port_index) const {
+  return GetArbitraryInputPortLocator(port_index);
+}
+
+template <typename T>
+const typename Diagram<T>::OutputPortLocator&
+Diagram<T>::get_output_port_locator(OutputPortIndex port_index) const {
+  DRAKE_DEMAND(port_index >= 0 &&
+               port_index < static_cast<int>(output_port_ids_.size()));
+  return output_port_ids_[port_index];
 }
 
 template <typename T>
@@ -463,13 +514,14 @@ void Diagram<T>::GetGraphvizFragment(int max_depth,
   //    actually service that port.  These edges are highlighted in blue
   //    (input) and green (output), matching the port nodes.
   for (int i = 0; i < this->num_input_ports(); ++i) {
-    const auto& port_id = input_port_ids_[i];
-    this->GetGraphvizInputPortToken(this->get_input_port(i), max_depth,
-                                    dot);
-    *dot << " -> ";
-    port_id.first->GetGraphvizInputPortToken(
-        port_id.first->get_input_port(port_id.second), max_depth - 1, dot);
-    *dot << " [color=blue];" << std::endl;
+    for (const auto& port_id : GetInputPortLocators(InputPortIndex(i))) {
+      this->GetGraphvizInputPortToken(this->get_input_port(i), max_depth,
+                                      dot);
+      *dot << " -> ";
+      port_id.first->GetGraphvizInputPortToken(
+          port_id.first->get_input_port(port_id.second), max_depth - 1, dot);
+      *dot << " [color=blue];" << std::endl;
+    }
   }
 
   for (int i = 0; i < this->num_output_ports(); ++i) {
@@ -828,8 +880,8 @@ void Diagram<T>::DoCalcNextUpdateTime(const Context<T>& context,
 template <typename T>
 std::unique_ptr<AbstractValue> Diagram<T>::DoAllocateInput(
     const InputPort<T>& input_port) const {
-  // Ask the subsystem to perform the allocation.
-  const InputPortLocator& id = input_port_ids_[input_port.get_index()];
+  // Ask an arbitrary connected subsystem to perform the allocation.
+  const auto id = GetArbitraryInputPortLocator(input_port.get_index());
   const System<T>* subsystem = id.first;
   const InputPortIndex subindex = id.second;
   return subsystem->AllocateInputAbstract(
@@ -881,9 +933,10 @@ std::unique_ptr<ContextBase> Diagram<T>::DoAllocateContext() const {
   // Subscribe the child subsystem's input port to its parent Diagram's input
   // port on which it depends.
   for (InputPortIndex i(0); i < this->num_input_ports(); ++i) {
-    const InputPortLocator& id = input_port_ids_[i];
-    context->SubscribeExportedInputPortToDiagramPort(
-        i, ConvertToContextPortIdentifier(id));
+    for (const auto& id : GetInputPortLocators(i)) {
+      context->SubscribeExportedInputPortToDiagramPort(
+          i, ConvertToContextPortIdentifier(id));
+    }
   }
 
   // Diagram-external output ports are exported from child subsystem output
@@ -910,10 +963,8 @@ const AbstractValue* Diagram<T>::EvalConnectedSubsystemInputPort(
 
   // Find if this input port is exported (connected to an input port of this
   // containing diagram).
-  // TODO(sherm1) Fix this. Shouldn't have to search.
-  const auto external_it =
-      std::find(input_port_ids_.begin(), input_port_ids_.end(), id);
-  const bool is_exported = (external_it != input_port_ids_.end());
+  const auto external_it = input_port_map_.find(id);
+  const bool is_exported = (external_it != input_port_map_.end());
 
   // Find if this input port is connected to an output port.
   // TODO(sherm1) Fix this. Shouldn't have to search.
@@ -928,7 +979,7 @@ const AbstractValue* Diagram<T>::EvalConnectedSubsystemInputPort(
   if (is_exported) {
     // The upstream source is an input to this whole Diagram; evaluate that
     // input port and use the result as the value for this one.
-    const InputPortIndex i(external_it - input_port_ids_.begin());
+    const InputPortIndex i = external_it->second;
     return this->EvalAbstractInput(diagram_context, i);
   }
 
@@ -959,7 +1010,9 @@ bool Diagram<T>::DiagramHasDirectFeedthrough(int input_port, int output_port)
   DRAKE_ASSERT(output_port >= 0);
   DRAKE_ASSERT(output_port < this->num_output_ports());
 
-  const InputPortLocator& target_input_id = input_port_ids_[input_port];
+  const auto input_ids = GetInputPortLocators(InputPortIndex(input_port));
+  std::set<InputPortLocator> target_input_ids(input_ids.begin(),
+                                              input_ids.end());
 
   // Search the graph for a direct-feedthrough connection from the output_port
   // back to the input_port. Maintain a set of the output port identifiers
@@ -974,7 +1027,7 @@ bool Diagram<T>::DiagramHasDirectFeedthrough(int input_port, int output_port)
     for (InputPortIndex i(0); i < sys->num_input_ports(); ++i) {
       if (sys->HasDirectFeedthrough(i, current_output_id.second)) {
         const InputPortLocator curr_input_id(sys, i);
-        if (curr_input_id == target_input_id) {
+        if (target_input_ids.count(curr_input_id)) {
           // We've found a direct-feedthrough path to the input_port.
           return true;
         } else {
@@ -1205,16 +1258,17 @@ Diagram<T>::ConvertScalarType() const {
 
   // Set up the blueprint.
   auto blueprint = std::make_unique<typename Diagram<NewType>::Blueprint>();
-  // Make all the inputs and outputs.
-  for (const InputPortLocator& id : input_port_ids_) {
-    const System<NewType>* new_system = old_to_new_map[id.first];
-    const InputPortIndex port = id.second;
-    blueprint->input_port_ids.emplace_back(new_system, port);
+  // Make all the inputs, preserving index assignments.
+  for (int k = 0; k < this->num_input_ports(); k++) {
+    const auto name = this->get_input_port(k).get_name();
+    for (const auto id : GetInputPortLocators(InputPortIndex(k))) {
+      const System<NewType>* new_system = old_to_new_map[id.first];
+      const InputPortIndex port = id.second;
+      blueprint->input_port_ids.emplace_back(new_system, port);
+      blueprint->input_port_names.emplace_back(name);
+    }
   }
-  for (InputPortIndex i{0}; i < this->num_input_ports(); i++) {
-    blueprint->input_port_names.emplace_back(
-        this->get_input_port(i).get_name());
-  }
+  // Make all the outputs.
   for (const OutputPortLocator& id : output_port_ids_) {
     const System<NewType>* new_system = old_to_new_map[id.first];
     const OutputPortIndex port = id.second;
@@ -1313,9 +1367,9 @@ void Diagram<T>::Initialize(std::unique_ptr<Blueprint> blueprint) {
   // We must not already own any subsystems.
   DRAKE_DEMAND(registered_systems_.empty());
 
-  // Move the data from the blueprint into private member variables.
+  // Move the corresponding data from the blueprint into private member
+  // variables.
   connection_map_ = std::move(blueprint->connection_map);
-  input_port_ids_ = std::move(blueprint->input_port_ids);
   output_port_ids_ = std::move(blueprint->output_port_ids);
   registered_systems_ = std::move(blueprint->systems);
 
@@ -1350,12 +1404,12 @@ void Diagram<T>::Initialize(std::unique_ptr<Blueprint> blueprint) {
   DRAKE_THROW_UNLESS(NamesAreUniqueAndNonEmpty());
 
   // Add the inputs to the Diagram topology, and check their invariants.
-  DRAKE_DEMAND(input_port_ids_.size() ==
+  DRAKE_DEMAND(blueprint->input_port_ids.size() ==
                blueprint->input_port_names.size());
   std::vector<std::string>::iterator name_iter =
       blueprint->input_port_names.begin();
-  for (const InputPortLocator& id : input_port_ids_) {
-    ExportInput(id, *name_iter++);
+  for (const InputPortLocator& id : blueprint->input_port_ids) {
+    ExportOrConnectInput(id, *name_iter++);
   }
   DRAKE_DEMAND(output_port_ids_.size() ==
                blueprint->output_port_names.size());
@@ -1396,17 +1450,23 @@ void Diagram<T>::Initialize(std::unique_ptr<Blueprint> blueprint) {
 }
 
 template <typename T>
-void Diagram<T>::ExportInput(const InputPortLocator& port, std::string name) {
+void Diagram<T>::ExportOrConnectInput(
+    const InputPortLocator& port, std::string name) {
   const System<T>* const sys = port.first;
   const int port_index = port.second;
   // Fail quickly if this system is not part of the diagram.
   GetSystemIndexOrAbort(sys);
 
-  // Add this port to our externally visible topology.
-  const auto& subsystem_input_port = sys->get_input_port(port_index);
-  this->DeclareInputPort(
-      std::move(name), subsystem_input_port.get_data_type(),
-      subsystem_input_port.size(), subsystem_input_port.get_random_type());
+  if (this->HasInputPort(name)) {
+    input_port_map_[port] = this->GetInputPort(name).get_index();
+  } else {
+    // Add this port to our externally visible topology.
+    const auto& subsystem_input_port = sys->get_input_port(port_index);
+    const InputPort<T>& new_port = this->DeclareInputPort(
+        std::move(name), subsystem_input_port.get_data_type(),
+        subsystem_input_port.size(), subsystem_input_port.get_random_type());
+    input_port_map_[port] = new_port.get_index();
+  }
 }
 
 template <typename T>

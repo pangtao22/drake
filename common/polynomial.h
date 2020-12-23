@@ -15,7 +15,6 @@
 #include "drake/common/autodiff.h"
 #include "drake/common/default_scalars.h"
 #include "drake/common/drake_assert.h"
-#include "drake/common/drake_deprecated.h"
 #include "drake/common/symbolic.h"
 
 namespace drake {
@@ -404,13 +403,6 @@ class Polynomial {
       const Polynomial<T>& other, const RealScalar& tol = 0.0,
       const ToleranceType& tol_type = ToleranceType::kAbsolute) const;
 
-  DRAKE_DEPRECATED("2020-08-01",
-                   "Use CoefficientsAlmostEqual with tol_type=kRelative "
-                   "instead of IsApprox.")
-  boolean<T> IsApprox(const Polynomial<T>& other, const RealScalar& tol) const {
-    return CoefficientsAlmostEqual(other, tol, ToleranceType::kRelative);
-  }
-
   /** Constructs a Polynomial representing the symbolic expression `e`.
    * Note that the ID of a variable is preserved in this translation.
    *
@@ -517,20 +509,6 @@ std::ostream& operator<<(
   return os;
 }
 
-#ifndef DRAKE_DOXYGEN_CXX
-namespace symbolic {
-namespace internal {
-// Helper to implement (deprecated) Expression::ToPolynomial.
-// TODO(soonho-tri): Remove this on or after 2020-07-01 when we remove
-// Expression::ToPolynomial.
-inline drake::Polynomial<double> ToPolynomial(
-    const drake::symbolic::Expression& e, const ToPolynomialHelperTag&) {
-  return drake::Polynomial<double>::FromExpression(e);
-}
-}  // namespace internal
-}  // namespace symbolic
-#endif
-
 typedef Polynomial<double> Polynomiald;
 
 /// A column vector of polynomials; used in several optimization classes.
@@ -539,21 +517,3 @@ typedef Eigen::Matrix<Polynomiald, Eigen::Dynamic, 1> VectorXPoly;
 
 DRAKE_DECLARE_CLASS_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_SCALARS(
     class drake::Polynomial)
-
-/** Provides power function for Polynomial. */
-template <typename T>
-DRAKE_DEPRECATED("2020-07-01", "Use drake::pow instead.")
-drake::Polynomial<T> pow(const drake::Polynomial<T>& base,
-                         typename drake::Polynomial<T>::PowerType exponent) {
-  return drake::pow(base, exponent);
-}
-
-template <typename T = double>
-using Polynomial DRAKE_DEPRECATED(
-    "2020-07-01", "Use drake::Polynomial instead.") = drake::Polynomial<T>;
-
-using Polynomiald DRAKE_DEPRECATED("2020-07-01", "Use drake::Polynomiald.") =
-    drake::Polynomial<double>;
-
-using VectorXPoly DRAKE_DEPRECATED("2020-07-01", "Use drake::VectorXPoly.") =
-    Eigen::Matrix<drake::Polynomiald, Eigen::Dynamic, 1>;

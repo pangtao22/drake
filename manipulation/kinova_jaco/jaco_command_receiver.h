@@ -27,10 +27,13 @@ namespace kinova_jaco {
 /// the values used by the Kinova SDK to values appropriate for the finger
 /// joints in the Jaco description (see jaco_constants.h).
 ///
-/// @system { JacoCommandReceiver,
-///   @input_port{lcmt_jaco_command}
-///   @output_port{state}
-/// }
+/// @system
+/// name: JacoCommandReceiver
+/// input_ports:
+/// - lcmt_jaco_command
+/// output_ports:
+/// - state
+/// @endsystem
 class JacoCommandReceiver : public systems::LeafSystem<double> {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(JacoCommandReceiver)
@@ -46,12 +49,6 @@ class JacoCommandReceiver : public systems::LeafSystem<double> {
   void set_initial_position(
       systems::Context<double>* context,
       const Eigen::Ref<const Eigen::VectorXd>& q) const;
-
-  /// @name Named accessors for this System's input and output ports.
-  //@{
-  const systems::InputPort<double>& get_input_port() const;
-  const systems::OutputPort<double>& get_output_port() const;
-  //@}
 
  private:
   Eigen::VectorXd input_state(const systems::Context<double>&) const;

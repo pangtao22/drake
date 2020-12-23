@@ -17,7 +17,7 @@ namespace drake {
 namespace multibody {
 namespace internal {
 
-/** A URDF-defined material consists of:
+/* A URDF-defined material consists of:
 
     - A normalized RGBA color (Red, Green, Blue, and Alpha values in the
       range [0, 1]) and/or
@@ -31,10 +31,10 @@ struct UrdfMaterial {
   std::optional<std::string> diffuse_map;
 };
 
-/** A map from the name of a material to its definition.  */
+/* A map from the name of a material to its definition.  */
 typedef std::map<std::string, UrdfMaterial> MaterialMap;
 
-/** Adds a material to the supplied `materials` map.
+/* Adds a material to the supplied `materials` map.
 
  If the input material is missing an rgba value, a default rgba value will be
  assigned (a fully transparent black).
@@ -57,7 +57,7 @@ UrdfMaterial AddMaterialToMaterialMap(const std::string& material_name,
                                       bool abort_if_name_clash,
                                       MaterialMap* materials);
 
-/** Returns the material specified by a <material> @p node. If the material has
+/* Returns the material specified by a <material> @p node. If the material has
  a name associated with it, the material will be reconciled with the given
  set of @p materials (and added to the set as appropriate).
 
@@ -91,7 +91,7 @@ UrdfMaterial ParseMaterial(const tinyxml2::XMLElement* node, bool name_required,
                            const std::string& root_dir,
                            MaterialMap* materials);
 
-/** Parses a "visual" element in @p node.
+/* Parses a "visual" element in @p node.
 
  <!-- TODO(SeanCurtis-TRI): Ultimately, a module for what we parse should be
   written outside of this _internal_ namespace. This should go there and
@@ -110,15 +110,14 @@ UrdfMaterial ParseMaterial(const tinyxml2::XMLElement* node, bool name_required,
     </visual>
  ```
 
- The new tag serves as a whitelist of renderers for which this visual is
- targeted.
+ The new tag serves as a list of renderers for which this visual is targeted.
 
   - The _value_ of the tag is the name of the renderer.
   - If the _value_ is empty, that is a parsing error.
   - If no instance of `<drake:accepting_renderer>` every renderer will be given
     the chance to reify this visual geometry.
   - Multiple instances of this tag are allowed. Each instance adds a renderer to
-    the white list.
+    the list of targeted renderers.
 
  This feature is one way to provide multiple visual representations of a body.
 
@@ -135,7 +134,7 @@ geometry::GeometryInstance ParseVisual(
     const std::string& root_dir, const tinyxml2::XMLElement* node,
     MaterialMap* materials);
 
-/** @anchor urdf_contact_material
+/* @anchor urdf_contact_material
  Parses a <collision> element in @p node.
 
  Reads the definition of a collision geometry (shape, pose, properties, etc.)
@@ -201,6 +200,6 @@ geometry::GeometryInstance ParseCollision(
     const PackageMap& package_map,
     const std::string& root_dir, const tinyxml2::XMLElement* node);
 
-}  /// namespace internal
-}  /// namespace multibody
-}  /// namespace drake
+}  // namespace internal
+}  // namespace multibody
+}  // namespace drake

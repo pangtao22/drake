@@ -21,12 +21,15 @@
 namespace drake {
 namespace geometry {
 
+using internal::convert_to_double;
 using internal::GeometryStateCollisionFilterAttorney;
 using internal::InternalFrame;
 using internal::InternalGeometry;
 using internal::ProximityEngine;
 using math::RigidTransform;
 using math::RigidTransformd;
+using render::ColorRenderCamera;
+using render::DepthRenderCamera;
 using std::make_pair;
 using std::make_unique;
 using std::move;
@@ -266,6 +269,28 @@ int GeometryState<T>::NumGeometriesWithRole(FrameId frame_id, Role role) const {
     if (geometries_.at(id).has_role(role)) ++count;
   }
   return count;
+}
+
+template <typename T>
+std::vector<GeometryId> GeometryState<T>::GetGeometries(
+    FrameId frame_id, std::optional<Role> role) const {
+  FindOrThrow(frame_id, frames_, [frame_id]() {
+    return fmt::format(
+        "Cannot report geometries associated with invalid frame id: {}",
+        frame_id);
+  });
+  const InternalFrame& frame = frames_.at(frame_id);
+
+  std::vector<GeometryId> ids;
+  ids.reserve(frame.child_geometries().size());
+  for (GeometryId g_id : frame.child_geometries()) {
+    if (role.has_value()) {
+      if (!geometries_.at(g_id).has_role(*role)) continue;
+    }
+    ids.push_back(g_id);
+  }
+  std::sort(ids.begin(), ids.end());
+  return ids;
 }
 
 template <typename T>
@@ -556,7 +581,7 @@ GeometryId GeometryState<T>::RegisterGeometry(
 
   // pose() is always RigidTransform<double>. To account for
   // GeometryState<AutoDiff>, we need to cast it to the common type T.
-  X_WGs_[geometry_id] = geometry->pose().cast<T>();
+  X_WGs_[geometry_id] = X_WF_[frame.index()] * geometry->pose().cast<T>();
 
   geometries_.emplace(
       geometry_id,
@@ -665,12 +690,15 @@ void GeometryState<T>::AssignRole(SourceId source_id, GeometryId geometry_id,
   InternalGeometry& geometry =
       ValidateRoleAssign(source_id, geometry_id, Role::kProximity, assign);
 
+  geometry_version_.modify_proximity();
   switch (assign) {
     case RoleAssign::kNew:
       geometry.SetRole(std::move(properties));
       if (geometry.is_dynamic()) {
         // Pass the geometry to the engine.
-        geometry_engine_->AddDynamicGeometry(geometry.shape(), geometry_id,
+        const RigidTransformd& X_WG = convert_to_double(X_WGs_.at(geometry_id));
+        geometry_engine_->AddDynamicGeometry(geometry.shape(), X_WG,
+                                             geometry_id,
                                              *geometry.proximity_properties());
 
         InternalFrame& frame = frames_[geometry.frame_id()];
@@ -739,6 +767,12 @@ template <typename T>
 void GeometryState<T>::AssignRole(SourceId source_id, GeometryId geometry_id,
                                   PerceptionProperties properties,
                                   RoleAssign assign) {
+  if (assign == RoleAssign::kReplace) {
+    throw std::logic_error(
+        "AssignRole() with RoleAssign::kReplace does not work for perception "
+        "properties");
+  }
+
   InternalGeometry& geometry =
       ValidateRoleAssign(source_id, geometry_id, Role::kPerception, assign);
 
@@ -750,13 +784,14 @@ void GeometryState<T>::AssignRole(SourceId source_id, GeometryId geometry_id,
 
   geometry.SetRole(std::move(properties));
 
+  const RigidTransformd& X_WG = convert_to_double(X_WGs_.at(geometry_id));
   bool added_to_renderer{false};
   for (auto& [name, engine] : render_engines_) {
     if (accepting_renderers.empty() || accepting_renderers.count(name) > 0) {
       added_to_renderer =
           engine->RegisterVisual(
               geometry_id, geometry.shape(), *geometry.perception_properties(),
-              RigidTransformd(geometry.X_FG()), geometry.is_dynamic()) ||
+              X_WG, geometry.is_dynamic()) ||
           added_to_renderer;
     }
   }
@@ -765,6 +800,11 @@ void GeometryState<T>::AssignRole(SourceId source_id, GeometryId geometry_id,
     drake::log()->warn(
         "Perception role assigned to geometry {}, but no renderer accepted it",
         geometry_id);
+  }
+  if (added_to_renderer) {
+    // Increment version number only if some renderer picks up the role
+    // assignment.
+    geometry_version_.modify_perception();
   }
 }
 
@@ -779,14 +819,28 @@ void GeometryState<T>::AssignRole(SourceId source_id, GeometryId geometry_id,
         "roles");
   }
 
+  // TODO(SeanCurtis-TRI): We want to remove this warning. For that to happen,
+  // we need systems dependent on illustration properties to recognize if there
+  // has been a change since last they processed the state. The simplest way to
+  // do that is to have a monotonically increasing serial number on
+  // GeometryState. It would increment for *every* change to GeometryState. A
+  // visualizer could query to determine if the serial number matches the value
+  // it had when it last initialized. If not, it can re-intialize (whatever that
+  // entails). It might also be advisable to have a collection of serial numbers
+  // with reduced scope (i.e., so a change to proximity properties doesn't
+  // cause illustration systems to reinitialize).
+  if (assign == RoleAssign::kReplace) {
+    static logging::Warn log_once(
+        "Updating illustration role properties must be done before visualizer "
+        "initialization to have an effect. When in doubt, after making "
+        "property changes, force the visualizer to re-initialize via its API.");
+  }
+
   InternalGeometry& geometry =
       ValidateRoleAssign(source_id, geometry_id, Role::kIllustration, assign);
-  // TODO(SeanCurtis-TRI): Ideally, if assign == RoleAssign::kReplace, this
-  //  should cause the visualization to change. I.e., if I've loaded an object
-  //  then I change its color here, it would be great if the visualization
-  //  reflected this. That is a *huge* issue that is not easily resolved.
-  //  Alternatively, I need to document that this *doesn't* happen and that it
-  //  is up to the visualizer to re-initialize itself.
+
+  geometry_version_.modify_illustration();
+
   geometry.SetRole(std::move(properties));
 }
 
@@ -878,6 +932,8 @@ void GeometryState<T>::ExcludeCollisionsWithin(const GeometrySet& set) {
   std::unordered_set<GeometryId> anchored;
   CollectIds(set, &dynamic, &anchored);
 
+  geometry_version_.modify_proximity();
+
   geometry_engine_->ExcludeCollisionsWithin(dynamic, anchored);
 }
 
@@ -890,6 +946,9 @@ void GeometryState<T>::ExcludeCollisionsBetween(const GeometrySet& setA,
   std::unordered_set<GeometryId> dynamic2;
   std::unordered_set<GeometryId> anchored2;
   CollectIds(setB, &dynamic2, &anchored2);
+
+  geometry_version_.modify_proximity();
+
   geometry_engine_->ExcludeCollisionsBetween(dynamic1, anchored1, dynamic2,
                                              anchored2);
 }
@@ -903,16 +962,22 @@ void GeometryState<T>::AddRenderer(
   }
   render::RenderEngine* render_engine = renderer.get();
   render_engines_[name] = move(renderer);
+  bool accepted = false;
   for (auto& id_geo_pair : geometries_) {
     InternalGeometry& geometry = id_geo_pair.second;
     if (geometry.has_perception_role()) {
       const GeometryId id = id_geo_pair.first;
       const PerceptionProperties* properties = geometry.perception_properties();
       DRAKE_DEMAND(properties != nullptr);
-      render_engine->RegisterVisual(id, geometry.shape(), *properties,
-                                    RigidTransformd(geometry.X_FG()),
-                                    geometry.is_dynamic());
+      accepted |= render_engine->RegisterVisual(
+                     id, geometry.shape(), *properties,
+                     RigidTransformd(geometry.X_FG()), geometry.is_dynamic());
     }
+  }
+  // Increment version number if any geometry is registered to the new
+  // renderer.
+  if (accepted) {
+    geometry_version_.modify_perception();
   }
 }
 
@@ -926,6 +991,8 @@ std::vector<std::string> GeometryState<T>::RegisteredRendererNames() const {
   return names;
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 template <typename T>
 void GeometryState<T>::RenderColorImage(const render::CameraProperties& camera,
                                         FrameId parent_frame,
@@ -943,9 +1010,8 @@ void GeometryState<T>::RenderColorImage(const render::CameraProperties& camera,
 
 template <typename T>
 void GeometryState<T>::RenderDepthImage(
-    const render::DepthCameraProperties& camera,
-    FrameId parent_frame, const RigidTransformd& X_PC,
-    ImageDepth32F* depth_image_out) const {
+    const render::DepthCameraProperties& camera, FrameId parent_frame,
+    const RigidTransformd& X_PC, ImageDepth32F* depth_image_out) const {
   const RigidTransformd X_WC = GetDoubleWorldPose(parent_frame) * X_PC;
   const render::RenderEngine& engine =
       GetRenderEngineOrThrow(camera.renderer_name);
@@ -966,6 +1032,47 @@ void GeometryState<T>::RenderLabelImage(const render::CameraProperties& camera,
   // See note in RenderColorImage() about this const cast.
   const_cast<render::RenderEngine&>(engine).UpdateViewpoint(X_WC);
   engine.RenderLabelImage(camera, show_window, label_image_out);
+}
+#pragma GCC diagnostic pop
+
+template <typename T>
+void GeometryState<T>::RenderColorImage(const ColorRenderCamera& camera,
+                                        FrameId parent_frame,
+                                        const RigidTransformd& X_PC,
+                                        ImageRgba8U* color_image_out) const {
+  const RigidTransformd X_WC = GetDoubleWorldPose(parent_frame) * X_PC;
+  const render::RenderEngine& engine =
+      GetRenderEngineOrThrow(camera.core().renderer_name());
+  // TODO(SeanCurtis-TRI): Invoke UpdateViewpoint() as part of a calc cache
+  //  entry. Challenge: how to do that with a parameter passed here?
+  const_cast<render::RenderEngine&>(engine).UpdateViewpoint(X_WC);
+  engine.RenderColorImage(camera, color_image_out);
+}
+
+template <typename T>
+void GeometryState<T>::RenderDepthImage(const DepthRenderCamera& camera,
+                                        FrameId parent_frame,
+                                        const RigidTransformd& X_PC,
+                                        ImageDepth32F* depth_image_out) const {
+  const RigidTransformd X_WC = GetDoubleWorldPose(parent_frame) * X_PC;
+  const render::RenderEngine& engine =
+      GetRenderEngineOrThrow(camera.core().renderer_name());
+  // See note in RenderColorImage() about this const cast.
+  const_cast<render::RenderEngine&>(engine).UpdateViewpoint(X_WC);
+  engine.RenderDepthImage(camera, depth_image_out);
+}
+
+template <typename T>
+void GeometryState<T>::RenderLabelImage(const ColorRenderCamera& camera,
+                                        FrameId parent_frame,
+                                        const RigidTransformd& X_PC,
+                                        ImageLabel16I* label_image_out) const {
+  const RigidTransformd X_WC = GetDoubleWorldPose(parent_frame) * X_PC;
+  const render::RenderEngine& engine =
+      GetRenderEngineOrThrow(camera.core().renderer_name());
+  // See note in RenderColorImage() about this const cast.
+  const_cast<render::RenderEngine&>(engine).UpdateViewpoint(X_WC);
+  engine.RenderLabelImage(camera, label_image_out);
 }
 
 template <typename T>
@@ -1184,12 +1291,6 @@ InternalGeometry& GeometryState<T>::ValidateRoleAssign(SourceId source_id,
                                                        GeometryId geometry_id,
                                                        Role role,
                                                        RoleAssign assign) {
-  if (assign == RoleAssign::kReplace &&
-      (role == Role::kPerception || role == Role::kIllustration)) {
-    throw std::logic_error(
-        "AssignRole() for updating properties currently only supports "
-        "proximity properties");
-  }
   if (!BelongsToSource(geometry_id, source_id)) {
     throw std::logic_error("Given geometry id " + to_string(geometry_id) +
         " does not belong to the given source id " +
@@ -1253,6 +1354,7 @@ bool GeometryState<T>::RemoveFromRendererUnchecked(
     // The engine has reported the belief that it has geometry `id`. Therefore,
     // removal should report true.
     DRAKE_DEMAND(engine->RemoveGeometry(id) == true);
+    geometry_version_.modify_perception();
     return true;
   }
   return false;
@@ -1269,6 +1371,7 @@ bool GeometryState<T>::RemoveProximityRole(GeometryId geometry_id) {
   // Geometry *is* registered; do the work to remove it.
   geometry_engine_->RemoveGeometry(geometry_id, geometry->is_dynamic());
   geometry->RemoveProximityRole();
+  geometry_version_.modify_proximity();
   return true;
 }
 
@@ -1281,6 +1384,7 @@ bool GeometryState<T>::RemoveIllustrationRole(GeometryId geometry_id) {
   if (!geometry->has_illustration_role()) return false;
 
   geometry->RemoveIllustrationRole();
+  geometry_version_.modify_illustration();
   return true;
 }
 
