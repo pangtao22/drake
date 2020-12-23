@@ -12,6 +12,7 @@ package(default_visibility = ["//visibility:public"])
 
 drake_cc_package_library(
     name = "robot_plans",
+    visibility = ["//visibility:public"],
     deps = [
         ":hybrid_force_position_plan",
         ":joint_space_plan",
