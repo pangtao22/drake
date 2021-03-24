@@ -404,7 +404,8 @@ class Simulator {
   /// simulator.set_monitor([&plant](const Context<T>& root_context) {
   ///   const Context<T>& plant_context =
   ///       plant.GetMyContextFromRoot(root_context);
-  ///   const Vector3<T> com = plant.CalcCenterOfMassPosition(plant_context);
+  ///   const Vector3<T> com =
+  ///       plant.CalcCenterOfMassPositionInWorld(plant_context);
   ///   if (com[2] < 0.1) {  // Check z height of com.
   ///     return EventStatus::Failed(plant, "System fell over.");
   ///   }
@@ -728,11 +729,10 @@ class Simulator {
   }
 
   TimeOrWitnessTriggered IntegrateContinuousState(
-      const T& next_publish_dt,
-      const T& next_update_dt,
-      const T& time_of_next_timed_event,
-      const T& boundary_dt,
-      CompositeEventCollection<T>* events);
+      const T& next_publish_time,
+      const T& next_update_time,
+      const T& boundary_time,
+      CompositeEventCollection<T>* witnessed_events);
 
   // Private methods related to witness functions.
   void IsolateWitnessTriggers(

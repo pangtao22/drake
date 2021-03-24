@@ -10,6 +10,7 @@ load("@drake//tools/workspace/cc:repository.bzl", "cc_repository")
 load("@drake//tools/workspace/ccd:repository.bzl", "ccd_repository")
 load("@drake//tools/workspace/cds:repository.bzl", "cds_repository")
 load("@drake//tools/workspace/clang_cindex_python3:repository.bzl", "clang_cindex_python3_repository")  # noqa
+load("@drake//tools/workspace/clp:repository.bzl", "clp_repository")
 load("@drake//tools/workspace/com_jidesoft_jide_oss:repository.bzl", "com_jidesoft_jide_oss_repository")  # noqa
 load("@drake//tools/workspace/common_robotics_utilities:repository.bzl", "common_robotics_utilities_repository")  # noqa
 load("@drake//tools/workspace/commons_io:repository.bzl", "commons_io_repository")  # noqa
@@ -54,7 +55,6 @@ load("@drake//tools/workspace/models:repository.bzl", "models_repository")
 load("@drake//tools/workspace/mosek:repository.bzl", "mosek_repository")
 load("@drake//tools/workspace/net_sf_jchart2d:repository.bzl", "net_sf_jchart2d_repository")  # noqa
 load("@drake//tools/workspace/nlopt:repository.bzl", "nlopt_repository")
-load("@drake//tools/workspace/numpy:repository.bzl", "numpy_repository")
 load("@drake//tools/workspace/openblas:repository.bzl", "openblas_repository")
 load("@drake//tools/workspace/opengl:repository.bzl", "opengl_repository")
 load("@drake//tools/workspace/optitrack_driver:repository.bzl", "optitrack_driver_repository")  # noqa
@@ -75,7 +75,6 @@ load("@drake//tools/workspace/sdformat:repository.bzl", "sdformat_repository")
 load("@drake//tools/workspace/semantic_version:repository.bzl", "semantic_version_repository")  # noqa
 load("@drake//tools/workspace/snopt:repository.bzl", "snopt_repository")
 load("@drake//tools/workspace/spdlog:repository.bzl", "spdlog_repository")
-load("@drake//tools/workspace/sphinx:repository.bzl", "sphinx_repository")
 load("@drake//tools/workspace/styleguide:repository.bzl", "styleguide_repository")  # noqa
 load("@drake//tools/workspace/suitesparse:repository.bzl", "suitesparse_repository")  # noqa
 load("@drake//tools/workspace/tinyobjloader:repository.bzl", "tinyobjloader_repository")  # noqa
@@ -85,6 +84,7 @@ load("@drake//tools/workspace/uritemplate_py:repository.bzl", "uritemplate_py_re
 load("@drake//tools/workspace/voxelized_geometry_tools:repository.bzl", "voxelized_geometry_tools_repository")  # noqa
 load("@drake//tools/workspace/vtk:repository.bzl", "vtk_repository")
 load("@drake//tools/workspace/x11:repository.bzl", "x11_repository")
+load("@drake//tools/workspace/xmlrunner_py:repository.bzl", "xmlrunner_py_repository")  # noqa
 load("@drake//tools/workspace/yaml_cpp:repository.bzl", "yaml_cpp_repository")
 load("@drake//tools/workspace/zlib:repository.bzl", "zlib_repository")
 
@@ -114,6 +114,8 @@ def add_default_repositories(excludes = [], mirrors = DEFAULT_MIRRORS):
         cds_repository(name = "cds", mirrors = mirrors)
     if "clang_cindex_python3" not in excludes:
         clang_cindex_python3_repository(name = "clang_cindex_python3", mirrors = mirrors)  # noqa
+    if "clp" not in excludes:
+        clp_repository(name = "clp")
     if "com_jidesoft_jide_oss" not in excludes:
         com_jidesoft_jide_oss_repository(name = "com_jidesoft_jide_oss", mirrors = mirrors)  # noqa
     if "common_robotics_utilities" not in excludes:
@@ -204,8 +206,6 @@ def add_default_repositories(excludes = [], mirrors = DEFAULT_MIRRORS):
         net_sf_jchart2d_repository(name = "net_sf_jchart2d", mirrors = mirrors)
     if "nlopt" not in excludes:
         nlopt_repository(name = "nlopt")
-    if "numpy" not in excludes:
-        numpy_repository(name = "numpy")
     if "openblas" not in excludes:
         openblas_repository(name = "openblas")
     if "opengl" not in excludes:
@@ -246,8 +246,6 @@ def add_default_repositories(excludes = [], mirrors = DEFAULT_MIRRORS):
         snopt_repository(name = "snopt")
     if "spdlog" not in excludes:
         spdlog_repository(name = "spdlog", mirrors = mirrors)
-    if "sphinx" not in excludes:
-        sphinx_repository(name = "sphinx")
     if "styleguide" not in excludes:
         styleguide_repository(name = "styleguide", mirrors = mirrors)
     if "suitesparse" not in excludes:
@@ -266,6 +264,8 @@ def add_default_repositories(excludes = [], mirrors = DEFAULT_MIRRORS):
         vtk_repository(name = "vtk", mirrors = mirrors)
     if "x11" not in excludes:
         x11_repository(name = "x11")
+    if "xmlrunner_py" not in excludes:
+        xmlrunner_py_repository(name = "xmlrunner_py", mirrors = mirrors)
     if "yaml_cpp" not in excludes:
         yaml_cpp_repository(name = "yaml_cpp")
     if "zlib" not in excludes:

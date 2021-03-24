@@ -42,6 +42,7 @@ using math::RigidTransformd;
 using math::RollPitchYawd;
 using multibody::JointActuator;
 using multibody::JointActuatorIndex;
+using multibody::ModelInstanceIndex;
 using multibody::MultibodyPlant;
 
 DEFINE_double(simulation_time, std::numeric_limits<double>::infinity(),
@@ -105,7 +106,7 @@ void DoMain() {
       "drake/examples/allegro_hand/joint_control/simple_mug.sdf");
   multibody::Parser parser(&plant);
   parser.AddModelFromFile(hand_model_path);
-  parser.AddModelFromFile(object_model_path);
+  ModelInstanceIndex mug_model = parser.AddModelFromFile(object_model_path);
 
   // Weld the hand to the world frame
   const auto& joint_hand_root = plant.GetBodyByName("hand_root");
@@ -185,7 +186,7 @@ void DoMain() {
   plant.Finalize();
 
   // Visualization
-  geometry::DrakeVisualizer::AddToBuilder(&builder, scene_graph);
+  geometry::DrakeVisualizerd::AddToBuilder(&builder, scene_graph);
   DRAKE_DEMAND(!!plant.get_source_id());
   builder.Connect(
       plant.get_geometry_poses_output_port(),
@@ -231,16 +232,17 @@ void DoMain() {
                   hand_output_torque_converter.get_input_port());
 
   // Create the command subscriber and status publisher for the hand.
+  const double kLcmPeriod = examples::allegro_hand::kHardwareStatusPeriod;
   auto& hand_command_sub = *builder.AddSystem(
       systems::lcm::LcmSubscriberSystem::Make<lcmt_allegro_command>(
           "ALLEGRO_COMMAND", lcm));
   hand_command_sub.set_name("hand_command_subscriber");
   auto& hand_command_receiver =
-      *builder.AddSystem<AllegroCommandReceiver>(kAllegroNumJoints);
+      *builder.AddSystem<AllegroCommandReceiver>(kAllegroNumJoints, kLcmPeriod);
   hand_command_receiver.set_name("hand_command_receiver");
   auto& hand_status_pub = *builder.AddSystem(
       systems::lcm::LcmPublisherSystem::Make<lcmt_allegro_status>(
-          "ALLEGRO_STATUS", lcm, kLcmStatusPeriod /* publish period */));
+          "ALLEGRO_STATUS", lcm, kLcmPeriod /* publish period */));
   hand_status_pub.set_name("hand_status_publisher");
   auto& status_sender =
       *builder.AddSystem<AllegroStatusSender>(kAllegroNumJoints);
@@ -268,7 +270,6 @@ void DoMain() {
   diagram->SetDefaultContext(diagram_context.get());
 
   // Set the position of object
-  const multibody::Body<double>& mug = plant.GetBodyByName("main_body");
   const multibody::Body<double>& hand = plant.GetBodyByName("hand_root");
   systems::Context<double>& plant_context =
       diagram->GetMutableSubsystemContext(plant, diagram_context.get());
@@ -279,7 +280,8 @@ void DoMain() {
   RigidTransformd X_WM(
       RollPitchYawd(M_PI / 2, 0, 0),
       p_WHand + Eigen::Vector3d(0.095, 0.062, 0.095));
-  plant.SetFreeBodyPose(&plant_context, mug, X_WM);
+  plant.SetFreeBodyPose(&plant_context,
+                        plant.GetUniqueFreeBaseBodyOrThrow(mug_model), X_WM);
 
   // set the initial command for the hand
   hand_command_receiver.set_initial_position(

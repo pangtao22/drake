@@ -1,4 +1,4 @@
-"""Tool to help populate doc/release_notes/*.rst entries by automatically
+r"""Tool to help populate doc/release_notes/*.rst entries by automatically
 adding commit messages' content into a structured document template.
 
 This program is intended only for use by Drake maintainers who are preparing
@@ -27,11 +27,18 @@ browser to https://github.com/settings/tokens and create a new token (it does
 not need any extra permissions; the default "no checkboxes are set" is good),
 and save the plaintext hexadecimal token to that file.
 
-TODO(jwnimmer-tri) Add specific example command lines to cargo cult from,
-either here or in release_playbook.rst.
+Here's an example of how to create (and then update) a new release notes
+document:
+
+  bazel build //tools/release_engineering:relnotes
+  bazel-bin/tools/release_engineering/relnotes --action=create \
+    --version=v0.26.0 --prior_version=v0.25.0
+  bazel-bin/tools/release_engineering/relnotes --action=update \
+    --version=v0.26.0
 """
 
 import argparse
+from collections import Counter
 import logging
 import os.path
 import re
@@ -39,6 +46,19 @@ import sys
 import time
 
 import github3
+
+
+def _format_inline_pr_link(pr_num):
+    """Return an inline link to the PR `pr_num`.  The corresponding
+    `_format_ref_pr_link` text must appear later in the file."""
+    return f"[#{pr_num}][_#{pr_num}]"
+
+
+def _format_ref_pr_link(pr_num):
+    """Return a reference link to the PR `pr_num`.  This goes at the bottom of
+    the file and allows earlier `_format_inline_pr_link` to work."""
+    url = f"https://github.com/RobotLocomotion/drake/pull/{pr_num}"
+    return f"[_#{pr_num}]: {url}"
 
 
 def _filename_to_primary_package(filename):
@@ -57,9 +77,15 @@ def _format_commit(gh, drake, commit):
     """Returns (packages, bullet) for the given commit.
 
     The packages is a list of top-level directories whose files were edited in
-    this commit.
+    this commit. If the packages list is empty, then the commit is ineligible
+    for release notes and should be dropped.
 
     The bullet is a "* Detail (#123)" summary of the change for release notes.
+
+    Ineligible commits: currently commits that only change files in dev
+    directories are ineligible. More ineligible commit conditions may be
+    defined later.
+
     """
     # Grab the commit message subject and body.
     message = commit.message
@@ -70,10 +96,21 @@ def _format_commit(gh, drake, commit):
     # notes author sort things better.
     comparison = drake.compare_commits(
         base=commit.parents[0].get('sha'), head=commit.sha)
-    committed_files = [x.get('filename') for x in comparison.files]
-    packages = sorted(set([
-        _filename_to_primary_package(x) for x in committed_files
-    ])) or ["tools"]
+    committed_files_weighted = (
+        {x.get('filename'): x.get('changes') for x in comparison.files})
+    # If all files in the commit are in dev directories, return empty data to
+    # indicate the commit is ineligible.
+    committed_nondev_files = [
+        x for x in committed_files_weighted.keys() if '/dev/' not in x]
+    if not committed_nondev_files:
+        return [], ""
+
+    # Report packages in order of most lines changed.
+    packages_weighted = sum(
+        [Counter({_filename_to_primary_package(k): v})
+         for k, v in committed_files_weighted.items()],
+        Counter())
+    packages = [k for k, v in packages_weighted.most_common()] or ["tools"]
     if len(packages) > 1 and "bindings" in packages:
         packages.remove("bindings")
 
@@ -113,15 +150,21 @@ def _format_commit(gh, drake, commit):
     if detail:
         detail = f"  # {detail}"
 
-    # Format as top-level rst bullet point.
-    return packages, f"* TBD {nice_summary} (`#{pr}`_){detail}"
+    # Add a multi-packages hint, if we have too many.
+    preamble = ""
+    if len(packages) > 1:
+        preamble = "[" + ",".join(packages) + "] "
+
+    # Format as top-level bullet point.
+    inline_link = _format_inline_pr_link(pr)
+    return packages, f"* TBD {preamble}{nice_summary} ({inline_link}){detail}"
 
 
-def _update(args, rst_filename, gh, drake):
+def _update(args, notes_filename, gh, drake):
     """The --update action."""
 
     # Read in the existing content.
-    with open(rst_filename, "r") as f:
+    with open(notes_filename, "r") as f:
         lines = f.readlines()
 
     # Scrape the last commit from the document.  The line looks like this:
@@ -164,10 +207,12 @@ def _update(args, rst_filename, gh, drake):
         # Try not to hit GitHub API rate limits.
         time.sleep(0.2)
         packages, bullet = _format_commit(gh, drake, commit)
+
+        # Skip commits deemed ineligible.
+        if not packages:
+            continue
+
         primary_package = packages[0]
-        preamble = ""
-        if len(packages) > 1:
-            preamble = "[" + ",".join(packages) + "] "
         # Find the section for this commit, matching a line that looks like:
         # <relnotes for foo,{package},bar go here>
         found = False
@@ -177,7 +222,7 @@ def _update(args, rst_filename, gh, drake):
                 (anchors_csv,) = match.groups()
                 anchors = anchors_csv.split(",")
                 if primary_package in anchors:
-                    lines.insert(i + 1, f"{preamble}{bullet}\n")
+                    lines.insert(i + 2, f"{bullet}\n")
                     found = True
                     break
         if not found:
@@ -186,38 +231,36 @@ def _update(args, rst_filename, gh, drake):
     # Update the issue links.  Replace the text between these markers:
     # .. <begin issue links>
     # .. <end issue links>
-    begin = lines.index(".. <begin issue links>\n")
-    end = lines.index(".. <end issue links>\n")
+    begin = lines.index("<!-- <begin issue links> -->\n")
+    end = lines.index("<!-- <end issue links> -->\n")
     assert begin < end
     pr_numbers = set()
     for i, one_line in enumerate(lines):
         if begin < i < end:
             continue
         while True:
-            match = re.search("`#([0-9]*)`_", one_line)
+            match = re.search(r"\[_#([0-9]*)\]", one_line)
             if not match:
                 break
             (number,) = match.groups()
             pr_numbers.add(number)
             one_line = one_line[match.end(0):]
-    pr_links = [
-        f".. _#{n}: https://github.com/RobotLocomotion/drake/pull/{n}\n"
-        for n in sorted(list(pr_numbers))
-    ]
+    pr_links = [_format_ref_pr_link(n) + "\n"
+                for n in sorted(list(pr_numbers))]
     lines[begin + 1:end] = pr_links
 
     # Rewrite the notes file.
-    with open(rst_filename + "~", "w") as f:
+    with open(notes_filename + "~", "w") as f:
         for one_line in lines:
             f.write(one_line)
-    os.replace(rst_filename + "~", rst_filename)
+    os.replace(notes_filename + "~", notes_filename)
 
 
-def _create(args, notes_dir, rst_filename, gh, drake):
+def _create(args, notes_dir, notes_filename, gh, drake):
     """The --create action."""
 
-    if os.path.exists(rst_filename):
-        raise RuntimeError(f"{rst_filename} already exists")
+    if os.path.exists(notes_filename):
+        raise RuntimeError(f"{notes_filename} already exists")
 
     # Find the commit sha for the prior_version release.
     prior_sha = next(drake.commits(sha=args.prior_version)).sha
@@ -232,11 +275,13 @@ def _create(args, notes_dir, rst_filename, gh, drake):
         oldest_commit_exclusive=prior_sha,
         newest_commit_inclusive=prior_sha,
     )
-    # TODO(jwnimmer-tri) Strip out "This document is the template ..."
-    # boilerplate before writing out the file.
+
+    # Strip out "This document is the template ..." boilerplate, which is the
+    # first line of the file.
+    content = content[content.index("\n") + 1:]
 
     # Write the notes skeleton to disk.
-    with open(rst_filename, "w") as f:
+    with open(notes_filename, "w") as f:
         f.write(content)
 
 
@@ -274,10 +319,10 @@ def main():
     # Find the file to operate on.
     me = os.path.realpath(sys.argv[0])
     workspace = os.path.dirname(os.path.dirname(os.path.dirname(me)))
-    notes_dir = f"{workspace}/doc/release_notes"
+    notes_dir = f"{workspace}/doc/_release-notes"
     if not os.path.isdir(notes_dir):
         parser.error("Could not find release_notes directory")
-    rst_filename = f"{notes_dir}/{args.version}.rst"
+    notes_filename = f"{notes_dir}/{args.version}.md"
 
     # Authenticate to GitHub.
     with open(os.path.expanduser(args.token_file), "r") as f:
@@ -289,10 +334,10 @@ def main():
     if args.action == "create":
         if not args.prior_version:
             parser.error("--prior_version is required to --create")
-        _create(args, notes_dir, rst_filename, gh, drake)
+        _create(args, notes_dir, notes_filename, gh, drake)
     else:
         assert args.action == "update"
-        _update(args, rst_filename, gh, drake)
+        _update(args, notes_filename, gh, drake)
 
 
 if __name__ == '__main__':
