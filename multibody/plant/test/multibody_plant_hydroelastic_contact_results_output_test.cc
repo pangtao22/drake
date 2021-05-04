@@ -10,7 +10,6 @@ using Eigen::Vector3d;
 namespace drake {
 
 using geometry::ContactSurface;
-using geometry::MeshField;
 using geometry::SurfaceFace;
 using geometry::SurfaceFaceIndex;
 using geometry::SurfaceVertex;
@@ -217,7 +216,7 @@ TEST_F(HydroelasticContactResultsOutputTester, Traction) {
         results.contact_surface().mesh_W().CalcBarycentric(
             quadrature_point_datum.p_WQ, quadrature_point_datum.face_index);
 
-    const double pressure = results.contact_surface().EvaluateE_MN(
+    const double pressure = results.contact_surface().e_MN().Evaluate(
         quadrature_point_datum.face_index, p_barycentric);
 
     // The conversion from Cartesian to barycentric coordinates introduces some

@@ -147,8 +147,9 @@ class JointActuator final
   /// approximation is reasonable for high gear ratios but less so for small
   /// gear ratios (see [Featherstone, 2008], Chapter 9.6 on gears).
   ///
-  /// @image html multibody/tree/images/GearBoxSchematic.png width=50%
-  /// @image html multibody/tree/images/GearedMotorAPiqselsComCC0.jpg width=50%
+  /// @image html drake/multibody/tree/images/GearBoxSchematic.png width=50%
+  /// <!-- NOLINTNEXTLINE(whitespace/line_length) -->
+  /// @image html drake/multibody/tree/images/GearedMotorAPiqselsComCC0.jpg width=50%
   ///
   /// #### Actuated revolute joints
   /// For an actuator driving a revolute joint, the reflected inertia can be
@@ -213,14 +214,15 @@ class JointActuator final
 
   /// Sets the associated rotor inertia value for this actuator in `context`.
   /// See @ref reflected_inertia.
-  void SetRotorInertia(systems::Context<T>* context, const T& rotor_inertia) {
+  void SetRotorInertia(systems::Context<T>* context,
+                       const T& rotor_inertia) const {
     context->get_mutable_numeric_parameter(rotor_inertia_parameter_index_)[0] =
         rotor_inertia;
   }
 
   /// Sets the associated gear ratio value for this actuator in `context`.
   /// See @ref reflected_inertia.
-  void SetGearRatio(systems::Context<T>* context, const T& gear_ratio) {
+  void SetGearRatio(systems::Context<T>* context, const T& gear_ratio) const {
     context->get_mutable_numeric_parameter(gear_ratio_parameter_index_)[0] =
         gear_ratio;
   }

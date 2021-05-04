@@ -121,18 +121,12 @@ def get_index_class(cls, T):
 
 
 # Permits parametric scalar type conversion.
-# TODO(eric.cousineau): Consider hoisting this to `test_utilities` or adding
-# `System.ToType[T]`.
 def to_type(system, T):
     assert isinstance(system, System_[float])
     if T == float:
         return system
-    elif T == AutoDiffXd:
-        return system.ToAutoDiffXd()
-    elif T == Expression:
-        return system.ToSymbolic()
     else:
-        assert False, "Invalid type, {}".format(T)
+        return system.ToScalarType[T]()
 
 
 class TestPlant(unittest.TestCase):
@@ -639,6 +633,7 @@ class TestPlant(unittest.TestCase):
                                     M_BBo_B=spatial_inertia)
         body_b = plant.AddRigidBody(name="body_b",
                                     M_BBo_B=spatial_inertia)
+        linear_spring_index = ForceElementIndex(plant.num_force_elements())
         linear_spring = plant.AddForceElement(LinearSpringDamper(
             bodyA=body_a, p_AP=[0., 0., 0.],
             bodyB=body_b, p_BQ=[0., 0., 0.],
@@ -741,6 +736,11 @@ class TestPlant(unittest.TestCase):
         numpy_compare.assert_float_equal(
             bushing.GetForceDampingConstants(context=context),
             2 * force_damping)
+
+        # Test get_force_element().
+        self.assertIs(
+            plant.get_force_element(force_element_index=linear_spring_index),
+            linear_spring)
 
     @numpy_compare.check_all_types
     def test_multibody_gravity_default(self, T):

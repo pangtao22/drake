@@ -19,7 +19,6 @@
 #include "drake/geometry/geometry_instance.h"
 #include "drake/geometry/geometry_properties.h"
 #include "drake/geometry/geometry_roles.h"
-#include "drake/geometry/geometry_visualization.h"
 #include "drake/geometry/proximity/obj_to_surface_mesh.h"
 #include "drake/geometry/proximity/surface_mesh.h"
 #include "drake/geometry/query_results/penetration_as_point_pair.h"
@@ -38,9 +37,7 @@ using Eigen::Vector3d;
 using geometry::GeometryId;
 using geometry::PerceptionProperties;
 using geometry::Shape;
-using geometry::render::CameraProperties;
 using geometry::render::ColorRenderCamera;
-using geometry::render::DepthCameraProperties;
 using geometry::render::DepthRenderCamera;
 using geometry::render::RenderEngine;
 using math::RigidTransformd;
@@ -139,34 +136,6 @@ class PyRenderEngine : public py::wrapper<RenderEngine> {
       const ImageType* image, const char* image_type) {
     return Base::ThrowIfInvalid<ImageType>(intrinsics, image, image_type);
   }
-
- private:
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  // TODO(SeanCurtis-TRI) We will be removing the Render*Image API when we
-  // deprecate CameraProperties. They must be implemented in order to build
-  // this class; so we'll make sure they clearly signal if they get invoked.
-  void RenderColorImage(
-      CameraProperties const&, bool, ImageRgba8U*) const override {
-    throw std::runtime_error(
-        "Python should not be able to invoke RenderColorImage with "
-        "CameraProperties");
-  }
-
-  void RenderDepthImage(
-      DepthCameraProperties const&, ImageDepth32F*) const override {
-    throw std::runtime_error(
-        "Python should not be able to invoke RenderDepthImage with "
-        "CameraProperties");
-  }
-
-  void RenderLabelImage(
-      CameraProperties const&, bool, ImageLabel16I*) const override {
-    throw std::runtime_error(
-        "Python should not be able to invoke RenderLabelImage with "
-        "CameraProperties");
-  }
-#pragma GCC diagnostic pop
 };
 
 void def_geometry_render(py::module m) {
@@ -198,7 +167,7 @@ void def_geometry_render(py::module m) {
     cls  // BR
         .def(py::init<Class const&>(), py::arg("other"), "Copy constructor")
         .def(py::init<RenderCameraCore, bool>(), py::arg("core"),
-            py::arg("show_window") = false, cls_doc.ctor.doc_2args)
+            py::arg("show_window") = false, cls_doc.ctor.doc)
         .def("core",
             static_cast<RenderCameraCore const& (Class::*)() const>(
                 &Class::core),
@@ -231,7 +200,7 @@ void def_geometry_render(py::module m) {
     cls  // BR
         .def(py::init<Class const&>(), py::arg("other"), "Copy constructor")
         .def(py::init<RenderCameraCore, DepthRange>(), py::arg("core"),
-            py::arg("depth_range"), cls_doc.ctor.doc_2args_core_depth_range)
+            py::arg("depth_range"), cls_doc.ctor.doc)
         .def("core",
             static_cast<RenderCameraCore const& (Class::*)() const>(
                 &Class::core),
@@ -251,7 +220,7 @@ void def_geometry_render(py::module m) {
         .def(
             py::init<std::string, CameraInfo, ClippingRange, RigidTransformd>(),
             py::arg("renderer_name"), py::arg("intrinsics"),
-            py::arg("clipping"), py::arg("X_BS"), cls_doc.ctor.doc_4args)
+            py::arg("clipping"), py::arg("X_BS"), cls_doc.ctor.doc)
         .def("clipping",
             static_cast<ClippingRange const& (Class::*)() const>(
                 &Class::clipping),
@@ -270,47 +239,6 @@ void def_geometry_render(py::module m) {
             cls_doc.sensor_pose_in_camera_body.doc);
     DefCopyAndDeepCopy(&cls);
   }
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  {
-    using Class = CameraProperties;
-    py::class_<Class> cls(
-        m, "CameraProperties", doc.CameraProperties.doc_deprecated);
-    cls  // BR
-        .def(py_init_deprecated<Class, int, int, double, std::string>(
-                 "Deprecated; due to be removed after 2021-04-01. Please use "
-                 "ColorRenderCamera instead"),
-            py::arg("width"), py::arg("height"), py::arg("fov_y"),
-            py::arg("renderer_name"), doc.CameraProperties.ctor.doc)
-        .def_readwrite("width", &Class::width, doc.CameraProperties.width.doc)
-        .def_readwrite(
-            "height", &Class::height, doc.CameraProperties.height.doc)
-        .def_readwrite("fov_y", &Class::fov_y, doc.CameraProperties.fov_y.doc)
-        .def_readwrite("renderer_name", &Class::renderer_name,
-            doc.CameraProperties.renderer_name.doc);
-    DefCopyAndDeepCopy(&cls);
-  }
-
-  {
-    using Class = DepthCameraProperties;
-    py::class_<Class, CameraProperties> cls(
-        m, "DepthCameraProperties", doc.DepthCameraProperties.doc_deprecated);
-    cls  // BR
-        .def(py_init_deprecated<Class, int, int, double, std::string, double,
-                 double>(
-                 "Deprecated; due to be removed after 2021-04-01. Please use "
-                 "DepthRenderCamera instead"),
-            py::arg("width"), py::arg("height"), py::arg("fov_y"),
-            py::arg("renderer_name"), py::arg("z_near"), py::arg("z_far"),
-            doc.DepthCameraProperties.ctor.doc)
-        .def_readwrite(
-            "z_near", &Class::z_near, doc.DepthCameraProperties.z_near.doc)
-        .def_readwrite(
-            "z_far", &Class::z_far, doc.DepthCameraProperties.z_far.doc);
-    DefCopyAndDeepCopy(&cls);
-  }
-#pragma GCC diagnostic pop
 
   {
     using Class = RenderEngine;
@@ -475,6 +403,8 @@ void DoScalarDependentDefinitions(py::module m, T) {
             cls_doc.num_geometries.doc)
         .def("GetAllGeometryIds", &Class::GetAllGeometryIds,
             cls_doc.GetAllGeometryIds.doc)
+        .def("GetGeometryIds", &Class::GetGeometryIds, py::arg("geometry_set"),
+            py::arg("role") = std::nullopt, cls_doc.GetGeometryIds.doc)
         .def("NumGeometriesWithRole", &Class::NumGeometriesWithRole,
             py::arg("role"), cls_doc.NumGeometriesWithRole.doc)
         .def("NumDynamicGeometries", &Class::NumDynamicGeometries,
@@ -486,27 +416,11 @@ void DoScalarDependentDefinitions(py::module m, T) {
         // Sources and source-related data.
         .def("SourceIsRegistered", &Class::SourceIsRegistered,
             py::arg("source_id"), cls_doc.SourceIsRegistered.doc)
-        .def("SourceIsRegistered",
-            WrapDeprecated(
-                "Please use SceneGraphInspector.SourceIsRegistered("
-                "source_id=value) instead. This variant will be removed after"
-                " after 2021-04-01",
-                &Class::SourceIsRegistered),
-            py::arg("id"), cls_doc.SourceIsRegistered.doc)
         .def("GetName",
             overload_cast_explicit<const std::string&, SourceId>(
                 &Class::GetName),
             py_rvp::reference_internal, py::arg("source_id"),
-            cls_doc.GetName.doc_1args_source_id);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    cls  // BR
-        .def("GetSourceName",
-            WrapDeprecated(
-                cls_doc.GetSourceName.doc_deprecated, &Class::GetSourceName),
-            py::arg("source_id"), cls_doc.GetSourceName.doc_deprecated);
-#pragma GCC diagnostic pop
-    cls  // BR
+            cls_doc.GetName.doc_1args_source_id)
         .def("NumFramesForSource", &Class::NumFramesForSource,
             py::arg("source_id"), cls_doc.NumFramesForSource.doc)
         .def("FramesForSource", &Class::FramesForSource, py::arg("source_id"),
@@ -788,24 +702,7 @@ void DoScalarDependentDefinitions(py::module m, T) {
             overload_cast_explicit<const math::RigidTransform<T>&, GeometryId>(
                 &Class::GetPoseInWorld),
             py::arg("geometry_id"), py_rvp::reference_internal,
-            cls_doc.GetPoseInWorld.doc_1args_geometry_id);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    cls  // BR
-        .def("X_WF",
-            WrapDeprecated(cls_doc.X_WF.doc_deprecated, &QueryObject<T>::X_WF),
-            py::arg("id"), py_rvp::reference_internal,
-            cls_doc.X_WF.doc_deprecated)
-        .def("X_PF",
-            WrapDeprecated(cls_doc.X_PF.doc_deprecated, &QueryObject<T>::X_PF),
-            py::arg("id"), py_rvp::reference_internal,
-            cls_doc.X_PF.doc_deprecated)
-        .def("X_WG",
-            WrapDeprecated(cls_doc.X_WG.doc_deprecated, &QueryObject<T>::X_WG),
-            py::arg("id"), py_rvp::reference_internal,
-            cls_doc.X_WG.doc_deprecated);
-#pragma GCC diagnostic pop
-    cls  // BR
+            cls_doc.GetPoseInWorld.doc_1args_geometry_id)
         .def("ComputeSignedDistancePairwiseClosestPoints",
             &QueryObject<T>::ComputeSignedDistancePairwiseClosestPoints,
             py::arg("max_distance") = std::numeric_limits<double>::infinity(),
@@ -813,14 +710,6 @@ void DoScalarDependentDefinitions(py::module m, T) {
         .def("ComputeSignedDistancePairClosestPoints",
             &QueryObject<T>::ComputeSignedDistancePairClosestPoints,
             py::arg("geometry_id_A"), py::arg("geometry_id_B"),
-            cls_doc.ComputeSignedDistancePairClosestPoints.doc)
-        .def("ComputeSignedDistancePairClosestPoints",
-            WrapDeprecated("Please use "
-                           "QueryObject.ComputeSignedDistancePairClosestPoints("
-                           "geometry_id_A=value1, geometry_id_B=value2). This "
-                           "variant will be removed on or after 2021-04-01.",
-                &QueryObject<T>::ComputeSignedDistancePairClosestPoints),
-            py::arg("id_A"), py::arg("id_B"),
             cls_doc.ComputeSignedDistancePairClosestPoints.doc)
         .def("ComputePointPairPenetration",
             &QueryObject<T>::ComputePointPairPenetration,
@@ -870,50 +759,6 @@ void DoScalarDependentDefinitions(py::module m, T) {
             },
             py::arg("camera"), py::arg("parent_frame"), py::arg("X_PC"),
             cls_doc.RenderLabelImage.doc);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    cls  // BR
-        .def("RenderColorImage",
-            WrapDeprecated(cls_doc.RenderColorImage.doc_deprecated,
-                [](const Class* self, const render::CameraProperties& camera,
-                    FrameId parent_frame, const math::RigidTransformd& X_PC,
-                    bool show_window) {
-                  systems::sensors::ImageRgba8U img(
-                      camera.width, camera.height);
-                  self->RenderColorImage(
-                      camera, parent_frame, X_PC, show_window, &img);
-                  return img;
-                }),
-            py::arg("camera"), py::arg("parent_frame"), py::arg("X_PC"),
-            py::arg("show_window") = false,
-            cls_doc.RenderColorImage.doc_deprecated)
-        .def("RenderDepthImage",
-            WrapDeprecated(cls_doc.RenderDepthImage.doc_deprecated,
-                [](const Class* self,
-                    const render::DepthCameraProperties& camera,
-                    FrameId parent_frame, const math::RigidTransformd& X_PC) {
-                  systems::sensors::ImageDepth32F img(
-                      camera.width, camera.height);
-                  self->RenderDepthImage(camera, parent_frame, X_PC, &img);
-                  return img;
-                }),
-            py::arg("camera"), py::arg("parent_frame"), py::arg("X_PC"),
-            cls_doc.RenderDepthImage.doc_deprecated)
-        .def("RenderLabelImage",
-            WrapDeprecated(cls_doc.RenderLabelImage.doc_deprecated,
-                [](const Class* self, const render::CameraProperties& camera,
-                    FrameId parent_frame, const math::RigidTransformd& X_PC,
-                    bool show_window = false) {
-                  systems::sensors::ImageLabel16I img(
-                      camera.width, camera.height);
-                  self->RenderLabelImage(
-                      camera, parent_frame, X_PC, show_window, &img);
-                  return img;
-                }),
-            py::arg("camera"), py::arg("parent_frame"), py::arg("X_PC"),
-            py::arg("show_window") = false,
-            cls_doc.RenderLabelImage.doc_deprecated);
-#pragma GCC diagnostic pop
 
     AddValueInstantiation<QueryObject<T>>(m);
   }
@@ -924,7 +769,7 @@ void DoScalarDependentDefinitions(py::module m, T) {
     auto cls = DefineTemplateClassWithDefault<Class>(
         m, "SignedDistancePair", param, doc.SignedDistancePair.doc);
     cls  // BR
-        .def(ParamInit<Class>(), doc.SignedDistancePair.ctor.doc_7args)
+        .def(ParamInit<Class>(), doc.SignedDistancePair.ctor.doc_6args)
         .def_readwrite("id_A", &SignedDistancePair<T>::id_A,
             doc.SignedDistancePair.id_A.doc)
         .def_readwrite("id_B", &SignedDistancePair<T>::id_B,
@@ -939,10 +784,22 @@ void DoScalarDependentDefinitions(py::module m, T) {
             doc.SignedDistancePair.distance.doc)
         .def_readwrite("nhat_BA_W", &SignedDistancePair<T>::nhat_BA_W,
             return_value_policy_for_scalar_type<T>(),
-            doc.SignedDistancePair.nhat_BA_W.doc)
-        .def_readwrite("is_nhat_BA_W_unique",
-            &SignedDistancePair<T>::is_nhat_BA_W_unique,
-            doc.SignedDistancePair.is_nhat_BA_W_unique.doc);
+            doc.SignedDistancePair.nhat_BA_W.doc);
+
+    constexpr char deprecated_unique_flag_doc[] =
+        "SignedDistancePair will no longer report uniqueness. If you require "
+        "knowledge of uniqueness, please contact the Drake team. This will be "
+        "removed on or after 2021-08-01.";
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    cls.def_property(
+        "is_nhat_BA_W_unique",
+        [](const Class* self) { return self->is_nhat_BA_W_unique; },
+        [](Class* self, int value) { self->is_nhat_BA_W_unique = value; },
+        deprecated_unique_flag_doc);
+#pragma GCC diagnostic pop
+
+    DeprecateAttribute(cls, "is_nhat_BA_W_unique", deprecated_unique_flag_doc);
   }
 
   // SignedDistanceToPoint
@@ -951,7 +808,7 @@ void DoScalarDependentDefinitions(py::module m, T) {
     auto cls = DefineTemplateClassWithDefault<Class>(
         m, "SignedDistanceToPoint", param, doc.SignedDistanceToPoint.doc);
     cls  // BR
-        .def(ParamInit<Class>(), doc.SignedDistanceToPoint.ctor.doc)
+        .def(ParamInit<Class>(), doc.SignedDistanceToPoint.ctor.doc_4args)
         .def_readwrite("id_G", &SignedDistanceToPoint<T>::id_G,
             doc.SignedDistanceToPoint.id_G.doc)
         .def_readwrite("p_GN", &SignedDistanceToPoint<T>::p_GN,
@@ -1116,54 +973,25 @@ void DoScalarIndependentDefinitions(py::module m) {
         .value("kReplace", Class::kReplace, cls_doc.kReplace.doc);
   }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  m.def("ConnectDrakeVisualizer",
-      WrapDeprecated(doc.ConnectDrakeVisualizer.doc_deprecated_4args,
-          py::overload_cast<systems::DiagramBuilder<double>*,
-              const SceneGraph<double>&, lcm::DrakeLcmInterface*,
-              geometry::Role>(&ConnectDrakeVisualizer)),
-      py::arg("builder"), py::arg("scene_graph"), py::arg("lcm") = nullptr,
-      py::arg("role") = geometry::Role::kIllustration,
-      // Keep alive, ownership: `return` keeps `builder` alive.
-      py::keep_alive<0, 1>(),
-      // Keep alive, reference: `builder` keeps `lcm` alive.
-      py::keep_alive<1, 3>(),
-      // See #11531 for why `py_rvp::reference` is needed.
-      py_rvp::reference, doc.ConnectDrakeVisualizer.doc_deprecated_4args);
-  m.def("ConnectDrakeVisualizer",
-      WrapDeprecated(doc.ConnectDrakeVisualizer.doc_deprecated_5args,
-          py::overload_cast<systems::DiagramBuilder<double>*,
-              const SceneGraph<double>&, const systems::OutputPort<double>&,
-              lcm::DrakeLcmInterface*, geometry::Role>(
-              &ConnectDrakeVisualizer)),
-      py::arg("builder"), py::arg("scene_graph"),
-      py::arg("pose_bundle_output_port"), py::arg("lcm") = nullptr,
-      py::arg("role") = geometry::Role::kIllustration,
-      // Keep alive, ownership: `return` keeps `builder` alive.
-      py::keep_alive<0, 1>(),
-      // Keep alive, reference: `builder` keeps `lcm` alive.
-      py::keep_alive<1, 3>(),
-      // See #11531 for why `py_rvp::reference` is needed.
-      py_rvp::reference, doc.ConnectDrakeVisualizer.doc_deprecated_5args);
-  m.def("DispatchLoadMessage",
-      WrapDeprecated(
-          doc.DispatchLoadMessage.doc_deprecated, &DispatchLoadMessage),
-      py::arg("scene_graph"), py::arg("lcm"),
-      py::arg("role") = geometry::Role::kIllustration,
-      doc.DispatchLoadMessage.doc_deprecated);
-#pragma GCC diagnostic pop
-
   {
     using Class = DrakeVisualizerParams;
     constexpr auto& cls_doc = doc.DrakeVisualizerParams;
-    py::class_<Class>(m, "DrakeVisualizerParams", cls_doc.doc)
+    py::class_<Class>(
+        m, "DrakeVisualizerParams", py::dynamic_attr(), cls_doc.doc)
         .def(ParamInit<Class>())
         .def_readwrite("publish_period", &DrakeVisualizerParams::publish_period,
             cls_doc.publish_period.doc)
         .def_readwrite("role", &DrakeVisualizerParams::role, cls_doc.role.doc)
         .def_readwrite("default_color", &DrakeVisualizerParams::default_color,
-            cls_doc.default_color.doc);
+            cls_doc.default_color.doc)
+        .def("__repr__", [](const Class& self) {
+          return py::str(
+              "DrakeVisualizerParams("
+              "publish_period={}, "
+              "role={}, "
+              "default_color={})")
+              .format(self.publish_period, self.role, self.default_color);
+        });
   }
 
   // Shape constructors
@@ -1357,8 +1185,55 @@ void DoScalarIndependentDefinitions(py::module m) {
   {
     using Class = GeometrySet;
     constexpr auto& cls_doc = doc.GeometrySet;
+    constexpr char extra_ctor_doc[] = "See main constructor";
+    // N.B. For containers, we use `std::vector<>` rather than abstract
+    // iterators / containers.
     py::class_<Class>(m, "GeometrySet", cls_doc.doc)
-        .def(py::init(), doc.GeometrySet.ctor.doc);
+        .def(py::init(), cls_doc.ctor.doc)
+        .def(py::init<GeometryId>(), py::arg("geometry_id"), extra_ctor_doc)
+        .def(py::init<FrameId>(), py::arg("frame_id"), extra_ctor_doc)
+        .def(py::init([](std::vector<GeometryId> geometry_ids) {
+          return Class(geometry_ids);
+        }),
+            py::arg("geometry_ids"), extra_ctor_doc)
+        .def(py::init([](std::vector<FrameId> frame_ids) {
+          return Class(frame_ids);
+        }),
+            py::arg("frame_ids"), extra_ctor_doc)
+        .def(py::init([](std::vector<GeometryId> geometry_ids,
+                          std::vector<FrameId> frame_ids) {
+          return Class(geometry_ids, frame_ids);
+        }),
+            py::arg("geometry_ids"), py::arg("frame_ids"), extra_ctor_doc)
+        .def(
+            "Add",
+            [](Class* self, const GeometryId& geometry_id) {
+              self->Add(geometry_id);
+            },
+            py::arg("geometry_id"), cls_doc.Add.doc)
+        .def(
+            "Add",
+            [](Class* self, const FrameId& frame_id) { self->Add(frame_id); },
+            py::arg("frame_id"), cls_doc.Add.doc)
+        .def(
+            "Add",
+            [](Class* self, std::vector<GeometryId> geometry_ids) {
+              self->Add(geometry_ids);
+            },
+            py::arg("geometry_ids"), extra_ctor_doc)
+        .def(
+            "Add",
+            [](Class* self, std::vector<FrameId> frame_ids) {
+              self->Add(frame_ids);
+            },
+            py::arg("frame_ids"), extra_ctor_doc)
+        .def(
+            "Add",
+            [](Class* self, std::vector<GeometryId> geometry_ids,
+                std::vector<FrameId> frame_ids) {
+              self->Add(geometry_ids, frame_ids);
+            },
+            py::arg("geometry_ids"), py::arg("frame_ids"), extra_ctor_doc);
   }
 
   // GeometryVersion
@@ -1408,11 +1283,14 @@ void DoScalarIndependentDefinitions(py::module m) {
       py_rvp::reference_internal, py::arg("diffuse"),
       doc.MakePhongIllustrationProperties.doc);
 
-  m.def("ReadObjToSurfaceMesh",
-      py::overload_cast<const std::string&, double>(
-          &geometry::ReadObjToSurfaceMesh),
+  m.def(
+      "ReadObjToSurfaceMesh",
+      [](const std::string& filename, double scale) {
+        return geometry::ReadObjToSurfaceMesh(filename, scale);
+      },
       py::arg("filename"), py::arg("scale") = 1.0,
-      doc.ReadObjToSurfaceMesh.doc_2args_filename_scale);
+      // N.B. We have not bound the optional "on_warning" argument.
+      doc.ReadObjToSurfaceMesh.doc_3args_filename_scale_on_warning);
 }
 
 void def_geometry(py::module m) {

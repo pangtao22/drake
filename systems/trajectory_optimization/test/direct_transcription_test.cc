@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <vector>
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
 #include "drake/common/eigen_types.h"
@@ -268,23 +269,25 @@ GTEST_TEST(DirectTranscriptionTest, ContinuousTimeSymbolicConstraintTest) {
   }
 }
 
-// This example tests the simple discrete-time System overload of the
-// constructor. The test sets up and solves the pendulum swing-up trajectory
-// optimization problem. It uses a discretized MultibodyPlant and constraints on
-// input torque, initial state, and final state.
-GTEST_TEST(DirectTranscriptionTest, DiscreteTimeSystemTest) {
+void SolvePendulumTrajectory(bool continuous_time) {
   // Only solve under SNOPT (IPOPT is unreliable here).
   solvers::SnoptSolver snopt_solver;
   if (!snopt_solver.is_available()) {
+    drake::log()->warn("SNOPT is unavaible; this test shall be skipped.");
     return;
   }
+
+  SCOPED_TRACE(fmt::format("continuous_time = {}", continuous_time));
 
   const char* const urdf_path =
       "drake/examples/pendulum/Pendulum.urdf";
 
-  // The time step here is somewhat arbitrary. The value chosen here provides
-  // a reasonably fast solve.
-  const double kTimeStep = 0.1;
+  // The time step here is somewhat arbitrary. The value chosen here
+  // provides a reasonably fast solve.
+  const double kFixedTimeStep = 0.1;
+
+  const double kTimeStep = continuous_time ? 0 : kFixedTimeStep;
+
   auto pendulum =
       std::make_unique<multibody::MultibodyPlant<double>>(kTimeStep);
   multibody::Parser parser(pendulum.get());
@@ -299,20 +302,25 @@ GTEST_TEST(DirectTranscriptionTest, DiscreteTimeSystemTest) {
   const InputPortIndex actuation_port_index =
       pendulum->get_actuation_input_port().get_index();
   const int kNumTimeSamples = 50;
-  DirectTranscription dirtran(pendulum.get(), *context, kNumTimeSamples,
-                              actuation_port_index);
+  std::unique_ptr<DirectTranscription> dirtran{};
+  if (continuous_time) {
+    dirtran = std::make_unique<DirectTranscription>(
+        pendulum.get(), *context, kNumTimeSamples, TimeStep(kFixedTimeStep),
+        actuation_port_index);
+  } else {
+    dirtran = std::make_unique<DirectTranscription>(
+        pendulum.get(), *context, kNumTimeSamples,
+        actuation_port_index);
+  }
 
   // Adds a torque actuation limit.
   const double kTorqueLimit = 3.0;  // N*m.
-  const solvers::VectorXDecisionVariable& u = dirtran.input();
-  dirtran.AddConstraintToAllKnotPoints(-kTorqueLimit <= u(0));
-  dirtran.AddConstraintToAllKnotPoints(u(0) <= kTorqueLimit);
+  const solvers::VectorXDecisionVariable& u = dirtran->input();
+  dirtran->AddConstraintToAllKnotPoints(-kTorqueLimit <= u(0));
+  dirtran->AddConstraintToAllKnotPoints(u(0) <= kTorqueLimit);
 
   BasicVector<double> initial_state(Eigen::VectorXd::Zero(2));
   BasicVector<double> final_state(Eigen::VectorXd::Zero(2));
-
-  DRAKE_DEMAND(initial_state.size() == 2);
-  DRAKE_DEMAND(final_state.size() == 2);
 
   // Set the initial and final state constraints.
   const int kTheta_index = 0, kThetadot_index = 1;
@@ -320,21 +328,33 @@ GTEST_TEST(DirectTranscriptionTest, DiscreteTimeSystemTest) {
   initial_state.SetAtIndex(kThetadot_index, 0.0);
   final_state.SetAtIndex(kTheta_index, M_PI);
   final_state.SetAtIndex(kThetadot_index, 0.0);
-  dirtran.AddLinearConstraint(dirtran.initial_state() ==
-                              initial_state.get_value());
-  dirtran.AddLinearConstraint(dirtran.final_state() == final_state.get_value());
+  dirtran->AddLinearConstraint(dirtran->initial_state() ==
+                               initial_state.get_value());
+  dirtran->AddLinearConstraint(dirtran->final_state() ==
+                               final_state.get_value());
 
   const double R = 10;  // Cost on input "effort".
-  dirtran.AddRunningCost((R * u) * u);
+  dirtran->AddRunningCost((R * u) * u);
 
   // Create an initial guess for the state trajectory.
   const double timespan_init = 4;
   auto traj_init_x = PiecewisePolynomial<double>::FirstOrderHold(
-      {0, timespan_init}, {initial_state.get_value(), final_state.get_value()});
-  dirtran.SetInitialTrajectory(PiecewisePolynomial<double>(), traj_init_x);
+      {0, timespan_init},
+      {initial_state.get_value(), final_state.get_value()});
+  dirtran->SetInitialTrajectory(PiecewisePolynomial<double>(), traj_init_x);
 
-  const auto result = snopt_solver.Solve(dirtran, {}, {});
-  DRAKE_DEMAND(result.is_success());
+  const auto result = snopt_solver.Solve(*dirtran, {}, {});
+  EXPECT_TRUE(result.is_success());
+}
+
+// Tests that MultibodyPlant can be optimized using both the discrete and
+// continuous time entry points into the plant.
+GTEST_TEST(DirectTranscriptionTest, MultibodyDiscreteTest) {
+  SolvePendulumTrajectory(false);
+}
+
+GTEST_TEST(DirectTranscriptionTest, MultibodyContinuousTest) {
+  SolvePendulumTrajectory(true);
 }
 
 GTEST_TEST(DirectTranscriptionTest, DiscreteTimeLinearSystemTest) {

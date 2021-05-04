@@ -359,14 +359,25 @@ class TestGeneral(unittest.TestCase):
             system = Adder_[T](1, 1)
             # N.B. Current scalar conversion does not permit conversion to and
             # from the same type.
+            if T != float:
+                methods = [Adder_[T].ToScalarType[float],
+                           Adder_[T].ToScalarTypeMaybe[float]]
+                for method in methods:
+                    system_float = method(system)
+                    self.assertIsInstance(system_float, System_[float])
+                    self._compare_system_instances(system, system_float)
             if T != AutoDiffXd:
-                methods = [Adder_[T].ToAutoDiffXd, Adder_[T].ToAutoDiffXdMaybe]
+                methods = [Adder_[T].ToAutoDiffXd, Adder_[T].ToAutoDiffXdMaybe,
+                           Adder_[T].ToScalarType[AutoDiffXd],
+                           Adder_[T].ToScalarTypeMaybe[AutoDiffXd]]
                 for method in methods:
                     system_ad = method(system)
                     self.assertIsInstance(system_ad, System_[AutoDiffXd])
                     self._compare_system_instances(system, system_ad)
             if T != Expression:
-                methods = [Adder_[T].ToSymbolic, Adder_[T].ToSymbolicMaybe]
+                methods = [Adder_[T].ToSymbolic, Adder_[T].ToSymbolicMaybe,
+                           Adder_[T].ToScalarType[Expression],
+                           Adder_[T].ToScalarTypeMaybe[Expression]]
                 for method in methods:
                     system_sym = method(system)
                     self.assertIsInstance(system_sym, System_[Expression])
@@ -441,9 +452,14 @@ class TestGeneral(unittest.TestCase):
             # Reuse simulator over the same time interval, without
             # initialization events.
             context.SetTime(0.)
-            simulator.Initialize(InitializeParams(
-                suppress_initialization_events=True))
+            params = InitializeParams(suppress_initialization_events=True)
+            simulator.Initialize(params)
             simulator.AdvanceTo(1)
+
+            # Check repr while we're here.
+            self.assertEqual(repr(params), "".join([
+                "InitializeParams("
+                "suppress_initialization_events=True)"]))
 
     def test_copy(self):
         # Copy a context using `deepcopy` or `clone`.
@@ -881,3 +897,6 @@ class TestGeneral(unittest.TestCase):
         self.assertEqual(adder1.get_name(), "adder1")
         adder2 = builder.AddNamedSystem(name="adder2", system=Adder(5, 8))
         self.assertEqual(adder2.get_name(), "adder2")
+
+    def test_module_constants(self):
+        self.assertEqual(repr(kUseDefaultName), "kUseDefaultName")

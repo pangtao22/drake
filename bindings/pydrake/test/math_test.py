@@ -11,6 +11,7 @@ from pydrake.common.test_utilities.pickle_compare import assert_pickle
 
 import copy
 import math
+import textwrap
 import unittest
 
 import numpy as np
@@ -52,9 +53,6 @@ class TestBarycentricMesh(unittest.TestCase):
 
         values = mesh.MeshValuesFrom(mynorm)
         self.assertEqual(values.size, 4)
-
-    def test_wrap_to(self):
-        self.assertEqual(wrap_to(1.5, 0., 1.), .5)
 
 
 # TODO(eric.cousineau): Test wrappings against non-identity transforms.
@@ -184,6 +182,30 @@ class TestMath(unittest.TestCase):
         p_AQlist = np.array([p_AQ, p_AQ]).T
         numpy_compare.assert_float_equal(
             X_AB.multiply(p_BoQ_B=p_BQlist), p_AQlist)
+        # - Repr.
+        z = repr(T(0.0))
+        i = repr(T(1.0))
+        type_suffix = {
+            float: "",
+            AutoDiffXd: "_[AutoDiffXd]",
+            Expression: "_[Expression]",
+        }[T]
+        self.assertEqual(repr(RigidTransform()), textwrap.dedent(f"""\
+        RigidTransform{type_suffix}(
+          R=RotationMatrix{type_suffix}([
+            [{i}, {z}, {z}],
+            [{z}, {i}, {z}],
+            [{z}, {z}, {i}],
+          ]),
+          p=[{z}, {z}, {z}],
+        )"""))
+        if T == float:
+            # TODO(jwnimmer-tri) Once AutoDiffXd and Expression implement an
+            # eval-able repr, then we can test more than just T=float here.
+            roundtrip = eval(repr(RigidTransform()))
+            # TODO(jwnimmer-tri) Once IsExactlyEqualTo is bound, we can easily
+            # check the contents of the roundtrip object here.
+            self.assertIsInstance(roundtrip, RigidTransform)
         # Test pickling.
         assert_pickle(self, X_AB, RigidTransform.GetAsMatrix4, T=T)
 
@@ -268,6 +290,25 @@ class TestMath(unittest.TestCase):
         R = RotationMatrix()
         numpy_compare.assert_equal(R.IsExactlyIdentity(), True)
         numpy_compare.assert_equal(R.IsIdentityToInternalTolerance(), True)
+        # - Repr.
+        z = repr(T(0.0))
+        i = repr(T(1.0))
+        type_suffix = {
+            float: "",
+            AutoDiffXd: "_[AutoDiffXd]",
+            Expression: "_[Expression]",
+        }[T]
+        self.assertEqual(repr(RotationMatrix()), textwrap.dedent(f"""\
+        RotationMatrix{type_suffix}([
+          [{i}, {z}, {z}],
+          [{z}, {i}, {z}],
+          [{z}, {z}, {i}],
+        ])"""))
+        if T == float:
+            # TODO(jwnimmer-tri) Once AutoDiffXd and Expression implement an
+            # eval-able repr, then we can test more than just T=float here.
+            roundtrip = eval(repr(RotationMatrix()))
+            self.assertTrue(roundtrip.IsExactlyIdentity())
         # Test pickling.
         assert_pickle(self, R_AB, RotationMatrix.matrix, T=T)
 
@@ -349,6 +390,12 @@ class TestMath(unittest.TestCase):
             [0, 1])
         numpy_compare.assert_float_equal(
             bspline.EvaluateBasisFunctionI(i=0, parameter_value=5.7), 0.)
+
+    @numpy_compare.check_all_types
+    def test_wrap_to(self, T):
+        value = wrap_to(T(1.5), T(0.), T(1.))
+        if T != Expression:
+            self.assertEqual(value, T(.5))
 
     def test_orthonormal_basis(self):
         R = mut.ComputeBasisFromAxis(axis_index=0, axis_W=[1, 0, 0])

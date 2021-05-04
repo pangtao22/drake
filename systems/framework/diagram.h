@@ -97,11 +97,6 @@ class Diagram : public System<T>, internal::SystemParentServiceInterface {
   std::vector<InputPortLocator> GetInputPortLocators(
       InputPortIndex port_index) const;
 
-  /// Returns an arbitrary "locator" for one of the subsystem input ports that
-  /// were exported to the @p port_index input port for the Diagram.
-  DRAKE_DEPRECATED("2021-04-01", "Use GetInputPortLocators() instead.")
-  InputPortLocator get_input_port_locator(InputPortIndex port_index) const;
-
   /// Returns the "locator" for the subsystem output port that was exported as
   /// the @p port_index output port for the Diagram.
   const OutputPortLocator& get_output_port_locator(
@@ -533,6 +528,11 @@ class Diagram : public System<T>, internal::SystemParentServiceInterface {
 
   // The map of subsystem inputs to inputs of this Diagram.
   std::map<InputPortLocator, InputPortIndex> input_port_map_;
+
+  // The index of a cache entry that stores a buffer of time data for use in
+  // managing events. It is only used in DoCalcNextUpdateTime(), but is
+  // allocated as a cache entry to avoid heap operations during simulation.
+  CacheIndex event_times_buffer_cache_index_{};
 
   // For all T, Diagram<T> considers DiagramBuilder<T> a friend, so that the
   // builder can set the internal state correctly.

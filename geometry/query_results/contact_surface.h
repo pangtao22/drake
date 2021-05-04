@@ -8,8 +8,8 @@
 #include "drake/common/drake_copyable.h"
 #include "drake/common/eigen_types.h"
 #include "drake/geometry/geometry_ids.h"
-#include "drake/geometry/proximity/mesh_field_linear.h"
 #include "drake/geometry/proximity/surface_mesh.h"
+#include "drake/geometry/proximity/surface_mesh_field.h"
 #include "drake/math/rigid_transform.h"
 
 namespace drake {
@@ -224,28 +224,6 @@ class ContactSurface {
   /** Returns the geometry id of Geometry N. */
   GeometryId id_N() const { return id_N_; }
 
-  // TODO(damrongguoy) Consider removing these evaluation methods and instead
-  // make the fields accessible, and then evaluate the fields directly.
-
-  /** Evaluates the scalar field eₘₙ at Point Q in a triangle.
-    Point Q is specified by its barycentric coordinates.
-    @param face         The face index of the triangle.
-    @param barycentric  The barycentric coordinates of Q on the triangle.
-   */
-  T EvaluateE_MN(
-      SurfaceFaceIndex face,
-      const typename SurfaceMesh<T>::Barycentric& barycentric) const {
-    return e_MN_->Evaluate(face, barycentric);
-  }
-
-  /** Evaluates the scalar field eₘₙ at the given vertex on the contact surface
-    mesh.
-    @param vertex       The index of the vertex in the mesh.
-   */
-  T EvaluateE_MN(SurfaceVertexIndex vertex) const {
-    return e_MN_->EvaluateAtVertex(vertex);
-  }
-
   /** @name  Evaluation of constituent pressure fields
 
    The %ContactSurface *provisionally* includes the gradients of the constituent
@@ -307,29 +285,25 @@ class ContactSurface {
   }
 
   /** Returns a reference to the scalar field eₘₙ. */
-  const MeshField<T, SurfaceMesh<T>>& e_MN() const { return *e_MN_; }
+  const SurfaceMeshFieldLinear<T, T>& e_MN() const { return *e_MN_; }
 
   // TODO(#12173): Consider NaN==NaN to be true in equality tests.
   /** Checks to see whether the given ContactSurface object is equal via deep
    exact comparison. NaNs are treated as not equal as per the IEEE standard.
-   @note Currently requires the fields of the objects to be of type
-   MeshFieldLinear, otherwise the current simple checking of equal values at
-   vertices is insufficient.
+
    @param surface The contact surface for comparison.
    @returns `true` if the given contact surface is equal.
    */
   bool Equal(const ContactSurface<T>& surface) const {
     // First check the meshes.
-    if (!this->mesh_W().Equal(surface.mesh_W()))
-      return false;
+    if (!this->mesh_W().Equal(surface.mesh_W())) return false;
 
     // Now examine the pressure field.
-    const auto* pressure_field =
-        dynamic_cast<const MeshFieldLinear<T, SurfaceMesh<T>>*>(
-            &(this->e_MN()));
-    DRAKE_DEMAND(pressure_field);
-    if (!pressure_field->Equal(surface.e_MN()))
-      return false;
+    if (!this->e_MN().Equal(surface.e_MN())) return false;
+
+    // TODO(SeanCurtis-TRI) This isn't testing the following quantities:
+    //  1. Geometry ids
+    //  2. Gradients.
 
     // All checks passed.
     return true;

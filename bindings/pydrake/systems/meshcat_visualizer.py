@@ -87,8 +87,7 @@ def AddTriad(vis, name, prefix, length=1., radius=0.04, opacity=1.):
 class MeshcatVisualizer(LeafSystem):
     """
     MeshcatVisualizer is a System block that connects to the query output port
-    of a SceneGraph and visualizes the scene in Meshcat.  (The class also has
-    deprecated support for connecting to the pose bundle output of SceneGraph.)
+    of a SceneGraph and visualizes the scene in Meshcat.
 
     The most common workflow would be to run::
 
@@ -136,7 +135,7 @@ class MeshcatVisualizer(LeafSystem):
                  prefix="drake",
                  zmq_url="default",
                  open_browser=None,
-                 frames_to_draw={},
+                 frames_to_draw=[],
                  frames_opacity=1.,
                  axis_length=0.15,
                  axis_radius=0.006,
@@ -164,12 +163,12 @@ class MeshcatVisualizer(LeafSystem):
                 default web browser.  The default value of None will open the
                 browser iff a new meshcat server is created as a subprocess.
                 Set to False to disable this.
-            frames_to_draw: a dictionary describing which body frames to draw.
-                It is keyed on the names of model instances, and the values are
-                sets of the names of the bodies whose body frames are shown.
-                For example, if we want to draw the frames of body "A" and
-                "B" in model instance "1", then frames_to_draw is
-                    {"1": {"A", "B"}}.
+            frames_to_draw: a list or array containing pydrake.geometry.FrameId
+                for which body frames to draw. Note that these are frames
+                registered within the scene_graph. For multibody frames, users
+                may obtain the ids from plant using GetBodyFrameIdIfExists.
+                Currently, frames that are not body frames are not supported
+                as they do not exist in the scene_graph yet.
             frames_opacity, axis_length and axis_radius are the opacity, length
                 and radius of the coordinate axes to be drawn.
             delete_prefix_on_load: Specifies whether we should delete the
@@ -203,11 +202,7 @@ class MeshcatVisualizer(LeafSystem):
         self._is_recording = False
         self.reset_recording()
 
-        # Deprecated
-        self._lcm_visualization_input_port = self.DeclareAbstractInputPort(
-            "lcm_visualization", AbstractValue.Make(PoseBundle(0)))
         self._scene_graph = scene_graph
-        self._warned_pose_bundle_input_port_connected = False
 
         self._geometry_query_input_port = self.DeclareAbstractInputPort(
             "geometry_query", AbstractValue.Make(QueryObject()))
@@ -249,7 +244,7 @@ class MeshcatVisualizer(LeafSystem):
         self._dynamic_frames = []
 
         # drawing coordinate frames
-        self.frames_to_draw = frames_to_draw
+        self.frames_to_draw = set(frames_to_draw)
         self.frames_opacity = frames_opacity
         self.axis_length = axis_length
         self.axis_radius = axis_radius
@@ -420,55 +415,45 @@ class MeshcatVisualizer(LeafSystem):
                 geometry_vis.set_object(geom, material)
                 geometry_vis.set_transform(X_FG)
 
+                if frame_id in self.frames_to_draw:
+                    AddTriad(
+                        self.vis,
+                        name=name,
+                        prefix=self.prefix + "/" + name,
+                        length=self.axis_length,
+                        radius=self.axis_radius,
+                        opacity=self.frames_opacity
+                    )
+                    self.frames_to_draw.remove(frame_id)
+
             if frame_id != inspector.world_frame_id():
                 self._dynamic_frames.append({
                     "id": frame_id,
                     "name": name,
                 })
 
+        # Loop through the input frames_to_draw list and warn the user if the
+        # frame_id does not exist in the scene graph.
+        for frame_id in self.frames_to_draw:
+            warnings.warn(f"Non-existent frame {frame_id} ignored")
+            continue
+
     def DoPublish(self, context, event):
 
         LeafSystem.DoPublish(self, context, event)
 
-        if (not self._warned_pose_bundle_input_port_connected
-                and self._lcm_visualization_input_port.HasValue(context)):
-            _warn_deprecated(
-                "The pose_bundle input port is deprecated.  Use e.g.\n"
-                "builder.Connect("
-                "scene_graph.get_query_output_port(), "
-                "visualizer.get_geometry_query_input_port())\n"
-                "instead.", date="2021-04-01")
-            self._warned_pose_bundle_input_port_connected = True
-
         vis = self.vis[self.prefix]
-        if self.get_geometry_query_input_port().HasValue(context):
-            # New workflow, using SceneGraph's QueryObject.
-            query_object = self.get_geometry_query_input_port().Eval(context)
 
-            for frame in self._dynamic_frames:
-                frame_vis = vis[frame['name']]
-                X_WF = query_object.GetPoseInWorld(frame['id'])
-                frame_vis.set_transform(X_WF.GetAsMatrix4())
-                if self._is_recording:
-                    with self._animation.at_frame(
-                            frame_vis, self._recording_frame_num) as f:
-                        f.set_transform(X_WF.GetAsMatrix4())
-        else:
-            # Deprecated workflow.
-            pose_bundle = self._lcm_visualization_input_port.Eval(context)
+        query_object = self.get_geometry_query_input_port().Eval(context)
 
-            for frame_i in range(pose_bundle.get_num_poses()):
-                # Note: MBP declares frames with SceneGraph using `::`, we
-                # replace those with `/` here to expose the full tree to
-                # meshcat.
-                name = pose_bundle.get_name(frame_i).replace("::", "/")
-                frame_vis = vis[name]
-                pose_matrix = pose_bundle.get_transform(frame_i)
-                frame_vis.set_transform(pose_matrix.GetAsMatrix4())
-                if self._is_recording:
-                    with self._animation.at_frame(
-                            frame_vis, self._recording_frame_num) as f:
-                        f.set_transform(pose_matrix.GetAsMatrix4())
+        for frame in self._dynamic_frames:
+            frame_vis = vis[frame['name']]
+            X_WF = query_object.GetPoseInWorld(frame['id'])
+            frame_vis.set_transform(X_WF.GetAsMatrix4())
+            if self._is_recording:
+                with self._animation.at_frame(
+                        frame_vis, self._recording_frame_num) as f:
+                    f.set_transform(X_WF.GetAsMatrix4())
 
         if self._is_recording:
             self._recording_frame_num += 1
@@ -512,9 +497,8 @@ class MeshcatVisualizer(LeafSystem):
 class MeshcatContactVisualizer(LeafSystem):
     """
     MeshcatContactVisualizer is a System block that visualizes contact
-    forces. It is connected to (1) the pose bundle output port of a SceneGraph,
-    and (2) the contact results output port of the SceneGraph's associated
-    MultibodyPlant.
+    forces. It is connected to the contact results output port of
+    SceneGraph's associated MultibodyPlant.
     """
     # TODO(russt): I am currently drawing both (equal and opposite) vector for
     # each contact.  Consider taking an additional option in the constructor to
@@ -550,15 +534,11 @@ class MeshcatContactVisualizer(LeafSystem):
         self.set_name('meshcat_contact_visualizer')
         self.DeclarePeriodicPublish(self._meshcat_viz.draw_period, 0.0)
 
-        # Pose bundle (from SceneGraph) input port.
-        self.DeclareAbstractInputPort("pose_bundle",
-                                      AbstractValue.Make(PoseBundle(0)))
         # Contact results input port from MultibodyPlant
         self.DeclareAbstractInputPort(
             "contact_results", AbstractValue.Make(ContactResults()))
 
         # This system has undeclared states, see #4330.
-        self._warned_pose_bundle_input_port_connected = False
         self._published_contacts = []
 
         # Zap any previous contact forces on this prefix
@@ -568,15 +548,7 @@ class MeshcatContactVisualizer(LeafSystem):
     def DoPublish(self, context, event):
         LeafSystem.DoPublish(self, context, event)
 
-        if (not self._warned_pose_bundle_input_port_connected
-                and self.get_input_port(0).HasValue(context)):
-            _warn_deprecated(
-                "The pose_bundle input port of MeshcatContactVisualizer is"
-                "deprecated; use the geometry_query inport port instead.",
-                date="2021-04-01")
-            self._warned_pose_bundle_input_port_connected = True
-
-        contact_results = self.EvalAbstractInput(context, 1).get_value()
+        contact_results = self.EvalAbstractInput(context, 0).get_value()
 
         vis = self._meshcat_viz.vis[self._meshcat_viz.prefix]["contact_forces"]
         contacts = []
@@ -675,7 +647,8 @@ class MeshcatPointCloudVisualizer(LeafSystem):
         viz = meshcat.Visualizer()
         pc_viz = builder.AddSystem(MeshcatPointCloudVisualizer(viz))
 
-    System YAML
+    .. pydrake_system::
+
         name: MeshcatPointCloudVisualizer
         input_ports:
         - point_cloud_P
@@ -763,13 +736,6 @@ def ConnectMeshcatVisualizer(builder, scene_graph=None, output_port=None,
         constructed visualizer.
     """
     visualizer = builder.AddSystem(MeshcatVisualizer(scene_graph, **kwargs))
-
-    if output_port and isinstance(output_port.Allocate().get_value(),
-                                  PoseBundle):
-        # TODO(russt): Remove this code path on deprecation of the pose_bundle
-        # api.
-        builder.Connect(output_port, visualizer.get_input_port(0))
-        return visualizer
 
     if output_port is None:
         assert scene_graph, ("If no output_port is specified, then the "

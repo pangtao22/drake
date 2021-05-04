@@ -48,16 +48,6 @@ PositionConstraint::PositionConstraint(
     throw std::invalid_argument("plant_context is nullptr.");
 }
 
-template <typename T>
-void EvalConstraintGradient(const systems::Context<T>&,
-                            const MultibodyPlant<T>&, const Frame<T>&,
-                            const Frame<T>&, const Vector3<T>& p_AQ,
-                            const Eigen::Vector3d&,
-                            const Eigen::Ref<const VectorX<T>>&,
-                            VectorX<T>* y) {
-  *y = p_AQ;
-}
-
 void EvalConstraintGradient(const systems::Context<double>& context,
                             const MultibodyPlant<double>& plant,
                             const Frame<double>& frameA,
@@ -66,11 +56,12 @@ void EvalConstraintGradient(const systems::Context<double>& context,
                             const Eigen::Vector3d& p_BQ,
                             const Eigen::Ref<const AutoDiffVecXd>& x,
                             AutoDiffVecXd* y) {
-  Eigen::MatrixXd Jq_V_ABq(6, plant.num_positions());
-  plant.CalcJacobianSpatialVelocity(context, JacobianWrtVariable::kQDot, frameB,
-                                    p_BQ, frameA, frameA, &Jq_V_ABq);
+  Eigen::Matrix3Xd Jq_V_ABq(3, plant.num_positions());
+  plant.CalcJacobianTranslationalVelocity(context, JacobianWrtVariable::kQDot,
+                                          frameB, p_BQ, frameA, frameA,
+                                          &Jq_V_ABq);
   *y = math::initializeAutoDiffGivenGradientMatrix(
-      p_AQ, Jq_V_ABq.bottomRows<3>() * math::autoDiffToGradientMatrix(x));
+      p_AQ, Jq_V_ABq * math::autoDiffToGradientMatrix(x));
 }
 
 template <typename T, typename S>
@@ -84,7 +75,11 @@ void DoEvalGeneric(const MultibodyPlant<T>& plant, systems::Context<T>* context,
   const Frame<T>& frameB = plant.get_frame(frameB_index);
   Vector3<T> p_AQ;
   plant.CalcPointsPositions(*context, frameB, p_BQ.cast<T>(), frameA, &p_AQ);
-  EvalConstraintGradient(*context, plant, frameA, frameB, p_AQ, p_BQ, x, y);
+  if constexpr (std::is_same_v<T, S>) {
+    *y = p_AQ;
+  } else {
+    EvalConstraintGradient(*context, plant, frameA, frameB, p_AQ, p_BQ, x, y);
+  }
 }
 
 void PositionConstraint::DoEval(const Eigen::Ref<const Eigen::VectorXd>& x,

@@ -119,6 +119,10 @@ class GeometryState {
     return ids;
   }
 
+  /** Implementation of SceneGraphInspector::GetGeometryIds().  */
+  std::unordered_set<GeometryId> GetGeometryIds(
+      const GeometrySet& geometry_set, const std::optional<Role>& role) const;
+
   /** Implementation of SceneGraphInspector::NumGeometriesWithRole().  */
   int NumGeometriesWithRole(Role role) const;
 
@@ -498,39 +502,6 @@ class GeometryState {
   /** Implementation of SceneGraph::RegisteredRendererNames().  */
   std::vector<std::string> RegisteredRendererNames() const;
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  /** Implementation of QueryObject::RenderColorImage().
-   @pre All poses have already been updated.  */
-  DRAKE_DEPRECATED("2021-04-01",
-                   "CameraProperties are being deprecated. Please use the "
-                   "ColorRenderCamera variant.")
-  void RenderColorImage(const render::CameraProperties& camera,
-                        FrameId parent_frame, const math::RigidTransformd& X_PC,
-                        bool show_window,
-                        systems::sensors::ImageRgba8U* color_image_out) const;
-
-  /** Implementation of QueryObject::RenderDepthImage().
-   @pre All poses have already been updated.  */
-  DRAKE_DEPRECATED("2021-04-01",
-                   "CameraProperties are being deprecated. Please use the "
-                   "DepthRenderCamera variant.")
-  void RenderDepthImage(const render::DepthCameraProperties& camera,
-                        FrameId parent_frame, const math::RigidTransformd& X_PC,
-                        systems::sensors::ImageDepth32F* depth_image_out) const;
-
-  /** Implementation of QueryObject::RenderLabelImage().
-   @pre All poses have already been updated.  */
-  DRAKE_DEPRECATED("2021-04-01",
-                   "CameraProperties are being deprecated. Please use the "
-                   "ColorRenderCamera variant.")
-  void RenderLabelImage(const render::CameraProperties& camera,
-                        FrameId parent_frame, const math::RigidTransformd& X_PC,
-                        bool show_window,
-                        systems::sensors::ImageLabel16I* label_image_out) const;
-
-#pragma GCC diagnostic pop
-
   /** Implementation of QueryObject::RenderColorImage().
    @pre All poses have already been updated.  */
   void RenderColorImage(const render::ColorRenderCamera& camera,
@@ -607,11 +578,6 @@ class GeometryState {
     }
   }
 
-  // NOTE: This friend class is responsible for evaluating the internals of
-  // a GeometryState and translating it into the appropriate visualization
-  // mechanism.
-  friend class internal::GeometryVisualizationImpl;
-
   // Allow SceneGraph unique access to the state members to perform queries.
   friend class SceneGraph<T>;
 
@@ -630,6 +596,9 @@ class GeometryState {
   // defined in terms of geometry ids *and* frame ids). If GeometrySet only
   // has GeometryIds, it is essentially a copy. Ids that can't be identified
   // will cause an exception to be thrown.
+  // The ids can be optionally filtered based on role. If `role` is nullopt,
+  // no filtering takes place. Otherwise, just those geometries with the given
+  // role will be returned.
   // TODO(SeanCurtis-TRI): Because all geometries only have a single id
   // type, we have two sets of the same id type. The compiler cannot know
   // that only anchored geometries go into the anchored set and only dynamic go
@@ -643,7 +612,8 @@ class GeometryState {
   // id type in both sets.
   void CollectIds(const GeometrySet& geometry_set,
                   std::unordered_set<GeometryId>* dynamic,
-                  std::unordered_set<GeometryId>* anchored);
+                  std::unordered_set<GeometryId>* anchored,
+                  const std::optional<Role>& role) const;
 
   // Sets the kinematic poses for the frames indicated by the given ids.
   // @param poses The frame id and pose values.

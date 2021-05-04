@@ -52,20 +52,6 @@ int GetVariableSize(const multibody::MultibodyPlant<T>& plant,
   DRAKE_UNREACHABLE();
 }
 
-Eigen::VectorBlock<const VectorX<double>> CopyIfNotPodType(
-    Eigen::VectorBlock<const VectorX<double>> x) {
-  // N.B. This references the existing vector's data, and does not perform a
-  // copy.
-  return x;
-}
-
-template <typename T>
-VectorX<T> CopyIfNotPodType(Eigen::VectorBlock<const VectorX<T>> x) {
-  // N.B. This copies the vector's data.
-  // TODO(eric.cousineau): Remove this once #8116 is resolved.
-  return x;
-}
-
 /**
  * Adds Python bindings for its contents to module `m`, for template `T`.
  * @param m Module.
@@ -752,7 +738,10 @@ void DoScalarDependentDefinitions(py::module m, T) {
             },
             py::arg("body"), cls_doc.GetBodiesWeldedTo.doc)
         .def("GetTopologyGraphvizString", &Class::GetTopologyGraphvizString,
-            cls_doc.GetTopologyGraphvizString.doc);
+            cls_doc.GetTopologyGraphvizString.doc)
+        .def("get_force_element", &Class::get_force_element,
+            py::arg("force_element_index"), py_rvp::reference_internal,
+            cls_doc.get_force_element.doc);
     // Geometry.
     cls  // BR
         .def("RegisterAsSourceForSceneGraph",

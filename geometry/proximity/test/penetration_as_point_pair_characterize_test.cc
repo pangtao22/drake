@@ -53,29 +53,113 @@ class CharacterizePointPairResultTest : public CharacterizeResultTest<T> {
  public:
   CharacterizePointPairResultTest()
       : CharacterizeResultTest<T>(make_unique<PenetrationCallback<T>>()) {}
+
+  std::vector<double> TestDistances() const final {
+    return {-this->kDistance};
+  }
 };
 
-using ScalarTypes = ::testing::Types<double, AutoDiffXd>;
-TYPED_TEST_SUITE(CharacterizePointPairResultTest, ScalarTypes);
+/* *-Mesh has not been implemented because Mesh is represented by Convex.
+ However, this single test will detect when that condition is no longer true
+ and call for implementation of *-Mesh tests. */
+GTEST_TEST(CharacterizePointPairResultTest, MeshMesh) {
+  ASSERT_TRUE(MeshIsConvex());
+}
 
-TYPED_TEST(CharacterizePointPairResultTest, SphereSphere) {
-  using T = TypeParam;
-  Expectation expect{.can_compute = true, .max_error = -1, .error_message = ""};
-  if constexpr (std::is_same<T, double>::value) {
-    expect.max_error = 8e-16;
-  } else {
-    expect.max_error = 3e-15;
-  }
-  // Orient the sphere arbitrarily and separate them *almost* by their combined
-  // radii.
-  const Sphere sphere = this->sphere();
-  const RigidTransform<T> X_AB(
-      RotationMatrix<T>(
-          AngleAxis<T>(M_PI * 9 / 7, Vector3<T>{-1, 2, 1}.normalized())),
-      Vector3<T>{1, -1, 2}.normalized() *
-          (sphere.radius() * 2 - this->kDistance));
-  vector<Configuration<T>> configs{{X_AB, -this->kDistance}};
-  this->RunCharacterization(expect, sphere, sphere, configs);
+class DoubleTest : public CharacterizePointPairResultTest<double>,
+                   public testing::WithParamInterface<QueryInstance> {};
+
+// clang-format off
+INSTANTIATE_TEST_SUITE_P(
+    PenetrationAsPointPair, DoubleTest,
+    testing::Values(
+        QueryInstance(kBox, kBox, 2e-15),
+        QueryInstance(kBox, kCapsule, 3e-5),
+        QueryInstance(kBox, kConvex, 2e-15),
+        QueryInstance(kBox, kCylinder, 1e-3),
+        QueryInstance(kBox, kEllipsoid, 4e-4),
+        QueryInstance(kBox, kHalfSpace, 6e-15),
+        QueryInstance(kBox, kSphere, 3e-15),
+
+        QueryInstance(kCapsule, kCapsule, 2e-5),
+        QueryInstance(kCapsule, kConvex, 3e-5),
+        QueryInstance(kCapsule, kCylinder, 4e-5),
+        QueryInstance(kCapsule, kEllipsoid, 2e-4),
+        QueryInstance(kCapsule, kHalfSpace, 4e-15),
+        QueryInstance(kCapsule, kSphere, 5e-15),
+
+        QueryInstance(kConvex, kConvex, 2e-15),
+        QueryInstance(kConvex, kCylinder, 1e-3),
+        QueryInstance(kConvex, kEllipsoid, 4e-4),
+        QueryInstance(kConvex, kHalfSpace, 3e-15),
+        QueryInstance(kConvex, kSphere, 3e-5),
+
+        QueryInstance(kCylinder, kCylinder, 2e-3),
+        QueryInstance(kCylinder, kEllipsoid, 2e-3),
+        QueryInstance(kCylinder, kHalfSpace, 4e-15),
+        QueryInstance(kCylinder, kSphere, 5e-15),
+
+        QueryInstance(kEllipsoid, kEllipsoid, 5e-4),
+        QueryInstance(kEllipsoid, kHalfSpace, 3e-15),
+        QueryInstance(kEllipsoid, kSphere, 2e-4),
+
+        QueryInstance(kHalfSpace, kHalfSpace, kThrows),
+        QueryInstance(kHalfSpace, kSphere, 3e-15),
+
+        QueryInstance(kSphere, kSphere, 5e-15)),
+    QueryInstanceName);
+// clang-format on
+
+TEST_P(DoubleTest, Characterize) {
+  this->RunCharacterization(GetParam());
+}
+
+class AutoDiffTest : public CharacterizePointPairResultTest<AutoDiffXd>,
+                     public testing::WithParamInterface<QueryInstance> {};
+
+// clang-format off
+INSTANTIATE_TEST_SUITE_P(
+    PenetrationAsPointPair, AutoDiffTest,
+    testing::Values(
+        QueryInstance(kBox, kBox, kThrows),
+        QueryInstance(kBox, kCapsule, kThrows),
+        QueryInstance(kBox, kConvex, kThrows),
+        QueryInstance(kBox, kCylinder, kThrows),
+        QueryInstance(kBox, kEllipsoid, kThrows),
+        QueryInstance(kBox, kHalfSpace, kThrows),
+        QueryInstance(kBox, kSphere, 2e-15),
+
+        QueryInstance(kCapsule, kCapsule, kThrows),
+        QueryInstance(kCapsule, kConvex, kThrows),
+        QueryInstance(kCapsule, kCylinder, kThrows),
+        QueryInstance(kCapsule, kEllipsoid, kThrows),
+        QueryInstance(kCapsule, kHalfSpace, kThrows),
+        QueryInstance(kCapsule, kSphere, 3e-15),
+
+        QueryInstance(kConvex, kConvex, kThrows),
+        QueryInstance(kConvex, kCylinder, kThrows),
+        QueryInstance(kConvex, kEllipsoid, kThrows),
+        QueryInstance(kConvex, kHalfSpace, kThrows),
+        QueryInstance(kConvex, kSphere, kThrows),
+
+        QueryInstance(kCylinder, kCylinder, kThrows),
+        QueryInstance(kCylinder, kEllipsoid, kThrows),
+        QueryInstance(kCylinder, kHalfSpace, kThrows),
+        QueryInstance(kCylinder, kSphere, 2e-15),
+
+        QueryInstance(kEllipsoid, kEllipsoid, kThrows),
+        QueryInstance(kEllipsoid, kHalfSpace, kThrows),
+        QueryInstance(kEllipsoid, kSphere, kThrows),
+
+        QueryInstance(kHalfSpace, kHalfSpace, kThrows),
+        QueryInstance(kHalfSpace, kSphere, 2e-15),
+
+        QueryInstance(kSphere, kSphere, 4e-15)),
+    QueryInstanceName);
+// clang-format on
+
+TEST_P(AutoDiffTest, Characterize) {
+  this->RunCharacterization(GetParam());
 }
 
 }  // namespace

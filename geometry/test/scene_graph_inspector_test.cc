@@ -47,6 +47,7 @@ GTEST_TEST(SceneGraphInspector, ExerciseEverything) {
   inspector.all_frame_ids();
   inspector.num_geometries();
   inspector.GetAllGeometryIds();
+  inspector.GetGeometryIds(GeometrySet{});
   inspector.NumGeometriesWithRole(Role::kUnassigned);
   inspector.NumDynamicGeometries();
   inspector.NumAnchoredGeometries();
@@ -56,10 +57,6 @@ GTEST_TEST(SceneGraphInspector, ExerciseEverything) {
   // Register a source to prevent exceptions being thrown.
   const SourceId source_id = tester.mutable_state().RegisterNewSource("name");
   inspector.SourceIsRegistered(source_id);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  inspector.GetSourceName(source_id);
-#pragma GCC diagnostic pop
   inspector.GetName(source_id);
   inspector.NumFramesForSource(source_id);
   inspector.FramesForSource(source_id);

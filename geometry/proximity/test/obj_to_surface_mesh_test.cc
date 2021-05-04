@@ -1,5 +1,6 @@
 #include "drake/geometry/proximity/obj_to_surface_mesh.h"
 
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -100,26 +101,46 @@ GTEST_TEST(ObjToSurfaceMeshTest, ReadObjToSurfaceMesh) {
     EXPECT_EQ(expect_vertices[i], surface.vertex(SurfaceVertexIndex(i)).r_MV());
   }
 
-  // This test relies on the specific content of the file quad_cube.obj. The
-  // last section of quad_cube.obj describes the six square faces of the cube.
-  // We expect that each square is subdivided into two triangles. Note that
-  // vertex indices in the file quad_cube.obj are from 1 to 8, but tinyobj
-  // has vertex indices from 0 to 7. We assume that tinyobj subdivides a
-  // polygon into a triangle fan around the first vertex; polygon ABCDE...
-  // becomes triangles ABC, ACD, ADE, etc.
+  // TODO(SeanCurtis-TRI) Devise a formulation of this that is less sensitive
+  //  to the details of the triangulation algorithm.
+  // This test is brittle. It depends on:
+  //   - the exact construction of quad faces in quad_cube.obj.
+  //   - the algorithm that tinyobj uses to triangulate n-gons into triangles.
+  // While we have 100% control over the former, we have no control over the
+  // latter. History has shown that the algorithm changes. In the past, it
+  // would create a fan around the *first* declared vertex, this current
+  // encoding creates a fan around the second. In other words, it's the
+  // difference between the following two triangulations
+  //
+  //    ┌───┐   ┌───┐
+  //    │╲  │   │  ╱│
+  //    │ ╲ │   │ ╱ │
+  //    │  ╲│   │╱  │
+  //    └───┘   └───┘
+  //
+  // This test may fail with subsequent updates to the triangulation algorithm.
   int expect_faces[12][3] {
-      {0, 1, 2}, {0, 2, 3},  // face 1 2 3 4 in quad_cube.obj
-      {4, 7, 6}, {4, 6, 5},  // face 5 8 7 6 in quad_cube.obj
-      {0, 4, 5}, {0, 5, 1},  // face 1 5 6 2 in quad_cube.obj
-      {1, 5, 6}, {1, 6, 2},  // face 2 6 7 3 in quad_cube.obj
-      {2, 6, 7}, {2, 7, 3},  // face 3 7 8 4 in quad_cube.obj
-      {4, 0, 3}, {4, 3, 7}   // face 5 1 4 8 in quad_cube.obj
+      {0, 1, 3}, {1, 2, 3},  // face 1 2 3 4 in quad_cube.obj
+      {4, 7, 5}, {7, 6, 5},  // face 5 8 7 6 in quad_cube.obj
+      {0, 4, 1}, {4, 5, 1},  // face 1 5 6 2 in quad_cube.obj
+      {1, 5, 2}, {5, 6, 2},  // face 2 6 7 3 in quad_cube.obj
+      {2, 6, 3}, {6, 7, 3},  // face 3 7 8 4 in quad_cube.obj
+      {4, 0, 7}, {0, 3, 7}   // face 5 1 4 8 in quad_cube.obj
   };
 
-  auto face_equal = [](const SurfaceFace& f, const SurfaceFace& g) -> bool {
-    return std::make_tuple(f.vertex(0), f.vertex(1), f.vertex(2)) ==
-           std::make_tuple(g.vertex(0), g.vertex(1), g.vertex(2));
+  auto face_equal = [](const SurfaceFace& f,
+                       const SurfaceFace& g) -> ::testing::AssertionResult {
+    const auto f_indices =
+        std::make_tuple(f.vertex(0), f.vertex(1), f.vertex(2));
+    const auto g_indices =
+        std::make_tuple(g.vertex(0), g.vertex(1), g.vertex(2));
+    if (f_indices == g_indices) return ::testing::AssertionSuccess();
+    return ::testing::AssertionFailure()
+           << "\n  Expected: " << f.vertex(0) << ", " << f.vertex(1) << ", "
+           << f.vertex(2) << "\n  Found: " << g.vertex(0) << ", " << g.vertex(1)
+           << ", " << g.vertex(2);
   };
+
   for (int i = 0; i < 12; ++i) {
     EXPECT_TRUE(face_equal(SurfaceFace(expect_faces[i]),
                            surface.element(SurfaceFaceIndex(i))));
@@ -137,6 +158,39 @@ GTEST_TEST(ObjToSurfaceMeshTest, ThrowExceptionForEmptyFile) {
   DRAKE_EXPECT_THROWS_MESSAGE(ReadObjToSurfaceMesh(&empty),
                               std::runtime_error,
                               "The Wavefront obj file has no faces.");
+}
+
+void FailOnWarning(std::string_view message) {
+  throw std::runtime_error(fmt::format("FailOnWarning: {}", message));
+}
+
+GTEST_TEST(ObjToSurfaceMeshTest, WarningCallback) {
+  // This *.obj file refers to a separate *.mtl file.  In various cases below,
+  // this may cause warnings from the parser.
+  const std::string filename =
+      FindResourceOrThrow("drake/geometry/test/quad_cube.obj");
+
+  // When loaded as a stream (such that the *.mtl file is missing) with
+  // a defaulted callback, we will drake::log() but not throw.
+  {
+    std::ifstream input(filename);
+    EXPECT_NO_THROW(ReadObjToSurfaceMesh(&input, 1.0));
+  }
+
+  // When loaded as a stream (such that the *.mtl file is missing), the user-
+  // provided callback may choose to throw, and our test stub callback does so.
+  {
+    std::ifstream input(filename);
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        ReadObjToSurfaceMesh(&input, 1.0, &FailOnWarning),
+        std::exception,
+        "FailOnWarning: Warning parsing Wavefront obj file : "
+        ".*CubeMaterial.*not found.*");
+  }
+
+  // When parsing using a filename, we are able to locate the *.mtl file with
+  // no warnings.
+  EXPECT_NO_THROW(ReadObjToSurfaceMesh(filename, 1.0, &FailOnWarning));
 }
 
 GTEST_TEST(ObjToSurfaceMeshTest, ThrowExceptionFileHasNoFaces) {

@@ -48,6 +48,7 @@ class SceneGraph;
  will always reproduce the same query results. This baking process is not cheap
  and should not be done without consideration.
 
+ @anchor query_object_precision_methodology
  <h2>Queries and scalar type</h2>
 
  A %QueryObject _cannot_ be converted to a different scalar type. A %QueryObject
@@ -55,12 +56,53 @@ class SceneGraph;
  of type T evaluated on a corresponding Context, also of type T.
 
  %QueryObject's support for arbitrary scalar type is incomplete. Not all queries
- support all scalar types to the same degree. In some cases the level of support
- is obvious (such as when the query is declared *explicitly* in terms of a
- double-valued scalar -- see ComputePointPairPenetration()). In other cases,
- where the query is expressed in terms of scalar `T`, the query may have
- restrictions. If a query has restricted scalar support, it is included in
- the query's documentation.
+ support all scalar types to the same degree. Furthermore, the queries are
+ typically served by *families* of algorithms. The evaluation of a query between
+ a particular pair of geometries will depend on the query, the pair of geometry
+ types involved, and the scalar type. From query to query, the treatment of
+ a geometry (or geometry pair) for a given scalar type can vary in many ways,
+ including but not limited to: ignoring the geometry, throwing an exception,
+ results with limited precision, or full, accurate support. The queries below
+ provide tables to help inform your expectations when evaluating queries. The
+ tables all use a common methodology and admit a common interpretation.
+
+ For each (query, geometry-pair, scalar) combination, we create a set of
+ geometric configurations with known answers. We evaluate the precision of the
+ query result (if supported at all) over the entire set and report the *worst*
+ observed error. This is a purely empirical approach and doesn't fully
+ characterize the families of underlying algorithms, and the reported error
+ may be misleading in that we've missed far worse latent error or that the
+ error reported doesn't well represent the average case.
+
+ The families of algorithms also differ in how their inherent errors scale with
+ the scale of the problem (e.g., size of geometries, magnitude of
+ distance/depth, etc.) Attempting to fully characterize that aspect is both
+ arduous and problematic, so, we've chosen a more *representative* approach.
+
+ Because Drake is primarily intended for robot simulation, we've created
+ geometric configurations on the scale of common robot manipulators (on the
+ order of 20cm). We position them with a known penetration depth (or separating
+ distance) of 2 mm. The error reported is the deviation from that expected
+ result.
+
+ When interpreting the tables, keep the following in mind:
+   - The table illustrates trends in *broad* strokes, only. It does not
+     represent an exhaustive analysis.
+   - If your problem involves larger geometries, greater penetration depths, or
+     larger separating distances, the error will vary. Do not assume that
+     observed error in this context is necessarily relative -- there truly is
+     that much variability in the families of algorithms.
+   - These values are an attempt to capture the *worst* case outcome. The
+     error shown is a single-significant-digit approximation of that observed
+     error.
+   - These values may not actually represent the true worst case; discovering
+     the true worst case is generally challenging. These represent our best
+     effort to date. If you find outcomes that are worse those reported here,
+     please <a href="https://github.com/RobotLocomotion/drake/issues/new">
+     submit a bug</a>.
+   - These tables represent Drake's transient state. The eventual goal is to
+     report no more than 1e-14 error across all supportable geometry pairs
+     and scalars. At that point, the table will simply disappear.
 
  @tparam_nonsymbolic_scalar
 */
@@ -110,10 +152,6 @@ class QueryObject {
    @throws std::exception if the frame `frame_id` is not valid.  */
   const math::RigidTransform<T>& GetPoseInWorld(FrameId frame_id) const;
 
-  /** Deprecated variant of GetPoseInWorld(FrameId).  */
-  DRAKE_DEPRECATED("2021-04-01", "Please use GetPoseInWorld(FrameId) instead.")
-  const math::RigidTransform<T>& X_WF(FrameId id) const;
-
   /** Reports the position of the frame indicated by `frame_id` relative to its
    parent frame. If the frame was registered with the world frame as its parent
    frame, this value will be identical to that returned by GetPoseInWorld().
@@ -123,24 +161,13 @@ class QueryObject {
    @throws std::exception if the frame `frame_id` is not valid.  */
   const math::RigidTransform<T>& GetPoseInParent(FrameId frame_id) const;
 
-  /** Deprecated variant of GetPoseInParent().  */
-  DRAKE_DEPRECATED("2021-04-01", "Please use GetPoseInParent(FrameId) instead.")
-  const math::RigidTransform<T>& X_PF(FrameId id) const;
-
   /** Reports the position of the geometry indicated by `geometry_id` relative
    to the world frame.
    @throws std::exception if the geometry `geometry_id` is not valid.  */
   const math::RigidTransform<T>& GetPoseInWorld(GeometryId geometry_id) const;
 
-  /** Deprecated variant of GetPoseInWorld(GeometryId).  */
-  DRAKE_DEPRECATED("2021-04-01",
-                   "Please use GetPoseInWorld(GeometryId) instead.")
-  const math::RigidTransform<T>& X_WG(GeometryId id) const;
-
   //@}
 
-  // TODO(hongkai.dai): allow T=AutodiffXd and some primitive geometries
-  // collide.
   /**
    @anchor collision_queries
    @name                Collision Queries
@@ -175,15 +202,56 @@ class QueryObject {
    For two penetrating geometries g_A and g_B, it is guaranteed that they will
    map to `id_A` and `id_B` in a fixed, repeatable manner.
 
-   <h3>Scalar and Shape Support</h3>
-    - For scalar type `double`, we support all Shape-Shape pairs *except* for
-      HalfSpace-HalfSpace. In that case, half spaces are either non-colliding or
-      have an infinite amount of penetration.
-    - For scalar type AutoDiffXd, we only support query pairs Sphere-Box,
-      Sphere-Capsule, Sphere-Cylinder, Sphere-HalfSpace, and Sphere-Sphere.
+   <h3>Characterizing the returned values</h3>
 
-   For a Shape-Shape pair in collision that is *not* supported for a given
-   scalar type, an exception is thrown.
+   As discussed in the
+   @ref query_object_precision_methodology "class's documentation", these tables
+   document the support given by this query for pairs of geometry types and
+   scalar. See the description in the link for details on how to interpret the
+   tables' results. The query is symmetric with respect to shape *ordering*, the
+   pair (ShapeA, ShapeB) will be the same as (ShapeB, ShapeA), so we only fill
+   in half of each table.
+
+   |           |   %Box  | %Capsule | %Convex | %Cylinder | %Ellipsoid | %HalfSpace |  %Mesh  | %Sphere |
+   | --------: | :-----: | :------: | :-----: | :-------: | :--------: | :--------: | :-----: | :-----: |
+   | Box       |  2e-15  |  ░░░░░░  |  ░░░░░  |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Capsule   |  3e-5ᶜ  |   2e-5ᶜ  |  ░░░░░  |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Convex    |  2e-15ᶜ |   3e-5ᶜ  | 2e-15ᶜ  |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Cylinder  |  1e-3ᶜ  |   4e-5ᶜ  |  1e-3ᶜ  |   2e-3ᶜ   |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Ellipsoid |  4e-4ᶜ  |   2e-4ᶜ  |  4e-4ᶜ  |   2e-3ᶜ   |    5e-4ᶜ   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | HalfSpace |  6e-15  |   4e-15  | 3e-15ᶜ  |   4e-15   |   3e-15    |   throwsᵃ  |  ░░░░░  |  ░░░░░  |
+   | Mesh      |    ᵇ    |    ᵇ     |    ᵇ    |     ᵇ     |      ᵇ     |     ᵇ      |    ᵇ    |  ░░░░░  |
+   | Sphere    |  3e-15  |   5e-15  |  3e-5ᶜ  |   5e-15   |    2e-4ᶜ   |   3e-15    |    ᵇ    |  5e-15  |
+   __*Table 1*__: Worst observed error (in m) for 2mm penetration between
+   geometries approximately 20cm in size for `T` = `double`.
+
+   |           |   %Box  | %Capsule | %Convex | %Cylinder | %Ellipsoid | %HalfSpace |  %Mesh  | %Sphere |
+   | --------: | :-----: | :------: | :-----: | :-------: | :--------: | :--------: | :-----: | :-----: |
+   | Box       | throwsᵈ |  ░░░░░░  |  ░░░░░  |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Capsule   | throwsᵈ | throwsᵈ  |  ░░░░░  |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Convex    | throwsᵈ | throwsᵈ  | throwsᵈ |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Cylinder  | throwsᵈ | throwsᵈ  | throwsᵈ |  throwsᵈ  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Ellipsoid | throwsᵈ | throwsᵈ  | throwsᵈ |  throwsᵈ  |   throwsᵈ  |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | HalfSpace | throwsᵈ | throwsᵈ  | throwsᵈ |  throwsᵈ  |   throwsᵈ  |   throwsᵃ  |  ░░░░░  |  ░░░░░  |
+   | Mesh      |    ᵇ    |    ᵇ     |    ᵇ    |     ᵇ     |      ᵇ     |     ᵇ      |    ᵇ    |  ░░░░░  |
+   | Sphere    |  2e-15  |  3e-15   | throwsᵈ |   2e-15   |   throwsᵈ  |   2e-15    |    ᵇ    |  4e-15  |
+   __*Table 2*__: Worst observed error (in m) for 2mm penetration between
+   geometries approximately 20cm in size for `T` = @ref drake::AutoDiffXd
+   "AutoDiffXd".
+
+   - ᵃ Penetration depth between two HalfSpace instances has no meaning; either
+       they don't intersect, or they have infinite penetration.
+   - ᵇ Meshes are represented by the *convex* hull of the mesh, therefore the
+       results for Mesh are assumed to be the same as for Convex.
+   - ᶜ These results are computed using an iterative algorithm. For particular
+       configurations, the solution may be correct to machine precision. The
+       values reported here are confirmed, observed worst case answers.
+   - ᵈ These results are simply not supported for
+       `T` = @ref drake::AutoDiffXd "AutoDiffXd" at this time.
+
+   <!-- Note to developers: the tests that support the assertions here are
+   located in penetration_as_point_pair_characterize_test.cc. The values in this
+   table should be reflected in the expected values there.  -->
 
    @returns A vector populated with all detected penetrations characterized as
             point pairs. The ordering of the results is guaranteed to be
@@ -191,8 +259,8 @@ class QueryObject {
             the same.
    @warning For Mesh shapes, their convex hulls are used in this query. It is
             *not* computationally efficient or particularly accurate.
-   @throws std::exception if unsupported pairs are in contact (see "Scalar
-   and Shape Support" for description of "unsupported pairs").*/
+   @throws std::exception if a Shape-Shape pair is in collision and indicated as
+           `throws` in the support table above.  */
   std::vector<PenetrationAsPointPair<T>> ComputePointPairPenetration() const;
 
   /**
@@ -213,7 +281,7 @@ class QueryObject {
        | Sphere    |  yes  |  yes  |
        | Cylinder  |  yes  |  yes  |
        | Box       |  yes  |  yes  |
-       | Capsule   |  no   |  no   |
+       | Capsule   |  yes  |  yes  |
        | Ellipsoid |  yes  |  yes  |
        | HalfSpace |  yes  |  yes  |
        | Mesh      |  no   |  yes  |
@@ -242,8 +310,6 @@ class QueryObject {
             the same.  */
   std::vector<ContactSurface<T>> ComputeContactSurfaces() const;
 
-  // TODO(hongkai.dai): allow T=AutodiffXd and some primitive geometries
-  // collide.
   /** Reports pair-wise intersections and characterizes each non-empty
    intersection as a ContactSurface _where possible_ and as a
    PenetrationAsPointPair where not.
@@ -372,17 +438,59 @@ class QueryObject {
    and anchored objects. We DO NOT report the distance between two anchored
    objects.
 
-   <h3>Scalar support</h3>
-   This function does not support halfspaces. If an unfiltered pair contains
-   a halfspace, an exception will be thrown for all scalar types. Otherwise,
-   this query supports all other pairs of Drake geometry types for `double`.
-   For `AutoDiffXd`, it only supports distance between sphere-box and
-   sphere-sphere. If there are any unfiltered geometry pairs that include other
-   geometries, the AutoDiff throws an exception.
+   @anchor query_object_compute_pairwise_distance_table
+   <h3>Characterizing the returned values</h3>
 
-   <!-- TODO(SeanCurtis-TRI): Document expected precision of answer based on
-   members of shape pair. See
-   https://github.com/RobotLocomotion/drake/issues/10907 -->
+   As discussed in the
+   @ref query_object_precision_methodology "class's documentation", this table
+   documents the support given by this query for pairs of geometry types and
+   scalar. See the description in the link for details on how to interpret the
+   table results. The query is symmetric with respect to shape *ordering*, the
+   pair (ShapeA, ShapeB) will be the same as (ShapeB, ShapeA), so we only fill
+   in half the table.
+
+   |           |   %Box  | %Capsule | %Convex | %Cylinder | %Ellipsoid | %HalfSpace |  %Mesh  | %Sphere |
+   | --------: | :-----: | :------: | :-----: | :-------: | :--------: | :--------: | :-----: | :-----: |
+   | Box       |  4e-15  |  ░░░░░░  |  ░░░░░  |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Capsule   |  3e-6   |   2e-5   |  ░░░░░  |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Convex    |  3e-15  |   2e-5   |  3e-15  |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Cylinder  |  6e-6   |   1e-5   |   6e-6  |   2e-5    |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Ellipsoid |  9e-6   |   5e-6   |   9e-6  |   5e-5    |    2e-5    |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | HalfSpace | throwsᵃ |  throwsᵃ | throwsᵃ |  throwsᵃ  |  throwsᵃ   |   throwsᵃ  |  ░░░░░  |  ░░░░░  |
+   | Mesh      |    ᶜ    |    ᶜ     |    ᶜ    |     ᶜ     |      ᶜ     |   throwsᵃ  |    ᶜ    |  ░░░░░  |
+   | Sphere    |  3e-15  |  6e-15   |   3e-6  |   5e-15   |    4e-5    |    3e-15   |    ᶜ    |  6e-15  |
+   __*Table 3*__: Worst observed error (in m) for 2mm penetration/separation
+   between geometries approximately 20cm in size for `T` = `double`.
+
+   |           |   %Box  | %Capsule | %Convex | %Cylinder | %Ellipsoid | %HalfSpace |  %Mesh  | %Sphere |
+   | --------: | :-----: | :------: | :-----: | :-------: | :--------: | :--------: | :-----: | :-----: |
+   | Box       | throwsᵇ |  ░░░░░░  |  ░░░░░  |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Capsule   | throwsᵇ |  throwsᵇ |  ░░░░░  |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Convex    | throwsᵇ |  throwsᵇ | throwsᵇ |  ░░░░░░░  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Cylinder  | throwsᵇ |  throwsᵇ | throwsᵇ |  throwsᵇ  |   ░░░░░░   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | Ellipsoid | throwsᵇ |  throwsᵇ | throwsᵇ |  throwsᵇ  |  throwsᵇ   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
+   | HalfSpace | throwsᵃ |  throwsᵃ | throwsᵃ |  throwsᵃ  |  throwsᵃ   |   throwsᵃ  |  ░░░░░  |  ░░░░░  |
+   | Mesh      |    ᶜ    |    ᶜ     |    ᶜ    |     ᶜ     |      ᶜ     |      ᵃ     |    ᶜ    |  ░░░░░  |
+   | Sphere    |  2e-15  |  throwsᵇ | throwsᵇ |  throwsᵇ  |  throwsᵇ   |    2e-15   |    ᶜ    |  4e-15  |
+   __*Table 4*__: Worst observed error (in m) for 2mm penetration/separation
+   between geometries approximately 20cm in size for `T` =
+   @ref drake::AutoDiffXd "AutoDiffXd".
+
+   - ᵃ We don't currently support queries between HalfSpace and any other shape
+       (except for Sphere).
+   - ᵇ These results are simply not supported for
+       `T` = @ref drake::AutoDiffXd "AutoDiffXd" at this time.
+   - ᶜ Meshes are represented by the *convex* hull of the mesh, therefore the
+       results for Mesh are the same as for Convex.
+
+   <!-- Note to developers: the tests that support the assertions here are
+   located in distance_to_shape_characterize_test.cc. The values in this
+   table should be reflected in the expected values there.  -->
+
+  <!-- Numerous values show deviation at 1e-6. This is a hard-coded iteration
+   limit in proximity engine. Consider exposing that parameter to the query
+   so that the user can choose to improve the answer.  -->
+
    <!-- TODO(SeanCurtis-TRI): Support queries of halfspace-A, where A is _not_ a
    halfspace. See https://github.com/RobotLocomotion/drake/issues/10905 -->
 
@@ -391,6 +499,7 @@ class QueryObject {
    @returns The signed distance (and supporting data) for all unfiltered
             geometry pairs whose distance is less than or equal to
             `max_distance`.
+   @throws std::exception as indicated in the table above.
    @warning For Mesh shapes, their convex hulls are used in this query. It is
             *not* computationally efficient or particularly accurate.  */
   std::vector<SignedDistancePair<T>> ComputeSignedDistancePairwiseClosestPoints(
@@ -402,8 +511,16 @@ class QueryObject {
    indicated by id. This function has the same restrictions on scalar report
    as ComputeSignedDistancePairwiseClosestPoints().
 
-   @throws std::exception if either geometry id is invalid, or if the pair
-                          (A, B) has been marked as filtered.
+   <h3>Characterizing the returned values</h3>
+
+   This method merely exercises the same mechanisms as
+   ComputeSignedDistancePairwiseClosestPoints() for evaluating signed distance.
+   Refer to @ref query_object_compute_pairwise_distance_table
+   "the table for ComputeSignedDistancePairwiseClosestPoints()" for details.
+
+   @throws std::exception if either geometry id is invalid, the pair (A, B) has
+                          been marked as filtered, or according to the scalar
+                          support table.
    @warning For Mesh shapes, their convex hulls are used in this query. It is
             *not* computationally efficient or particularly accurate.  */
   SignedDistancePair<T> ComputeSignedDistancePairClosestPoints(
@@ -416,9 +533,6 @@ class QueryObject {
   /**
    Computes the signed distances and gradients to a query point from each
    geometry in the scene.
-
-   @warning Currently supports spheres, boxes, and cylinders only. Silently
-   ignores other kinds of geometries, which will be added later.
 
    This query provides φᵢ(p), φᵢ:ℝ³→ℝ, the signed distance to the position
    p of a query point from geometry Gᵢ in the scene.  It returns an array of
@@ -441,11 +555,24 @@ class QueryObject {
    Note that ∇φᵢ(p) is also defined on Gᵢ's surface, but we cannot use the
    above formula.
 
-   <h3>Scalar support</h3>
-   This query only supports computing distances from the point to spheres,
-   boxes, and cylinders for both `double` and `AutoDiffXd` scalar types. If
-   the SceneGraph contains any other geometry shapes, they will be silently
-   ignored.
+   <h3>Characterizing the returned values</h3>
+
+   This table is a variant of that described in this
+   @ref query_object_precision_methodology "class's documentation". The query
+   evaluates signed distance between *one* shape and a point (in contrast to
+   other queries which involve two shapes). Therefore, we don't need a matrix
+   of shape pairs, but a list of shapes. Otherwise, the methodology is the same
+   as described, with the point being represented as a zero-radius sphere.
+
+   | Scalar |   %Box  | %Capsule | %Convex | %Cylinder | %Ellipsoid | %HalfSpace |  %Mesh  | %Sphere |
+   | :----: | :-----: | :------: | :-----: | :-------: | :--------: | :--------: | :-----: | :-----: |
+   | double |  2e-15  |   4e-15  |    ᵃ    |   3e-15   |      ᵃ     |    5e-15   |    ᵃ    |  4e-15  |
+   | ADXd   |  1e-15  |   4e-15  |    ᵃ    |     ᵃ     |      ᵃ     |    5e-15   |    ᵃ    |  3e-15  |
+   __*Table 5*__: Worst observed error (in m) for 2mm penetration/separation
+   between geometry approximately 20cm in size and a point.
+
+   - ᵃ Unsupported geometry/scalar combinations are simply ignored; no results
+       are reported for that geometry.
 
    @note For a sphere G, the signed distance function φᵢ(p) has an undefined
    gradient vector at the center of the sphere--every point on the sphere's
@@ -481,10 +608,10 @@ class QueryObject {
    @param[in] threshold       We ignore any object beyond this distance.
                               By default, it is infinity, so we report
                               distances from the query point to every object.
-   @retval signed_distances   A vector populated with per-object signed
-                              distance values (and supporting data).
-                              See SignedDistanceToPoint.
-   */
+   @retval signed_distances   A vector populated with per-object signed distance
+                              values (and supporting data) for every supported
+                              geometry as shown in the table. See
+                              SignedDistanceToPoint. */
   std::vector<SignedDistanceToPoint<T>>
   ComputeSignedDistanceToPoint(const Vector3<T> &p_WQ,
                                const double threshold
@@ -509,26 +636,6 @@ class QueryObject {
    */
   //@{
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  /** Renders an RGB image for the given `camera` posed with respect to the
-   indicated parent frame P.
-
-   @param camera                The intrinsic properties of the camera.
-   @param parent_frame          The id for the camera's parent frame.
-   @param X_PC                  The pose of the camera body in the parent frame.
-   @param show_window           If true, the render window will be displayed.
-   @param[out] color_image_out  The rendered color image. */
-  DRAKE_DEPRECATED("2021-04-01",
-                   "CameraProperties are being deprecated. Please use the "
-                   "ColorRenderCamera variant.")
-  void RenderColorImage(const render::CameraProperties& camera,
-                        FrameId parent_frame,
-                        const math::RigidTransformd& X_PC,
-                        bool show_window,
-                        systems::sensors::ImageRgba8U* color_image_out) const;
-#pragma GCC diagnostic pop
-
   /** Renders an RGB image for the given `camera` posed with respect to the
    indicated parent frame P.
 
@@ -539,28 +646,6 @@ class QueryObject {
   void RenderColorImage(const render::ColorRenderCamera& camera,
                         FrameId parent_frame, const math::RigidTransformd& X_PC,
                         systems::sensors::ImageRgba8U* color_image_out) const;
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  /** Renders a depth image for the given `camera` posed with respect to the
-   indicated parent frame P.
-
-   In contrast to the other rendering methods, rendering depth images doesn't
-   provide the option to display the window; generally, basic depth images are
-   not readily communicative to humans.
-
-   @param camera                The intrinsic properties of the camera.
-   @param parent_frame          The id for the camera's parent frame.
-   @param X_PC                  The pose of the camera body in the parent frame.
-   @param[out] depth_image_out  The rendered depth image. */
-  DRAKE_DEPRECATED("2021-04-01",
-                   "CameraProperties are being deprecated. Please use the "
-                   "DepthRenderCamera variant.")
-  void RenderDepthImage(const render::DepthCameraProperties& camera,
-                        FrameId parent_frame,
-                        const math::RigidTransformd& X_PC,
-                        systems::sensors::ImageDepth32F* depth_image_out) const;
-#pragma GCC diagnostic pop
 
   /** Renders a depth image for the given `camera` posed with respect to the
    indicated parent frame P.
@@ -576,26 +661,6 @@ class QueryObject {
   void RenderDepthImage(const render::DepthRenderCamera& camera,
                         FrameId parent_frame, const math::RigidTransformd& X_PC,
                         systems::sensors::ImageDepth32F* depth_image_out) const;
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  /** Renders a label image for the given `camera` posed with respect to the
-   indicated parent frame P.
-
-   @param camera                The intrinsic properties of the camera.
-   @param parent_frame          The id for the camera's parent frame.
-   @param X_PC                  The pose of the camera body in the parent frame.
-   @param show_window           If true, the render window will be displayed.
-   @param[out] label_image_out  The rendered label image. */
-  DRAKE_DEPRECATED("2021-04-01",
-                   "CameraProperties are being deprecated. Please use the "
-                   "ColorRenderCamera variant.")
-  void RenderLabelImage(const render::CameraProperties& camera,
-                        FrameId parent_frame,
-                        const math::RigidTransformd& X_PC,
-                        bool show_window,
-                        systems::sensors::ImageLabel16I* label_image_out) const;
-#pragma GCC diagnostic pop
 
   /** Renders a label image for the given `camera` posed with respect to the
    indicated parent frame P.

@@ -68,7 +68,6 @@ drake_cc_package_library(
         ":solver_type",
         ":solver_type_converter",
         ":sos_basis_generator",
-        ":symbolic_extraction",
         ":system_identification",
         ":unrevised_lemke_solver",
     ],
@@ -178,24 +177,6 @@ drake_cc_library(
         "//common:essential",
         "//common:polynomial",
         "//math:gradient",
-        "//math:matrix_util",
-    ],
-)
-
-drake_cc_library(
-    name = "symbolic_extraction",
-    srcs = ["symbolic_extraction.cc"],
-    hdrs = ["symbolic_extraction.h"],
-    copts = [
-        "-Wno-deprecated-declarations",
-    ],
-    deps = [
-        ":decision_variable",
-        "//common:autodiff",
-        "//common:essential",
-        "//common:polynomial",
-        "//common:symbolic",
-        "//common:symbolic_decompose",
         "//math:matrix_util",
     ],
 )
@@ -1139,18 +1120,6 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
-    name = "symbolic_extraction_test",
-    copts = [
-        "-Wno-deprecated-declarations",
-    ],
-    deps = [
-        ":symbolic_extraction",
-        "//common/test_utilities:eigen_matrix_compare",
-        "//common/test_utilities:symbolic_test_util",
-    ],
-)
-
-drake_cc_googletest(
     name = "complementary_problem_test",
     tags = ["snopt"],
     deps = [
@@ -1196,6 +1165,7 @@ drake_cc_googletest(
     deps = [
         ":clp_solver",
         ":linear_program_examples",
+        ":quadratic_program_examples",
     ],
 )
 
@@ -1272,6 +1242,8 @@ drake_cc_googletest(
         ":mixed_integer_optimization_util",
         ":quadratic_program_examples",
         ":second_order_cone_program_examples",
+        "//common:filesystem",
+        "//common:temp_directory",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
     ],
@@ -1590,6 +1562,7 @@ drake_cc_googletest(
         "//common:filesystem",
         "//common:temp_directory",
         "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
         "//math:geometric_transform",
     ],
 )
