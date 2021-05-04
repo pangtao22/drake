@@ -104,7 +104,7 @@ int run_plan() {
 
   PlanData::EeData ee_data;
   ee_data.p_ToQ_T << 0, 0, 0.1;
-  ee_data.ee_xyz_traj = trajectories::PiecewisePolynomial<double>::Cubic(
+  ee_data.ee_xyz_traj = trajectories::PiecewisePolynomial<double>::CubicHermite(
       Eigen::Map<const Eigen::VectorXd>(t_knots1.data(), t_knots1.size()),
       xyz_knots, xyz_dot_knots);
   ee_data.ee_xyz_dot_traj = ee_data.ee_xyz_traj.derivative(1);
