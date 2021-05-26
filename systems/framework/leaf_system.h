@@ -44,11 +44,6 @@ class LeafSystem : public System<T> {
 
   ~LeafSystem() override;
 
-  /** Allocates a CompositeEventCollection object for this system.
-  @sa System::AllocateCompositeEventCollection(). */
-  std::unique_ptr<CompositeEventCollection<T>>
-      AllocateCompositeEventCollection() const final;
-
   /** Shadows System<T>::AllocateContext to provide a more concrete return
   type LeafContext<T>. */
   std::unique_ptr<LeafContext<T>> AllocateContext() const;
@@ -301,17 +296,17 @@ class LeafSystem : public System<T> {
       EventStatus (MySystem::*publish)(const Context<T>&) const) {
     static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
                   "Expected to be invoked from a LeafSystem-derived System.");
-    auto this_ptr = dynamic_cast<const MySystem*>(this);
-    DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(publish != nullptr);
 
     DeclarePeriodicEvent(
         period_sec, offset_sec,
-        PublishEvent<T>(TriggerType::kPeriodic, [this_ptr, publish](
-                                                    const Context<T>& context,
-                                                    const PublishEvent<T>&) {
+        PublishEvent<T>(TriggerType::kPeriodic, [publish](
+                            const System<T>& system,
+                            const Context<T>& context,
+                            const PublishEvent<T>&) {
+          const auto& sys = dynamic_cast<const MySystem&>(system);
           // TODO(sherm1) Forward the return status.
-          (this_ptr->*publish)(context);  // Ignore return status for now.
+          (sys.*publish)(context);  // Ignore return status for now.
         }));
   }
 
@@ -327,18 +322,19 @@ class LeafSystem : public System<T> {
                                        const) {
     static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
                   "Expected to be invoked from a LeafSystem-derived System.");
-    auto this_ptr = dynamic_cast<const MySystem*>(this);
-    DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(publish != nullptr);
 
     DeclarePeriodicEvent(
         period_sec, offset_sec,
-        PublishEvent<T>(TriggerType::kPeriodic,
-                        [this_ptr, publish](const Context<T>& context,
-                                            const PublishEvent<T>&) {
-                          (this_ptr->*publish)(context);
-                          // TODO(sherm1) return EventStatus::Succeeded()
-                        }));
+        PublishEvent<T>(
+            TriggerType::kPeriodic,
+            [publish](const System<T>& system,
+                      const Context<T>& context,
+                      const PublishEvent<T>&) {
+              const auto& sys = dynamic_cast<const MySystem&>(system);
+              (sys.*publish)(context);
+              // TODO(sherm1) return EventStatus::Succeeded()
+            }));
   }
 
   /** Declares that a DiscreteUpdate event should occur periodically and that it
@@ -367,21 +363,20 @@ class LeafSystem : public System<T> {
           const) {
     static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
                   "Expected to be invoked from a LeafSystem-derived System.");
-    auto this_ptr = dynamic_cast<const MySystem*>(this);
-    DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(update != nullptr);
 
     DeclarePeriodicEvent(
         period_sec, offset_sec,
-        DiscreteUpdateEvent<T>(TriggerType::kPeriodic,
-                               [this_ptr, update](const Context<T>& context,
-                                                  const DiscreteUpdateEvent<T>&,
-                                                  DiscreteValues<T>* xd) {
-                                 // TODO(sherm1) Forward the return status.
-                                 (this_ptr->*update)(
-                                     context,
-                                     &*xd);  // Ignore return status for now.
-                               }));
+        DiscreteUpdateEvent<T>(
+            TriggerType::kPeriodic,
+            [update](const System<T>& system,
+                     const Context<T>& context,
+                     const DiscreteUpdateEvent<T>&,
+                     DiscreteValues<T>* xd) {
+              const auto& sys = dynamic_cast<const MySystem&>(system);
+              // TODO(sherm1) Forward the return status.
+              (sys.*update)(context, &*xd);  // Ignore return status for now.
+            }));
   }
 
   /** This variant accepts a handler that is assumed to succeed rather than
@@ -397,19 +392,20 @@ class LeafSystem : public System<T> {
       void (MySystem::*update)(const Context<T>&, DiscreteValues<T>*) const) {
     static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
                   "Expected to be invoked from a LeafSystem-derived System.");
-    auto this_ptr = dynamic_cast<const MySystem*>(this);
-    DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(update != nullptr);
 
     DeclarePeriodicEvent(
         period_sec, offset_sec,
-        DiscreteUpdateEvent<T>(TriggerType::kPeriodic,
-                               [this_ptr, update](const Context<T>& context,
-                                                  const DiscreteUpdateEvent<T>&,
-                                                  DiscreteValues<T>* xd) {
-                                 (this_ptr->*update)(context, &*xd);
-                                 // TODO(sherm1) return EventStatus::Succeeded()
-                               }));
+        DiscreteUpdateEvent<T>(
+            TriggerType::kPeriodic,
+            [update](const System<T>& system,
+                     const Context<T>& context,
+                     const DiscreteUpdateEvent<T>&,
+                     DiscreteValues<T>* xd) {
+              const auto& sys = dynamic_cast<const MySystem&>(system);
+              (sys.*update)(context, &*xd);
+              // TODO(sherm1) return EventStatus::Succeeded()
+            }));
   }
 
   /** Declares that an UnrestrictedUpdate event should occur periodically and
@@ -436,19 +432,18 @@ class LeafSystem : public System<T> {
       EventStatus (MySystem::*update)(const Context<T>&, State<T>*) const) {
     static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
                   "Expected to be invoked from a LeafSystem-derived System.");
-    auto this_ptr = dynamic_cast<const MySystem*>(this);
-    DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(update != nullptr);
 
     DeclarePeriodicEvent(
         period_sec, offset_sec,
         UnrestrictedUpdateEvent<T>(
             TriggerType::kPeriodic,
-            [this_ptr, update](const Context<T>& context,
-                               const UnrestrictedUpdateEvent<T>&, State<T>* x) {
+            [update](const System<T>& system,
+                     const Context<T>& context,
+                     const UnrestrictedUpdateEvent<T>&, State<T>* x) {
+              const auto& sys = dynamic_cast<const MySystem&>(system);
               // TODO(sherm1) Forward the return status.
-              (this_ptr->*update)(context,
-                                  &*x);  // Ignore return status for now.
+              (sys.*update)(context, &*x);  // Ignore return status for now.
             }));
   }
 
@@ -464,17 +459,16 @@ class LeafSystem : public System<T> {
       void (MySystem::*update)(const Context<T>&, State<T>*) const) {
     static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
                   "Expected to be invoked from a LeafSystem-derived System.");
-    auto this_ptr = dynamic_cast<const MySystem*>(this);
-    DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(update != nullptr);
 
     DeclarePeriodicEvent(
         period_sec, offset_sec,
         UnrestrictedUpdateEvent<T>(
             TriggerType::kPeriodic,
-            [this_ptr, update](const Context<T>& context,
-                               const UnrestrictedUpdateEvent<T>&, State<T>* x) {
-              (this_ptr->*update)(context, &*x);
+            [update](const System<T>& system, const Context<T>& context,
+                     const UnrestrictedUpdateEvent<T>&, State<T>* x) {
+              const auto& sys = dynamic_cast<const MySystem&>(system);
+              (sys.*update)(context, &*x);
               // TODO(sherm1) return EventStatus::Succeeded()
             }));
   }
@@ -609,15 +603,15 @@ class LeafSystem : public System<T> {
       EventStatus (MySystem::*publish)(const Context<T>&) const) {
     static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
                   "Expected to be invoked from a LeafSystem-derived System.");
-    auto this_ptr = dynamic_cast<const MySystem*>(this);
-    DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(publish != nullptr);
 
     DeclarePerStepEvent<PublishEvent<T>>(PublishEvent<T>(
         TriggerType::kPerStep,
-        [this_ptr, publish](const Context<T>& context, const PublishEvent<T>&) {
+        [publish](const System<T>& system, const Context<T>& context,
+                  const PublishEvent<T>&) {
+          const auto& sys = dynamic_cast<const MySystem&>(system);
           // TODO(sherm1) Forward the return status.
-          (this_ptr->*publish)(context);  // Ignore return status for now.
+          (sys.*publish)(context);  // Ignore return status for now.
         }));
   }
 
@@ -646,18 +640,17 @@ class LeafSystem : public System<T> {
       const Context<T>&, DiscreteValues<T>*) const) {
     static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
                   "Expected to be invoked from a LeafSystem-derived System.");
-    auto this_ptr = dynamic_cast<const MySystem*>(this);
-    DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(update != nullptr);
 
-    DeclarePerStepEvent(DiscreteUpdateEvent<T>(
-        TriggerType::kPerStep, [this_ptr, update](const Context<T>& context,
-                                                  const DiscreteUpdateEvent<T>&,
-                                                  DiscreteValues<T>* xd) {
-          // TODO(sherm1) Forward the return status.
-          (this_ptr->*update)(context,
-                              &*xd);  // Ignore return status for now.
-        }));
+    DeclarePerStepEvent(
+        DiscreteUpdateEvent<T>(
+            TriggerType::kPerStep,
+            [update](const System<T>& system, const Context<T>& context,
+                     const DiscreteUpdateEvent<T>&, DiscreteValues<T>* xd) {
+              const auto& sys = dynamic_cast<const MySystem&>(system);
+              // TODO(sherm1) Forward the return status.
+              (sys.*update)(context, &*xd);  // Ignore return status for now.
+            }));
   }
 
   /** Declares that an UnrestrictedUpdate event should occur at the start of
@@ -685,17 +678,15 @@ class LeafSystem : public System<T> {
       EventStatus (MySystem::*update)(const Context<T>&, State<T>*) const) {
     static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
                   "Expected to be invoked from a LeafSystem-derived System.");
-    auto this_ptr = dynamic_cast<const MySystem*>(this);
-    DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(update != nullptr);
 
     DeclarePerStepEvent(UnrestrictedUpdateEvent<T>(
         TriggerType::kPerStep,
-        [this_ptr, update](const Context<T>& context,
-                           const UnrestrictedUpdateEvent<T>&, State<T>* x) {
+        [update](const System<T>& system, const Context<T>& context,
+                 const UnrestrictedUpdateEvent<T>&, State<T>* x) {
+          const auto& sys = dynamic_cast<const MySystem&>(system);
           // TODO(sherm1) Forward the return status.
-          (this_ptr->*update)(context,
-                              &*x);  // Ignore return status for now.
+          (sys.*update)(context, &*x);  // Ignore return status for now.
         }));
   }
 
@@ -1974,6 +1965,9 @@ class LeafSystem : public System<T> {
   std::unique_ptr<AbstractValue> DoAllocateInput(
       const InputPort<T>& input_port) const final;
 
+  std::unique_ptr<CompositeEventCollection<T>>
+      DoAllocateCompositeEventCollection() const final;
+
   std::map<PeriodicEventData, std::vector<const Event<T>*>,
       PeriodicEventDataComparator> DoGetPeriodicEvents() const override;
 
@@ -2112,6 +2106,9 @@ class LeafSystem : public System<T> {
 
   // Model abstract parameters to be used during Context allocation.
   internal::ModelValues model_abstract_parameters_;
+
+  // The index of a cache entry for scratch storage.
+  CacheIndex scratch_cache_index_{};
 };
 
 }  // namespace systems

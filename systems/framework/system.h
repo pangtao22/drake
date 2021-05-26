@@ -90,8 +90,8 @@ class System : public SystemBase {
   instance is used for populating collections of triggered events; for
   example, Simulator passes this object to System::CalcNextUpdateTime() to
   allow the system to identify and handle upcoming events. */
-  virtual std::unique_ptr<CompositeEventCollection<T>>
-  AllocateCompositeEventCollection() const = 0;
+  std::unique_ptr<CompositeEventCollection<T>>
+  AllocateCompositeEventCollection() const;
 
   /** Given an input port, allocates the vector storage.  The @p input_port
   must match a port declared via DeclareInputPort. */
@@ -1012,12 +1012,6 @@ class System : public SystemBase {
   boolean<T> CheckSystemConstraintsSatisfied(
       const Context<T>& context, double tol) const;
 
-  /** Checks that @p output is consistent with the number and size of output
-  ports declared by the system.
-  @throws std::exception unless `output` is non-null and valid for this
-  system. */
-  void CheckValidOutput(const SystemOutput<T>* output) const;
-
   /** Returns a copy of the continuous state vector x꜀ into an Eigen
   vector. */
   VectorX<T> CopyContinuousStateVector(const Context<T>& context) const;
@@ -1708,7 +1702,7 @@ class System : public SystemBase {
   /** Checks whether the given object was created for this system.
   @note This method is sufficiently fast for performance sensitive code. */
   template <template <typename> class Clazz>
-  void ValidateChildOfContext(const Clazz<T>* object) const {
+  void ValidateCreatedForThisSystem(const Clazz<T>* object) const {
     DRAKE_THROW_UNLESS(object != nullptr);
     if (!object->get_system_id().is_valid()) {
       throw std::logic_error(fmt::format(
@@ -1722,6 +1716,13 @@ class System : public SystemBase {
           NiceTypeName::Get<Clazz<T>>(), this->GetSystemType(),
           this->GetSystemPathname()));
     }
+  }
+
+  template <template <typename> class Clazz>
+  DRAKE_DEPRECATED("2021-09-01",
+                   "Please use ValidateCreatedForThisSystem instead.")
+  void ValidateChildOfContext(const Clazz<T>* object) const {
+    ValidateCreatedForThisSystem(object);
   }
 
  private:
@@ -1738,6 +1739,13 @@ class System : public SystemBase {
   // specified by @p input_port.  This is final in LeafSystem and Diagram.
   virtual std::unique_ptr<AbstractValue> DoAllocateInput(
       const InputPort<T>& input_port) const = 0;
+
+  // Allocates a composite event collection for use with this system.
+  // Implementers should not set system_id; that is done by the wrapping
+  // AllocateCompositeEventCollection method. This method is final in
+  // LeafSystem and Diagram.
+  virtual std::unique_ptr<CompositeEventCollection<T>>
+  DoAllocateCompositeEventCollection() const = 0;
 
   std::function<void(const AbstractValue&)> MakeFixInputPortTypeChecker(
       InputPortIndex port_index) const final;

@@ -1,5 +1,6 @@
 #include "drake/systems/primitives/affine_system.h"
 
+#include <set>
 #include <utility>
 
 #include <Eigen/Eigenvalues>
@@ -36,19 +37,22 @@ TimeVaryingAffineSystem<T>::TimeVaryingAffineSystem(
 
   // Declare state and input/output ports.
   // Declares the state variables and (potentially) the discrete-time update.
-  if (time_period_ == 0.0) {
-    this->DeclareContinuousState(num_states_);
-  } else {
-    this->DeclareDiscreteState(num_states_);
-    this->DeclarePeriodicDiscreteUpdate(time_period_, 0.0);
+  if (num_states > 0) {
+    if (time_period_ == 0.0) {
+      this->DeclareContinuousState(num_states_);
+    } else {
+      this->DeclareDiscreteState(num_states_);
+      this->DeclarePeriodicDiscreteUpdate(time_period_, 0.0);
+    }
   }
+
   if (num_inputs_ > 0)
     this->DeclareInputPort(kVectorValued, num_inputs_);
   if (num_outputs_ > 0) {
-    // TODO(sherm1, eric.cousineau): For subclasses that override CalcOutputY,
-    // ideally we would offer a mechanism for them to alter the prerequisites
-    // argument to DeclareOutputPort to match their implementation, either
-    // specific to this class, or generally via #12709.
+    // N.B. Subclasses that override CalcOutputY may want to fine-tune the
+    // output port's prerequisites; see AffineSystem's ctor for an example.
+    // By default, the output port will depend on everything (time, input,
+    // state, accuracy, etc.).
     this->DeclareVectorOutputPort(BasicVector<T>(num_outputs_),
                                   &TimeVaryingAffineSystem::CalcOutputY);
   }
@@ -72,6 +76,7 @@ template <typename T>
 void TimeVaryingAffineSystem<T>::configure_default_state(
     const Eigen::Ref<const VectorX<T>>& x0) {
   DRAKE_DEMAND(x0.rows() == num_states_);
+  if (num_states_ == 0) return;
   x0_ = x0;
 }
 
@@ -80,10 +85,9 @@ void TimeVaryingAffineSystem<T>::configure_random_state(
     const Eigen::Ref<const Eigen::MatrixXd>& covariance) {
   DRAKE_DEMAND(covariance.rows() == num_states_);
   DRAKE_DEMAND(covariance.cols() == num_states_);
-  if (num_states_ > 0) {
-    Sqrt_Sigma_x0_ = Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd>(covariance)
-                         .operatorSqrt();
-  }
+  if (num_states_ == 0) return;
+  Sqrt_Sigma_x0_ = Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd>(covariance)
+                        .operatorSqrt();
 }
 
 // This is the default implementation for this virtual method.
@@ -177,6 +181,8 @@ template <typename T>
 void TimeVaryingAffineSystem<T>::SetDefaultState(const Context<T>& context,
                                                  State<T>* state) const {
   unused(context);
+  if (num_states_ == 0) return;
+
   if (time_period_ == 0.0) {
     state->get_mutable_continuous_state().SetFromVector(x0_);
   } else {
@@ -189,6 +195,8 @@ void TimeVaryingAffineSystem<T>::SetRandomState(
     const Context<T>& context, State<T>* state,
     RandomGenerator* generator) const {
   unused(context);
+  if (num_states_ == 0) return;
+
   Eigen::VectorXd w(num_states_);
   std::normal_distribution<double> normal;
   for (int i = 0; i < num_states_; i++) {
@@ -219,8 +227,8 @@ AffineSystem<T>::AffineSystem(const Eigen::Ref<const Eigen::MatrixXd>& A,
 namespace {
 
 // Returns whether a matrix is "meaningful" when pre-multiplying a vector.
-bool IsMeaningful(const Eigen::MatrixXd& D) {
-  return D.size() > 0 && (D.array() != 0).any();
+bool IsMeaningful(const Eigen::MatrixXd& m) {
+  return m.size() > 0 && (m.array() != 0).any();
 }
 
 }  // namespace
@@ -244,8 +252,7 @@ AffineSystem<T>::AffineSystem(SystemScalarConverter converter,
       C_(C),
       D_(D),
       y0_(y0),
-      // This check permits a workaround for inadvertent computational loops
-      // (#12706).
+      has_meaningful_C_(IsMeaningful(C)),
       has_meaningful_D_(IsMeaningful(D)) {
   DRAKE_DEMAND(this->num_states() == A.rows());
   DRAKE_DEMAND(this->num_states() == A.cols());
@@ -255,6 +262,24 @@ AffineSystem<T>::AffineSystem(SystemScalarConverter converter,
   DRAKE_DEMAND(this->num_inputs() == D.cols());
   DRAKE_DEMAND(this->num_outputs() == C.rows());
   DRAKE_DEMAND(this->num_outputs() == D.rows());
+
+  // Specify our output port's dependencies more precisely than our base class
+  // is able to.  We know that output never depends on time nor parameters,
+  // only on state (iff C if non-zero) and input (iff D is non-zero).
+  if (this->num_outputs() > 0) {
+    const OutputPort<T>& output_port = this->get_output_port();
+    const auto& leaf_port = dynamic_cast<const LeafOutputPort<T>&>(output_port);
+    const CacheIndex cache_index = leaf_port.cache_entry().cache_index();
+    CacheEntry& cache_entry = this->get_mutable_cache_entry(cache_index);
+    std::set<DependencyTicket>& prereqs = cache_entry.mutable_prerequisites();
+    prereqs.clear();
+    if (has_meaningful_C_) {
+      prereqs.insert(this->all_state_ticket());
+    }
+    if (has_meaningful_D_) {
+      prereqs.insert(this->all_input_ports_ticket());
+    }
+  }
 }
 
 // Our copy constructor delegates to the public constructor; this used only by
@@ -305,15 +330,18 @@ unique_ptr<AffineSystem<T>> AffineSystem<T>::MakeAffineSystem(
 template <typename T>
 void AffineSystem<T>::CalcOutputY(const Context<T>& context,
                                   BasicVector<T>* output_vector) const {
-  const VectorX<T>& x = (this->time_period() == 0.)
-      ? dynamic_cast<const BasicVector<T>&>(
-          context.get_continuous_state_vector()).get_value()
-      : context.get_discrete_state().get_vector().get_value();
-
   auto y = output_vector->get_mutable_value();
-  y = C_ * x + y0_;
+  y = y0_;
 
-  if (has_meaningful_D_ && this->num_inputs()) {
+  if (has_meaningful_C_) {
+    const VectorX<T>& x = (this->time_period() == 0.)
+        ? dynamic_cast<const BasicVector<T>&>(
+            context.get_continuous_state_vector()).get_value()
+        : context.get_discrete_state().get_vector().get_value();
+    y += C_ * x;
+  }
+
+  if (has_meaningful_D_) {
     const auto& u = this->get_input_port().Eval(context);
     y += D_ * u;
   }

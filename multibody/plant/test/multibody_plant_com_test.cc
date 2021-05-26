@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
+#include "drake/common/test_utilities/expect_no_throw.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/geometry/scene_graph.h"
 #include "drake/multibody/tree/rigid_body.h"
@@ -23,17 +24,8 @@ GTEST_TEST(EmptyMultibodyPlantCenterOfMassTest, CalcCenterOfMassPosition) {
   DRAKE_EXPECT_THROWS_MESSAGE(
       plant.CalcCenterOfMassPositionInWorld(*context_),
       std::exception,
-      "CalcCenterOfMassPositionInWorld\\(\\): This MultibodyPlant contains "
-      "only the world_body\\(\\) so its center of mass is undefined.");
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  DRAKE_EXPECT_THROWS_MESSAGE(
-      plant.CalcCenterOfMassPosition(*context_),
-      std::exception,
-      "CalcCenterOfMassPositionInWorld\\(\\): This MultibodyPlant contains "
-      "only the world_body\\(\\) so its center of mass is undefined.");
-#pragma GCC diagnostic pop  // pop -Wdeprecated-declarations
+      "CalcCenterOfMassPositionInWorld\\(\\): This MultibodyPlant "
+      "only contains the world_body\\(\\) so its center of mass is undefined.");
 
   DRAKE_EXPECT_THROWS_MESSAGE(
       plant.CalcCenterOfMassTranslationalVelocityInWorld(*context_),
@@ -89,14 +81,6 @@ class MultibodyPlantCenterOfMassTest : public ::testing::Test {
     // Allow for 3 bits (2^3 = 8) of error.
     const double kTolerance = 8 * std::numeric_limits<double>::epsilon();
     EXPECT_TRUE(CompareMatrices(p_WCcm, p_WCcm_expected, kTolerance));
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    Eigen::Vector3d p_WCcm_deprecated =
-        plant_.CalcCenterOfMassPosition(*context_);
-    EXPECT_TRUE(
-        CompareMatrices(p_WCcm_deprecated, p_WCcm_expected, kTolerance));
-#pragma GCC diagnostic pop  // pop -Wdeprecated-declarations
   }
 
   const RigidBody<double>& GetSphereBody() {
@@ -156,6 +140,60 @@ class MultibodyPlantCenterOfMassTest : public ::testing::Test {
   Eigen::Vector3d p_TTcm_T_;
 };
 
+TEST_F(MultibodyPlantCenterOfMassTest, CalcTotalMass) {
+  // Verify the plant's total mass makes sense.
+  const double mass_system = plant_.CalcTotalMass(*context_);
+  EXPECT_EQ(mass_system, mass_S_ + mass_T_);
+
+  // Verify CalcTotalMass() returns 0 if model instances only has 1 world body.
+  const ModelInstanceIndex world_model_instance =
+      multibody::world_model_instance();
+  std::vector<ModelInstanceIndex> world_model_instance_array;
+  world_model_instance_array.push_back(world_model_instance);
+  double mass_zero =
+      plant_.CalcTotalMass(*context_, world_model_instance_array);
+  EXPECT_EQ(mass_zero, 0.0);
+
+  // Check CalcTotalMass() returns 0 if model instances has only 2 world bodies.
+  world_model_instance_array.push_back(world_model_instance);
+  mass_zero = plant_.CalcTotalMass(*context_, world_model_instance_array);
+  EXPECT_EQ(mass_zero, 0.0);
+
+  // Verify CalcTotalMass() returns 0 for empty model_instances.
+  std::vector<ModelInstanceIndex> model_instances;
+  mass_zero = plant_.CalcTotalMass(*context_, model_instances);
+  EXPECT_EQ(mass_zero, 0.0);
+
+  // Verify CalcTotalMass() works for 1 instances in model_instances.
+  model_instances.push_back(triangle_instance_);
+  const double mass_triangle = plant_.CalcTotalMass(*context_, model_instances);
+  EXPECT_EQ(mass_triangle, mass_T_);
+
+  // Verify CalcTotalMass() works for 2 instances in model_instances.
+  model_instances.push_back(sphere_instance_);
+  double mass_2_instances = plant_.CalcTotalMass(*context_, model_instances);
+  EXPECT_EQ(mass_2_instances, mass_S_ + mass_T_);
+
+  // Verify CalcTotalMass() works for 3 instances (with 2 sphere_instance_).
+  // Note: CalcTotalMass() only calculates a single sphere_instance_ !
+  model_instances.push_back(sphere_instance_);
+  double mass_odd_instances = plant_.CalcTotalMass(*context_, model_instances);
+  EXPECT_EQ(mass_odd_instances, mass_S_ + mass_T_);  // mass_S not 2 * mass_S!
+
+  // Verify we are able to determine if the total mass = 0.
+  set_mass_sphere(0.0);
+  set_mass_triangle(0.0);
+  mass_zero = plant_.CalcTotalMass(*context_);
+  EXPECT_EQ(mass_zero, 0.0);
+  mass_zero = plant_.CalcTotalMass(*context_, model_instances);
+  EXPECT_EQ(mass_zero, 0.0);
+
+  // Verify no exception is thrown if there is an invalid ModelInstanceIndex.
+  ModelInstanceIndex error_index(10);
+  model_instances.push_back(error_index);
+  DRAKE_EXPECT_NO_THROW(plant_.CalcTotalMass(*context_, model_instances));
+}
+
 TEST_F(MultibodyPlantCenterOfMassTest, CenterOfMassPosition) {
   // Verify the plant's default center of mass position makes sense.
   Eigen::Vector3d p_WCcm = plant_.CalcCenterOfMassPositionInWorld(*context_);
@@ -167,13 +205,6 @@ TEST_F(MultibodyPlantCenterOfMassTest, CenterOfMassPosition) {
   // Allow for 3 bits (2^3 = 8) of error.
   const double kTolerance = 8 * std::numeric_limits<double>::epsilon();
   EXPECT_TRUE(CompareMatrices(p_WCcm, result, kTolerance));
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  Eigen::Vector3d p_WCcm_deprecatedA =
-      plant_.CalcCenterOfMassPosition(*context_);
-  EXPECT_TRUE(CompareMatrices(p_WCcm_deprecatedA, result, kTolerance));
-#pragma GCC diagnostic pop  // pop -Wdeprecated-declarations
 
   // Verify the plant's center of mass location for an arbitrary input.
   const Eigen::Vector3d p_WSo_W(1.1, 2.3, 3.7);
@@ -199,15 +230,15 @@ TEST_F(MultibodyPlantCenterOfMassTest, CenterOfMassPosition) {
   DRAKE_EXPECT_THROWS_MESSAGE(
       plant_.CalcCenterOfMassPositionInWorld(*context_, model_instances),
       std::exception,
-      "CalcCenterOfMassPositionInWorld\\(\\): There were no bodies specified. "
-      "You must provide at least one selected body.");
+      "CalcCenterOfMassPositionInWorld\\(\\): There must be at "
+      "least one non-world body contained in model_instances.");
 
   DRAKE_EXPECT_THROWS_MESSAGE(
       plant_.CalcCenterOfMassTranslationalVelocityInWorld(*context_,
                                                           model_instances),
       std::exception,
-      "CalcCenterOfMassTranslationalVelocityInWorld\\(\\): There were no "
-      "bodies specified. You must provide at least one selected body.");
+      "CalcCenterOfMassTranslationalVelocityInWorld\\(\\): There must be at "
+      "least one non-world body contained in model_instances.");
 
   // Ensure an exception is thrown when a model instance has one world body.
   const ModelInstanceIndex world_model_instance =
@@ -218,8 +249,8 @@ TEST_F(MultibodyPlantCenterOfMassTest, CenterOfMassPosition) {
       plant_.CalcCenterOfMassTranslationalVelocityInWorld(*context_,
           world_model_instance_array),
       std::exception,
-      "CalcCenterOfMassTranslationalVelocityInWorld\\(\\): This system only "
-      "contains the world_body\\(\\) so its center of mass is undefined.");
+      "CalcCenterOfMassTranslationalVelocityInWorld\\(\\): There must be at "
+      "least one non-world body contained in model_instances.");
 
   // Ensure an exception is thrown when a model instance has two world bodies.
   world_model_instance_array.push_back(world_model_instance);
@@ -227,8 +258,8 @@ TEST_F(MultibodyPlantCenterOfMassTest, CenterOfMassPosition) {
       plant_.CalcCenterOfMassTranslationalVelocityInWorld(*context_,
           world_model_instance_array),
       std::exception,
-      "CalcCenterOfMassTranslationalVelocityInWorld\\(\\): This system only "
-      "contains the world_body\\(\\) so its center of mass is undefined.");
+      "CalcCenterOfMassTranslationalVelocityInWorld\\(\\): There must be at "
+      "least one non-world body contained in model_instances.");
 
   // Try one instance in model_instances.
   model_instances.push_back(triangle_instance_);
@@ -242,13 +273,6 @@ TEST_F(MultibodyPlantCenterOfMassTest, CenterOfMassPosition) {
            (mass_S_ + mass_T_);
   p_WCcm = plant_.CalcCenterOfMassPositionInWorld(*context_, model_instances);
   EXPECT_TRUE(CompareMatrices(p_WCcm, result, kTolerance));
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  Eigen::Vector3d p_WCcm_deprecatedB =
-      plant_.CalcCenterOfMassPosition(*context_, model_instances);
-  EXPECT_TRUE(CompareMatrices(p_WCcm_deprecatedB, result, kTolerance));
-#pragma GCC diagnostic pop  // pop -Wdeprecated-declarations
 
   // Verify CalcCenterOfMassPositionInWorld() works for 2 objects in
   // model_instances, where the 2 objects have arbitrary orientation/position.

@@ -104,11 +104,6 @@ class Diagram : public System<T>, internal::SystemParentServiceInterface {
 
   std::multimap<int, int> GetDirectFeedthroughs() const final;
 
-  /// Allocates a DiagramEventCollection for this Diagram.
-  /// @sa System::AllocateCompositeEventCollection().
-  std::unique_ptr<CompositeEventCollection<T>>
-  AllocateCompositeEventCollection() const final;
-
   void SetDefaultState(const Context<T>& context,
                        State<T>* state) const override;
 
@@ -137,13 +132,6 @@ class Diagram : public System<T>, internal::SystemParentServiceInterface {
   std::unique_ptr<ContinuousState<T>> AllocateTimeDerivatives() const final;
 
   std::unique_ptr<DiscreteValues<T>> AllocateDiscreteVariables() const final;
-
-  void DoCalcTimeDerivatives(const Context<T>& context,
-                             ContinuousState<T>* derivatives) const final;
-
-  void DoCalcImplicitTimeDerivativesResidual(
-      const Context<T>& context, const ContinuousState<T>& proposed_derivatives,
-      EigenPtr<VectorX<T>> residual) const final;
 
   /// Retrieves a reference to the subsystem with name @p name returned by
   /// get_name().
@@ -335,6 +323,9 @@ class Diagram : public System<T>, internal::SystemParentServiceInterface {
   // diagram substructure of default-constructed subcontexts.
   std::unique_ptr<ContextBase> DoAllocateContext() const final;
 
+  std::unique_ptr<CompositeEventCollection<T>>
+  DoAllocateCompositeEventCollection() const final;
+
   // Evaluates the value of the specified subsystem input
   // port in the given context. The port has already been determined _not_ to
   // be a fixed port, so it must be connected either
@@ -443,6 +434,13 @@ class Diagram : public System<T>, internal::SystemParentServiceInterface {
   void DoGetInitializationEvents(
       const Context<T>& context,
       CompositeEventCollection<T>* event_info) const override;
+
+  void DoCalcTimeDerivatives(const Context<T>& context,
+                             ContinuousState<T>* derivatives) const final;
+
+  void DoCalcImplicitTimeDerivativesResidual(
+      const Context<T>& context, const ContinuousState<T>& proposed_derivatives,
+      EigenPtr<VectorX<T>> residual) const final;
 
   // A structural outline of a Diagram, produced by DiagramBuilder.
   struct Blueprint {

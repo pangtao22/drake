@@ -102,6 +102,7 @@ GTEST_TEST(ForcedDispatchOverrideSystemTest, Dispatchers) {
   ForcedDispatchOverrideSystem system;
   auto context = system.CreateDefaultContext();
   auto discrete_values = system.AllocateDiscreteVariables();
+  EXPECT_EQ(discrete_values->get_system_id(), context->get_system_id());
   auto state = context->CloneState();
   system.Publish(*context);
   system.CalcDiscreteVariableUpdates(*context, discrete_values.get());
@@ -452,7 +453,7 @@ TEST_F(LeafSystemTest, WitnessDeclarations) {
   EXPECT_EQ(witness3->CalcWitnessValue(context_), 3.0);
   auto pe = dynamic_cast<const PublishEvent<double>*>(witness3->get_event());
   ASSERT_TRUE(pe);
-  pe->handle(context_);
+  pe->handle(system_, context_);
   EXPECT_TRUE(system_.publish_callback_called());
 
   auto witness4 = system_.MakeWitnessWithDiscreteUpdate();
@@ -466,7 +467,7 @@ TEST_F(LeafSystemTest, WitnessDeclarations) {
   auto de = dynamic_cast<const DiscreteUpdateEvent<double>*>(
       witness4->get_event());
   ASSERT_TRUE(de);
-  de->handle(context_, nullptr);
+  de->handle(system_, context_, nullptr);
   EXPECT_TRUE(system_.discrete_update_callback_called());
 
   auto witness5 = system_.MakeWitnessWithUnrestrictedUpdate();
@@ -480,7 +481,7 @@ TEST_F(LeafSystemTest, WitnessDeclarations) {
   auto ue = dynamic_cast<const UnrestrictedUpdateEvent<double>*>(
       witness5->get_event());
   ASSERT_TRUE(ue);
-  ue->handle(context_, nullptr);
+  ue->handle(system_, context_, nullptr);
   EXPECT_TRUE(system_.unrestricted_update_callback_called());
 
   auto witness6 = system_.DeclareLambdaWitnessWithoutEvent();
@@ -845,6 +846,7 @@ TEST_F(LeafSystemTest, ContinuousStateBelongsWithSystem) {
   // Successfully calc using a storage that was created by the system.
   std::unique_ptr<ContinuousState<double>> derivatives =
       system_.AllocateTimeDerivatives();
+  EXPECT_EQ(derivatives->get_system_id(), context_.get_system_id());
   DRAKE_EXPECT_NO_THROW(
       system_.CalcTimeDerivatives(context_, derivatives.get()));
 
@@ -2223,7 +2225,7 @@ class TestTriggerSystem : public LeafSystem<double> {
         continue;
 
       // Call custom callback handler.
-      event->handle(context);
+      event->handle(*this, context);
     }
 
     publish_count_++;
@@ -2724,6 +2726,7 @@ GTEST_TEST(InitializationTest, InitializationTest) {
   auto discrete_updates = dut.AllocateDiscreteVariables();
   auto state = context->CloneState();
   auto init_events = dut.AllocateCompositeEventCollection();
+  EXPECT_EQ(init_events->get_system_id(), context->get_system_id());
   dut.GetInitializationEvents(*context, init_events.get());
 
   dut.Publish(*context, init_events->get_publish_events());

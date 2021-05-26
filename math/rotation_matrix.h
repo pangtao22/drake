@@ -4,6 +4,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include <Eigen/Dense>
 
@@ -15,6 +16,7 @@
 #include "drake/common/eigen_types.h"
 #include "drake/common/never_destroyed.h"
 #include "drake/common/symbolic.h"
+#include "drake/math/fast_pose_composition_functions.h"
 #include "drake/math/roll_pitch_yaw.h"
 
 namespace drake {
@@ -35,7 +37,7 @@ namespace math {
 /// nor does it enforce strict proper usage of this class with vectors.
 ///
 /// @note When assertions are enabled, several methods in this class
-/// do a validity check and throw an exception (std::logic_error) if the
+/// do a validity check and throw an exception (std::exception) if the
 /// rotation matrix is invalid.  When assertions are disabled,
 /// many of these validity checks are skipped (which helps improve speed).
 /// In addition, these validity tests are only performed for scalar types for
@@ -57,13 +59,13 @@ class RotationMatrix {
 
   /// Constructs a %RotationMatrix from a Matrix3.
   /// @param[in] R an allegedly valid rotation matrix.
-  /// @throws std::logic_error in debug builds if R fails IsValid(R).
+  /// @throws std::exception in debug builds if R fails IsValid(R).
   explicit RotationMatrix(const Matrix3<T>& R) { set(R); }
 
   /// Constructs a %RotationMatrix from an Eigen::Quaternion.
   /// @param[in] quaternion a non-zero, finite quaternion which may or may not
   /// have unit length [i.e., `quaternion.norm()` does not have to be 1].
-  /// @throws std::logic_error in debug builds if the rotation matrix
+  /// @throws std::exception in debug builds if the rotation matrix
   /// R that is built from `quaternion` fails IsValid(R).  For example, an
   /// exception is thrown if `quaternion` is zero or contains a NaN or infinity.
   /// @note This method has the effect of normalizing its `quaternion` argument,
@@ -90,7 +92,7 @@ class RotationMatrix {
   /// @param[in] theta_lambda an Eigen::AngleAxis whose associated axis (vector
   /// direction herein called `lambda`) is non-zero and finite, but which may or
   /// may not have unit length [i.e., `lambda.norm()` does not have to be 1].
-  /// @throws std::logic_error in debug builds if the rotation matrix
+  /// @throws std::exception in debug builds if the rotation matrix
   /// R that is built from `theta_lambda` fails IsValid(R).  For example, an
   /// exception is thrown if `lambda` is zero or contains a NaN or infinity.
   explicit RotationMatrix(const Eigen::AngleAxis<T>& theta_lambda) {
@@ -165,7 +167,7 @@ class RotationMatrix {
   /// @param[in] Bx first unit vector in right-handed orthogonal set.
   /// @param[in] By second unit vector in right-handed orthogonal set.
   /// @param[in] Bz third unit vector in right-handed orthogonal set.
-  /// @throws std::logic_error in debug builds if `R_AB` fails IsValid(R_AB).
+  /// @throws std::exception in debug builds if `R_AB` fails IsValid(R_AB).
   /// @note In release builds, the caller can subsequently test if `R_AB` is,
   /// in fact, a valid %RotationMatrix by calling `R_AB.IsValid()`.
   /// @note The rotation matrix `R_AB` relates two sets of right-handed
@@ -185,7 +187,7 @@ class RotationMatrix {
   /// @param[in] Ax first unit vector in right-handed orthogonal set.
   /// @param[in] Ay second unit vector in right-handed orthogonal set.
   /// @param[in] Az third unit vector in right-handed orthogonal set.
-  /// @throws std::logic_error in debug builds if `R_AB` fails IsValid(R_AB).
+  /// @throws std::exception in debug builds if `R_AB` fails IsValid(R_AB).
   /// @note In release builds, the caller can subsequently test if `R_AB` is,
   /// in fact, a valid %RotationMatrix by calling `R_AB.IsValid()`.
   /// @note The rotation matrix `R_AB` relates two sets of right-handed
@@ -275,6 +277,44 @@ class RotationMatrix {
     return RotationMatrix(R);
   }
 
+  /// Creates a 3D right-handed orthonormal basis B from a given vector b_A,
+  /// returned as a rotation matrix R_AB. It consists of orthogonal unit vectors
+  /// u_A, v_A, w_A where u_A is the normalized b_A in the axis_index column of
+  /// R_AB and v_A has one element which is zero.  If an element of b_A is zero,
+  /// then one element of w_A is 1 and the other two elements are 0.
+  /// @param[in] b_A vector expressed in frame A that when normalized as
+  /// u_A = b_A.normalized() represents Bx, By, or Bz (depending on axis_index).
+  /// @param[in] axis_index The index ∈ {0, 1, 2} of the unit vector associated
+  ///  with u_A, 0 means u_A is Bx, 1 means u_A is By, and 2 means u_A is Bz.
+  /// @pre axis_index is 0 or 1 or 2.
+  /// @throws std::exception if b_A cannot be made into a unit vector because
+  ///   b_A contains a NaN or infinity or |b_A| < 1.0E-10.
+  /// @throws std::exception if the underlying type is symbolic (non-numeric).
+  /// @see MakeFromOneUnitVector() if b_A is known to already be unit length.
+  /// @retval R_AB the rotation matrix with properties as described above.
+  static RotationMatrix<T> MakeFromOneVector(
+      const Vector3<T>& b_A, int axis_index) {
+    const Vector3<T> u_A = NormalizeOrThrow(b_A, __func__);
+    return MakeFromOneUnitVector(u_A, axis_index);
+  }
+
+  /// (Advanced) Creates a right-handed orthonormal basis B from a given
+  /// unit vector u_A, returned as a rotation matrix R_AB.
+  /// @param[in] u_A unit vector which is expressed in frame A and is either
+  ///  Bx or By or Bz (depending on the value of axis_index).
+  /// @param[in] axis_index The index ∈ {0, 1, 2} of the unit vector associated
+  ///  with u_A, 0 means u_A is Bx, 1 means u_A is By, and 2 means u_A is Bz.
+  /// @pre axis_index is 0 or 1 or 2.
+  /// @throws std::exception in Debug builds if u_A is not a unit vector, i.e.,
+  /// |u_A| is not within a tolerance of 4ε ≈ 8.88E-16 to 1.0.
+  /// @throws std::exception if the underlying type is symbolic (non-numeric).
+  /// @note This method is designed for maximum performance and does not verify
+  ///  u_A as a unit vector in Release builds.  Consider MakeFromOneVector().
+  /// @retval R_AB the rotation matrix whose properties are described in
+  /// MakeFromOneVector().
+  static RotationMatrix<T> MakeFromOneUnitVector(const Vector3<T>& u_A,
+                                                 int axis_index);
+
   /// Creates a %RotationMatrix templatized on a scalar type U from a
   /// %RotationMatrix templatized on scalar type T.  For example,
   /// ```
@@ -307,7 +347,7 @@ class RotationMatrix {
 
   /// Sets `this` %RotationMatrix from a Matrix3.
   /// @param[in] R an allegedly valid rotation matrix.
-  /// @throws std::logic_error in debug builds if R fails IsValid(R).
+  /// @throws std::exception in debug builds if R fails IsValid(R).
   void set(const Matrix3<T>& R) {
     DRAKE_ASSERT_VOID(ThrowIfNotValid(R));
     SetUnchecked(R);
@@ -346,7 +386,7 @@ class RotationMatrix {
   /// - row(2) returns Az_B (Az expressed in terms of Bx, By, Bz).
   /// @param[in] index requested row index (0 <= index <= 2).
   /// @see col(), matrix()
-  /// @throws In debug builds, asserts (0 <= index <= 2).
+  /// @throws In Debug builds, asserts (0 <= index <= 2).
   /// @note For efficiency and consistency with Eigen, this method returns
   /// the same quantity returned by Eigen's row() operator.
   /// The returned quantity can be assigned in various ways, e.g., as
@@ -368,7 +408,7 @@ class RotationMatrix {
   /// - col(2) returns Bz_A (Bz expressed in terms of Ax, Ay, Az).
   /// @param[in] index requested column index (0 <= index <= 2).
   /// @see row(), matrix()
-  /// @throws In debug builds, asserts (0 <= index <= 2).
+  /// @throws In Debug builds, asserts (0 <= index <= 2).
   /// @note For efficiency and consistency with Eigen, this method returns
   /// the same quantity returned by Eigen's col() operator.
   /// The returned quantity can be assigned in various ways, e.g., as
@@ -389,7 +429,11 @@ class RotationMatrix {
   /// @note It is possible (albeit improbable) to create an invalid rotation
   /// matrix by accumulating round-off error with a large number of multiplies.
   RotationMatrix<T>& operator*=(const RotationMatrix<T>& other) {
-    SetUnchecked(matrix() * other.matrix());
+    if constexpr (std::is_same_v<T, double>) {
+      ComposeRR(R_AB_.data(), other.matrix().data(), R_AB_.data());
+    } else {
+      SetUnchecked(matrix() * other.matrix());
+    }
     return *this;
   }
 
@@ -400,7 +444,13 @@ class RotationMatrix {
   /// @note It is possible (albeit improbable) to create an invalid rotation
   /// matrix by accumulating round-off error with a large number of multiplies.
   RotationMatrix<T> operator*(const RotationMatrix<T>& other) const {
-    return RotationMatrix<T>(matrix() * other.matrix(), true);
+    RotationMatrix<T> R_AC(DoNotInitializeMemberFields{});
+    if constexpr (std::is_same_v<T, double>) {
+      ComposeRR(R_AB_.data(), other.matrix().data(), R_AC.R_AB_.data());
+    } else {
+      R_AC.R_AB_ = matrix() * other.matrix();
+    }
+    return R_AC;
   }
 
   /// Calculates `this` rotation matrix `R_AB` multiplied by an arbitrary
@@ -538,7 +588,7 @@ class RotationMatrix {
   /// bases related by matrix M does not span 3D space (when M multiples a unit
   /// vector, a vector of magnitude as small as 0 may result).
   /// @returns proper orthonormal matrix R that is closest to M.
-  /// @throws std::logic_error if R fails IsValid(R).
+  /// @throws std::exception if R fails IsValid(R).
   /// @note William Kahan (UC Berkeley) and Hongkai Dai (Toyota Research
   /// Institute) proved that for this problem, the same R that minimizes the
   /// Frobenius norm also minimizes the matrix-2 norm (a.k.a an induced-2 norm),
@@ -565,7 +615,7 @@ class RotationMatrix {
   /// @note The tolerance is chosen by developers to ensure a reasonably
   /// valid (orthonormal) rotation matrix.
   /// @note To orthonormalize a 3x3 matrix, use ProjectToRotationMatrix().
-  static double get_internal_tolerance_for_orthonormality() {
+  static constexpr double get_internal_tolerance_for_orthonormality() {
     return kInternalToleranceForOrthonormality;
   }
 
@@ -581,7 +631,7 @@ class RotationMatrix {
   /// chooses to return a canonical quaternion, i.e., with q(0) >= 0.
   /// @param[in] M 3x3 matrix to be made into a quaternion.
   /// @returns a unit quaternion q in canonical form, i.e., with q(0) >= 0.
-  /// @throws std::logic_error in debug builds if the quaternion `q`
+  /// @throws std::exception in debug builds if the quaternion `q`
   /// returned by this method cannot construct a valid %RotationMatrix.
   /// For example, if `M` contains NaNs, `q` will not be a valid quaternion.
   static Eigen::Quaternion<T> ToQuaternion(
@@ -662,7 +712,7 @@ class RotationMatrix {
   // @param[in] Bx first unit vector in right-handed orthogonal basis.
   // @param[in] By second unit vector in right-handed orthogonal basis.
   // @param[in] Bz third unit vector in right-handed orthogonal basis.
-  // @throws std::logic_error in debug builds if `R_AB` fails IsValid(R_AB).
+  // @throws std::exception in debug builds if `R_AB` fails IsValid(R_AB).
   // @note The rotation matrix `R_AB` relates two sets of right-handed
   // orthogonal unit vectors, namely `Ax`, `Ay`, `Az` and `Bx`, `By`, `Bz`.
   // The rows of `R_AB` are `Ax`, `Ay`, `Az` whereas the
@@ -681,7 +731,7 @@ class RotationMatrix {
   // @param[in] Ax first unit vector in right-handed orthogonal basis.
   // @param[in] Ay second unit vector in right-handed orthogonal basis.
   // @param[in] Az third unit vector in right-handed orthogonal basis.
-  // @throws std::logic_error in debug builds if `R_AB` fails R_AB.IsValid().
+  // @throws std::exception in debug builds if `R_AB` fails R_AB.IsValid().
   // @see SetFromOrthonormalColumns() for additional notes.
   void SetFromOrthonormalRows(const Vector3<T>& Ax,
                               const Vector3<T>& Ay,
@@ -920,6 +970,28 @@ class RotationMatrix {
 
     return m;
   }
+
+  // Throws an exception if the vector v does not have a measurable magnitude
+  // within 4ε of 1 (where machine epsilon ε ≈ 2.22E-16).
+  // @param[in] v The vector to test.
+  // @param[in] function_name The name of the calling function; included in the
+  //   exception message.
+  // @throws std::exception if |v| cannot be verified to be within 4ε of 1.
+  //   An exception is thrown if v contains nonfinite numbers (NaN or infinity).
+  // @note no exception is thrown if v is a symbolic type.
+  static void ThrowIfNotUnitLength(const Vector3<T>& v,
+                                   const char* function_name);
+
+  // Returns the unit vector in the direction of v or throws an exception if v
+  // cannot be "safely" normalized.
+  // @param[in] v The vector to normalize.
+  // @param[in] function_name The name of the calling function; included in the
+  //   exception message.
+  // @throws std::exception if v contains nonfinite numbers (NaN or infinity)
+  //   or |v| < 1E-10.
+  // @note no exception is thrown if v is a symbolic type.
+  static Vector3<T> NormalizeOrThrow(const Vector3<T>& v,
+                                     const char* function_name);
 
   // Stores the underlying rotation matrix relating two frames (e.g. A and B).
   // For speed, `R_AB_` is uninitialized (public constructors set its value).

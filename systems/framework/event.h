@@ -13,6 +13,9 @@
 namespace drake {
 namespace systems {
 
+// Forward declaration to avoid circular dependencies.
+template <typename T> class System;
+
 /** @defgroup events_description System Events
     @ingroup systems
 
@@ -421,10 +424,11 @@ enum class TriggerType {
  * main pieces of information: an enum trigger type and an optional attribute
  * of AbstractValue that can be used to explain why the event is triggered.
  * Derived classes should contain a function pointer to an optional callback
- * function that handles the event. No-op is the default handling behavior.
- * Currently, the System framework only supports three concrete event types:
- * PublishEvent, DiscreteUpdateEvent, and UnrestrictedUpdateEvent distinguished
- * by their callback functions' write access level to the State.
+ * function that handles the event. See @ref event_callbacks for detail.
+ * No-op is the default handling behavior.  Currently, the System framework
+ * only supports three concrete event types: PublishEvent, DiscreteUpdateEvent,
+ * and UnrestrictedUpdateEvent distinguished by their callback functions' write
+ * access level to the State.
  *
  * Event handling occurs during a simulation of a system. The logic that
  * describes when particular event types are handled is described in the
@@ -440,11 +444,11 @@ class Event {
   #endif
 
   /** @name Does not allow move or assignment; copy constructor is private. */
-  /** @{ */
+  ///@{
   void operator=(const Event&) = delete;
   Event(Event&&) = delete;
   void operator=(Event&&) = delete;
-  /** @} */
+  ///@}
 
   // TODO(eric.cousineau): Deprecate and remove this alias.
   using TriggerType = systems::TriggerType;
@@ -566,10 +570,39 @@ struct PeriodicEventDataComparator {
   }
 };
 
+/** @defgroup event_callbacks Event Callbacks
+    @ingroup technical_notes
+
+ The derived subclasses of Event<T> support two different type signatures for
+ callbacks. They differ by whether a System<T>& argument is present. For this
+ discussion, call them legacy (no system) callbacks and system callbacks.
+
+ One goal of offering both signatures is to support the possibility of
+ simulation without heap transactions after initialization. The motivation is
+ to enable certain kinds of soft real-time applications of Drake; see #14543
+ for more detail. Even with careful support within Drake, implementers of such
+ systems need to analyze and test carefully to see the heap proscription is
+ maintained.
+
+ The most common and convenient use of events and callbacks will be indirect,
+ via the LeafSystem Declare*Event() methods. The system callbacks permit those
+ methods to avoid heap usage induced in std::function by lambdas with captures
+ of a certain size. Empirically, the capture of an ordinary pointer and a
+ (wider) pointer-to-member-function are enough to induce heap allocations.
+
+ Direct clients of the event callbacks here may prefer the legacy callback,
+ together with a lambda capture of a pointer of the exact type needed. This
+ technique avoids a down-cast within the callback body. However, if other
+ captures are also necessary, the system callback (with a down-cast) may help
+ avoid heap use.
+*/
+// TODO(rpoyner-tri): extend the support described above to all subclasses.
+
 /**
  * This class represents a publish event. It has an optional callback function
- * to do custom handling of this event given const Context and const
- * PublishEvent object references. @see System::Publish for more details.
+ * (two forms are supported) to do custom handling of this event. @see
+ * System::Publish for more details. @see LeafSystem for more convenient
+ * interfaces to publish events via the Declare*PublishEvent() methods.
  */
 template <typename T>
 class PublishEvent final : public Event<T> {
@@ -579,11 +612,26 @@ class PublishEvent final : public Event<T> {
   void operator=(PublishEvent&&) = delete;
   bool is_discrete_update() const override { return false; }
 
+  /** @name Publish Callbacks
+   *
+   * Two callback signatures are supported. See @ref event_callbacks for a
+   * complete discussion. Both callback types receive a const reference to the
+   * context and this publish event. They differ in whether a const reference
+   * to the owning system is also provided.
+   */
+  ///@{
   /**
-   * Callback function that processes a publish event.
+   * Callback without system reference.
    */
   typedef std::function<void(const Context<T>&, const PublishEvent<T>&)>
       PublishCallback;
+
+  /**
+   * Callback with const system reference.
+   */
+  typedef std::function<void(const System<T>&, const Context<T>&,
+                             const PublishEvent<T>&)> SystemCallback;
+  ///@}
 
   /// Makes a PublishEvent with no trigger type, no event data, and
   /// no specified callback function.
@@ -594,6 +642,11 @@ class PublishEvent final : public Event<T> {
   explicit PublishEvent(const PublishCallback& callback)
       : Event<T>(), callback_(callback) {}
 
+  /// Makes a PublishEvent with no trigger type, no event data, and
+  /// the specified system callback function.
+  explicit PublishEvent(const SystemCallback& system_callback)
+      : Event<T>(), system_callback_(system_callback) {}
+
   // Note: Users should not be calling these.
   #if !defined(DRAKE_DOXYGEN_CXX)
   // Makes a PublishEvent with `trigger_type`, no event data, and
@@ -603,17 +656,29 @@ class PublishEvent final : public Event<T> {
       : Event<T>(trigger_type), callback_(callback) {}
 
   // Makes a PublishEvent with `trigger_type`, no event data, and
+  // system callback function `system_callback`, which can be null.
+  PublishEvent(const TriggerType& trigger_type,
+               const SystemCallback& system_callback)
+      : Event<T>(trigger_type), system_callback_(system_callback) {}
+
+  // Makes a PublishEvent with `trigger_type`, no event data, and
   // no specified callback function.
   explicit PublishEvent(const TriggerType& trigger_type)
       : Event<T>(trigger_type) {}
   #endif
 
   /**
-   * Calls the optional callback function, if one exists, with @p context and
-   * `this`.
+   * Calls the optional callback or system callback function, if one exists,
+   * with @p system, @p context, and `this`.
    */
-  void handle(const Context<T>& context) const {
-    if (callback_ != nullptr) callback_(context, *this);
+  void handle(const System<T>& system, const Context<T>& context) const {
+    // At most one callback can be set.
+    DRAKE_ASSERT(!(callback_ && system_callback_));
+    if (callback_ != nullptr) {
+      callback_(context, *this);
+    } else if (system_callback_ != nullptr) {
+      system_callback_(system, context, *this);
+    }
   }
 
  private:
@@ -631,15 +696,19 @@ class PublishEvent final : public Event<T> {
     return new PublishEvent(*this);
   }
 
-  // Optional callback function that handles this publish event.
+  // Optional callback functions that handle this publish event. At most one
+  // callback can be set; whichever one is set will be invoked. It is valid for
+  // no callback to be set.
   PublishCallback callback_{nullptr};
+  SystemCallback system_callback_{nullptr};
 };
 
 /**
  * This class represents a discrete update event. It has an optional callback
- * function to do custom handling of this event given const Context and
- * const DiscreteUpdateEvent references, and writes the updates to a mutable,
- * non-null DiscreteValues object.
+ * function (two forms are supported) to do custom handling of this event, and
+ * that can write updates to a mutable, non-null DiscreteValues object.  @see
+ * LeafSystem for more convenient interfaces to discrete update events via the
+ * Declare*DiscreteUpdateEvent() methods.
  */
 template <typename T>
 class DiscreteUpdateEvent final : public Event<T> {
@@ -649,12 +718,29 @@ class DiscreteUpdateEvent final : public Event<T> {
   void operator=(DiscreteUpdateEvent&&) = delete;
   bool is_discrete_update() const override { return true; }
 
+  /** @name Discrete Update Callbacks
+   *
+   * Two callback signatures are supported. See @ref event_callbacks for a
+   * complete discussion. Both callback types receive a const reference to the
+   * context and this discrete update event, and a writable non-null pointer to
+   * discrete state which the callback may write to. They differ in whether a
+   * const reference to the owning system is also provided.
+   */
+  ///@{
   /**
-   * Callback function that processes a discrete update event.
+   * Callback without system reference.
    */
   typedef std::function<void(const Context<T>&, const DiscreteUpdateEvent<T>&,
                              DiscreteValues<T>*)>
       DiscreteUpdateCallback;
+
+  /**
+   * Callback with const system reference.
+   */
+  typedef std::function<void(const System<T>&, const Context<T>&,
+                             const DiscreteUpdateEvent<T>&, DiscreteValues<T>*)>
+      SystemCallback;
+  ///@}
 
   /// Makes a DiscreteUpdateEvent with no trigger type, no event data, and
   /// no specified callback function.
@@ -665,6 +751,11 @@ class DiscreteUpdateEvent final : public Event<T> {
   explicit DiscreteUpdateEvent(const DiscreteUpdateCallback& callback)
       : Event<T>(), callback_(callback) {}
 
+  /// Makes a DiscreteUpdateEvent with no trigger type, no event data, and
+  /// the specified system callback function.
+  explicit DiscreteUpdateEvent(const SystemCallback& system_callback)
+      : Event<T>(), system_callback_(system_callback) {}
+
   // Note: Users should not be calling these.
   #if !defined(DRAKE_DOXYGEN_CXX)
   // Makes a DiscreteUpdateEvent with `trigger_type` with no event data and
@@ -674,20 +765,32 @@ class DiscreteUpdateEvent final : public Event<T> {
                       const DiscreteUpdateCallback& callback)
       : Event<T>(trigger_type), callback_(callback) {}
 
+  // Makes a DiscreteUpdateEvent with `trigger_type` with no event data and
+  // the system callback function `system_callback`.
+  // `system_callback` can be null.
+  DiscreteUpdateEvent(const TriggerType& trigger_type,
+                      const SystemCallback& system_callback)
+      : Event<T>(trigger_type), system_callback_(system_callback) {}
+
   // Makes a DiscreteUpdateEvent with @p trigger_type with no event data and
   // no specified callback function.
-  explicit DiscreteUpdateEvent(
-      const TriggerType& trigger_type)
-      : DiscreteUpdateEvent(trigger_type, nullptr) {}
+  explicit DiscreteUpdateEvent(const TriggerType& trigger_type)
+      : Event<T>(trigger_type) {}
   #endif
 
   /**
-   * Calls the optional callback function, if one exists, with @p context,
-   * 'this' and @p discrete_state.
+   * Calls the optional callback function, if one exists, with @p system, @p
+   * context, `this` and @p discrete_state.
    */
-  void handle(const Context<T>& context,
+  void handle(const System<T>& system, const Context<T>& context,
               DiscreteValues<T>* discrete_state) const {
-    if (callback_ != nullptr) callback_(context, *this, discrete_state);
+    // At most one callback can be set.
+    DRAKE_ASSERT(!(callback_ && system_callback_));
+    if (callback_ != nullptr) {
+      callback_(context, *this, discrete_state);
+    } else if (system_callback_ != nullptr) {
+      system_callback_(system, context, *this, discrete_state);
+    }
   }
 
  private:
@@ -702,18 +805,22 @@ class DiscreteUpdateEvent final : public Event<T> {
 
   // Clones DiscreteUpdateEvent-specific data.
   [[nodiscard]] DiscreteUpdateEvent<T>* DoClone() const final {
-    return new DiscreteUpdateEvent(this->get_trigger_type(), callback_);
+    return new DiscreteUpdateEvent(*this);
   }
 
-  // Optional callback function that handles this discrete update event.
+  // Optional callback functions that handle this discrete update event. At
+  // most one callback can be set; whichever one is set will be invoked. It is
+  // valid for no callback to be set.
   DiscreteUpdateCallback callback_{nullptr};
+  SystemCallback system_callback_{nullptr};
 };
 
 /**
  * This class represents an unrestricted update event. It has an optional
- * callback function to do custom handling of this event given const Context and
- * const UnrestrictedUpdateEvent object references, and writes the updates to a
- * mutable, non-null State object.
+ * callback function (two forms are supported) to do custom handling of this
+ * event, and that can write updates to a mutable, non-null State object. @see
+ * LeafSystem for more convenient interfaces to unrestricted update events via
+ * the Declare*UnrestrictedUpdateEvent() methods.
  */
 template <typename T>
 class UnrestrictedUpdateEvent final : public Event<T> {
@@ -723,12 +830,29 @@ class UnrestrictedUpdateEvent final : public Event<T> {
   void operator=(UnrestrictedUpdateEvent&&) = delete;
   bool is_discrete_update() const override { return false; }
 
+  /** @name Unrestricted Update Callbacks
+   *
+   * Two callback signatures are supported. See @ref event_callbacks for a
+   * complete discussion. Both callback types receive a const reference to the
+   * context and this unrestricted update event, and a writable non-null
+   * pointer to state which the callback may write to. They differ in whether a
+   * const reference to the owning system is also provided.
+   */
+  ///@{
   /**
-   * Callback function that processes an unrestricted update event.
+   * Callback without system reference.
    */
   typedef std::function<void(const Context<T>&,
                              const UnrestrictedUpdateEvent<T>&, State<T>*)>
       UnrestrictedUpdateCallback;
+
+  /**
+   * Callback with const system reference.
+   */
+  typedef std::function<void(const System<T>&, const Context<T>&,
+                             const UnrestrictedUpdateEvent<T>&, State<T>*)>
+      SystemCallback;
+  ///@}
 
   /// Makes an UnrestrictedUpdateEvent with no trigger type, no event data, and
   /// no specified callback function.
@@ -739,6 +863,12 @@ class UnrestrictedUpdateEvent final : public Event<T> {
   explicit UnrestrictedUpdateEvent(const UnrestrictedUpdateCallback& callback)
       : Event<T>(), callback_(callback) {}
 
+  /// Makes a UnrestrictedUpdateEvent with no trigger type, no event data, and
+  /// the specified system callback function.
+  explicit UnrestrictedUpdateEvent(
+      const SystemCallback& system_callback)
+      : Event<T>(), system_callback_(system_callback) {}
+
   // Note: Users should not be calling these.
   #if !defined(DRAKE_DOXYGEN_CXX)
   // Makes an UnrestrictedUpdateEvent with `trigger_type` and callback function
@@ -747,19 +877,32 @@ class UnrestrictedUpdateEvent final : public Event<T> {
                           const UnrestrictedUpdateCallback& callback)
       : Event<T>(trigger_type), callback_(callback) {}
 
+  // Makes an UnrestrictedUpdateEvent with `trigger_type` and system callback
+  // function `system_callback`. `system_callback` can be null.
+  UnrestrictedUpdateEvent(const TriggerType& trigger_type,
+                          const SystemCallback& system_callback)
+      : Event<T>(trigger_type), system_callback_(system_callback) {}
+
   // Makes an UnrestrictedUpateEvent with @p trigger_type, no optional data, and
   // no callback function.
   explicit UnrestrictedUpdateEvent(
       const TriggerType& trigger_type)
-      : UnrestrictedUpdateEvent(trigger_type, nullptr) {}
+      : Event<T>(trigger_type) {}
   #endif
 
   /**
-   * Calls the optional callback function, if one exists, with @p context,
-   * `this` and @p discrete_state.
+   * Calls the optional callback function, if one exists, with @p system, @p
+   * context, `this` and @p state.
    */
-  void handle(const Context<T>& context, State<T>* state) const {
-    if (callback_ != nullptr) callback_(context, *this, state);
+  void handle(const System<T>& system, const Context<T>& context,
+              State<T>* state) const {
+    // At most one callback can be set.
+    DRAKE_ASSERT(!(callback_ && system_callback_));
+    if (callback_ != nullptr) {
+      callback_(context, *this, state);
+    } else if (system_callback_ != nullptr) {
+      system_callback_(system, context, *this, state);
+    }
   }
 
  private:
@@ -777,8 +920,11 @@ class UnrestrictedUpdateEvent final : public Event<T> {
     return new UnrestrictedUpdateEvent(*this);
   }
 
-  // Optional callback function that handles this unrestricted update event.
+  // Optional callback functions that handle this unrestricted update event. At
+  // most one callback can be set; whichever one is set will be invoked. It is
+  // valid for no callback to be set.
   UnrestrictedUpdateCallback callback_{nullptr};
+  SystemCallback system_callback_{nullptr};
 };
 
 }  // namespace systems

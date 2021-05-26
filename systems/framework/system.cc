@@ -26,6 +26,14 @@ std::unique_ptr<Context<T>> System<T>::AllocateContext() const {
 }
 
 template <typename T>
+std::unique_ptr<CompositeEventCollection<T>>
+System<T>::AllocateCompositeEventCollection() const {
+  auto result = DoAllocateCompositeEventCollection();
+  result->set_system_id(get_system_id());
+  return result;
+}
+
+template <typename T>
 std::unique_ptr<BasicVector<T>> System<T>::AllocateInputVector(
     const InputPort<T>& input_port) const {
   DRAKE_THROW_UNLESS(input_port.get_data_type() == kVectorValued);
@@ -52,6 +60,7 @@ std::unique_ptr<SystemOutput<T>> System<T>::AllocateOutput() const {
     const OutputPort<T>& port = this->get_output_port(i);
     output->add_port(port.Allocate());
   }
+  output->set_system_id(get_system_id());
   return output;
 }
 
@@ -246,7 +255,7 @@ void System<T>::CalcTimeDerivatives(const Context<T>& context,
                                     ContinuousState<T>* derivatives) const {
   DRAKE_DEMAND(derivatives != nullptr);
   ValidateContext(context);
-  ValidateChildOfContext(derivatives);
+  ValidateCreatedForThisSystem(derivatives);
   DoCalcTimeDerivatives(context, derivatives);
 }
 
@@ -264,7 +273,7 @@ void System<T>::CalcImplicitTimeDerivativesResidual(
         this->implicit_time_derivatives_residual_size(), residual->size()));
   }
   ValidateContext(context);
-  ValidateChildOfContext(&proposed_derivatives);
+  ValidateCreatedForThisSystem(&proposed_derivatives);
   DoCalcImplicitTimeDerivativesResidual(context, proposed_derivatives,
                                         residual);
 }
@@ -439,7 +448,7 @@ void System<T>::CalcOutput(const Context<T>& context,
                            SystemOutput<T>* outputs) const {
   DRAKE_DEMAND(outputs != nullptr);
   ValidateContext(context);
-  DRAKE_ASSERT_VOID(CheckValidOutput(outputs));
+  ValidateCreatedForThisSystem(outputs);
   for (OutputPortIndex i(0); i < num_output_ports(); ++i) {
     // TODO(sherm1) Would be better to use Eval() here but we don't have
     // a generic abstract assignment capability that would allow us to
@@ -742,26 +751,6 @@ boolean<T> System<T>::CheckSystemConstraintsSatisfied(
     }
   }
   return result;
-}
-
-template <typename T>
-void System<T>::CheckValidOutput(const SystemOutput<T>* output) const {
-  DRAKE_THROW_UNLESS(output != nullptr);
-
-  // Checks that the number of output ports in the system output is consistent
-  // with the number of output ports declared by the System.
-  DRAKE_THROW_UNLESS(output->num_ports() == num_output_ports());
-
-  // Checks the validity of each output port.
-  for (int i = 0; i < num_output_ports(); ++i) {
-    // TODO(sherm1): consider adding (very expensive) validation of the
-    // abstract ports also.
-    if (get_output_port(i).get_data_type() == kVectorValued) {
-      const BasicVector<T>* output_vector = output->get_vector_data(i);
-      DRAKE_THROW_UNLESS(output_vector != nullptr);
-      DRAKE_THROW_UNLESS(output_vector->size() == get_output_port(i).size());
-    }
-  }
 }
 
 template <typename T>
@@ -1117,6 +1106,8 @@ template <typename T>
 Eigen::VectorBlock<VectorX<T>> System<T>::GetMutableOutputVector(
     SystemOutput<T>* output, int port_index) const {
   DRAKE_ASSERT(0 <= port_index && port_index < num_output_ports());
+  DRAKE_DEMAND(output != nullptr);
+  ValidateCreatedForThisSystem(output);
 
   BasicVector<T>* output_vector = output->GetMutableVectorData(port_index);
   DRAKE_ASSERT(output_vector != nullptr);
