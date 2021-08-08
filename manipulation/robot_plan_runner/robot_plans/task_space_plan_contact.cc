@@ -119,7 +119,7 @@ void TaskSpacePlanContact::Step(
         -std::numeric_limits<double>::infinity(), f_desired, dq);
   }
   // tracking error cost
-  prog->AddL2NormCost(Jt / control_period, x_dot_desired_, dq);
+  prog->Add2NormSquaredCost(Jt / control_period, x_dot_desired_, dq);
 
   solver_.Solve(*prog, {}, {}, prog_result_.get());
 

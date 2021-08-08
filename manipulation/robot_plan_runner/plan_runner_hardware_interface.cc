@@ -13,6 +13,7 @@
 #include "drake/systems/lcm/connect_lcm_scope.h"
 #include "drake/systems/lcm/lcm_interface_system.h"
 #include "drake/systems/lcm/lcm_publisher_system.h"
+#include "drake/systems/lcm/lcm_scope_system.h"
 #include "drake/systems/primitives/zero_order_hold.h"
 
 namespace drake {
@@ -93,15 +94,15 @@ PlanRunnerHardwareInterface::PlanRunnerHardwareInterface(
                     contact_info_translator->GetInputPort("contact_info"));
 
     // Log frequency is hardcoded in ConnectLcmScope.
-    systems::lcm::ConnectLcmScope(
+    systems::lcm::LcmScopeSystem::AddToBuilder(&builder, owned_lcm_.get(),
         contact_info_translator->GetOutputPort("num_contacts"), "NUM_CONTACTS",
-        &builder, owned_lcm_.get());
-    systems::lcm::ConnectLcmScope(
+        0.01);
+    systems::lcm::LcmScopeSystem::AddToBuilder(&builder, owned_lcm_.get(),
         contact_info_translator->GetOutputPort("contact_link"), "CONTACT_LINK",
-        &builder, owned_lcm_.get());
-    systems::lcm::ConnectLcmScope(
+        0.01);
+    systems::lcm::LcmScopeSystem::AddToBuilder(&builder, owned_lcm_.get(),
         contact_info_translator->GetOutputPort("contact_position"),
-        "CONTACT_POSITION", &builder, owned_lcm_.get());
+        "CONTACT_POSITION", 0.01);
   }
 
   if (control_gripper) {

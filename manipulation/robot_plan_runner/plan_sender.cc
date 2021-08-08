@@ -150,8 +150,8 @@ void PlanSender::DoCalcNextUpdateTime(
       *time = t;
       systems::EventCollection<systems::UnrestrictedUpdateEvent<double>>&
           uu_events = events->get_mutable_unrestricted_update_events();
-      uu_events.add_event(
-          std::make_unique<systems::UnrestrictedUpdateEvent<double>>(
+      uu_events.AddEvent(
+          systems::UnrestrictedUpdateEvent<double>(
               systems::TriggerType::kTimed,
               [this](const Context<double>& context_lambda,
                      const systems::UnrestrictedUpdateEvent<double>&,

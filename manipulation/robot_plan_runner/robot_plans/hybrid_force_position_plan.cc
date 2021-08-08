@@ -166,7 +166,7 @@ void HybridForcePositionPlan::Step(
       Eigen::VectorXd::Zero(num_positions_), dq);
 
   // tracking error costs
-  prog->AddL2NormCost(Sm * Jc / control_period, Sm * (V_C_TP_C_des + V_ff_c),
+  prog->Add2NormSquaredCost(Sm * Jc / control_period, Sm * (V_C_TP_C_des + V_ff_c),
                       dq);
 
   // control contact force.
