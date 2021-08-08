@@ -248,14 +248,18 @@ class TwoWitnessStatelessSystem : public LeafSystem<double> {
 
   explicit TwoWitnessStatelessSystem(double off1, double off2)
       : offset1_(off1), offset2_(off2) {
-    witness1_ = this->MakeWitnessFunction("clock witness1",
-            WitnessFunctionDirection::kCrossesZero,
-            &TwoWitnessStatelessSystem::CalcClockWitness1,
-            PublishEvent<double>());
-    witness2_ = this->MakeWitnessFunction("clock witness2",
-            WitnessFunctionDirection::kCrossesZero,
-            &TwoWitnessStatelessSystem::CalcClockWitness2,
-            PublishEvent<double>());
+    auto witness_handler = [this](const Context<double>& context,
+                                  const PublishEvent<double>& event) {
+      this->PublishOnWitness(context, event);
+    };
+    witness1_ = this->MakeWitnessFunction(
+        "clock witness1", WitnessFunctionDirection::kCrossesZero,
+        &TwoWitnessStatelessSystem::CalcClockWitness1,
+        PublishEvent<double>(witness_handler));
+    witness2_ = this->MakeWitnessFunction(
+        "clock witness2", WitnessFunctionDirection::kCrossesZero,
+        &TwoWitnessStatelessSystem::CalcClockWitness2,
+        PublishEvent<double>(witness_handler));
   }
 
   void set_publish_callback(
@@ -263,7 +267,7 @@ class TwoWitnessStatelessSystem : public LeafSystem<double> {
     publish_callback_ = callback;
   }
 
- protected:
+ private:
   void DoGetWitnessFunctions(
       const Context<double>&,
       std::vector<const WitnessFunction<double>*>* w) const override {
@@ -271,19 +275,17 @@ class TwoWitnessStatelessSystem : public LeafSystem<double> {
     w->push_back(witness2_.get());
   }
 
-  void DoPublish(
-      const Context<double>& context,
-      const std::vector<const PublishEvent<double>*>& events) const override {
+  void PublishOnWitness(const Context<double>& context,
+                        const PublishEvent<double>&) const {
     if (publish_callback_ != nullptr) publish_callback_(context);
   }
 
- private:
-  // The witness function is the time value itself plus the offset value.
+  // The witness function is the time value itself minus the offset value.
   double CalcClockWitness1(const Context<double>& context) const {
     return context.get_time() - offset1_;
   }
 
-  // The witness function is the time value itself plus the offset value.
+  // The witness function is the time value itself minus the offset value.
   double CalcClockWitness2(const Context<double>& context) const {
     return context.get_time() - offset2_;
   }
@@ -1049,19 +1051,17 @@ class ExampleDiscreteSystem : public LeafSystem<double> {
                                        &ExampleDiscreteSystem::Update);
 
     // Present y_n (=S_n) at the output port.
-    DeclareVectorOutputPort("Sn", systems::BasicVector<double>(1),
-                            &ExampleDiscreteSystem::Output);
+    DeclareVectorOutputPort("Sn", 1, &ExampleDiscreteSystem::Output);
   }
 
   static constexpr double kPeriod = 1 / 50.;  // Update at 50Hz (h=1/50).
   static constexpr double kOffset = 0.;       // Trigger events at n=0.
 
  private:
-  systems::EventStatus Update(const systems::Context<double>& context,
-                              systems::DiscreteValues<double>* xd) const {
+  void Update(const systems::Context<double>& context,
+              systems::DiscreteValues<double>* xd) const {
     const double x_n = context.get_discrete_state()[0];
     (*xd)[0] = x_n + 1.;
-    return systems::EventStatus::Succeeded();
   }
 
   void Output(const systems::Context<double>& context,
@@ -1118,7 +1118,7 @@ class SinusoidalDelayHybridSystem : public LeafSystem<double> {
     this->DeclarePeriodicDiscreteUpdateEvent(
         kUpdatePeriod, 0.0, &SinusoidalDelayHybridSystem::Update);
     this->DeclareDiscreteState(1 /* single state variable */);
-    this->DeclareVectorOutputPort("y", BasicVector<double>(1),
+    this->DeclareVectorOutputPort("y", 1,
                                   &SinusoidalDelayHybridSystem::CalcOutput);
   }
 
@@ -1126,11 +1126,10 @@ class SinusoidalDelayHybridSystem : public LeafSystem<double> {
   static constexpr double kUpdatePeriod = 0.25;
 
  private:
-  EventStatus Update(const Context<double>& context,
-                     DiscreteValues<double>* x_next) const {
+  void Update(const Context<double>& context,
+              DiscreteValues<double>* x_next) const {
     const double t = context.get_time();
     (*x_next)[0] = std::sin(kSinusoidalFrequency * t);
-    return EventStatus::Succeeded();
   }
 
   void CalcOutput(const Context<double>& context,
@@ -1199,9 +1198,7 @@ class ShiftedTimeOutputter : public LeafSystem<double> {
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(ShiftedTimeOutputter)
 
   ShiftedTimeOutputter() {
-    this->DeclareVectorOutputPort("time",
-                                  BasicVector<double>(1),
-                                  &ShiftedTimeOutputter::OutputTime);
+    this->DeclareVectorOutputPort("time", 1, &ShiftedTimeOutputter::OutputTime);
   }
 
  private:
@@ -1222,17 +1219,15 @@ class SimpleHybridSystem : public LeafSystem<double> {
     this->DeclarePeriodicDiscreteUpdateEvent(kPeriod, offset,
         &SimpleHybridSystem::Update);
     this->DeclareDiscreteState(1 /* single state variable */);
-    this->DeclareVectorInputPort("u", systems::BasicVector<double>(1));
+    this->DeclareVectorInputPort("u", 1);
   }
 
  private:
-  EventStatus Update(
-      const Context<double>& context,
-      DiscreteValues<double>* x_next) const {
+  void Update(const Context<double>& context,
+              DiscreteValues<double>* x_next) const {
     const double u = this->get_input_port(0).Eval(context)[0];  // u(t)
-    double x = context.get_discrete_state()[0];  // x_n
+    double x = context.get_discrete_state()[0];                 // x_n
     (*x_next)[0] = x + u;
-    return EventStatus::Succeeded();
   }
 
   const double kPeriod = 1.0;
@@ -1282,9 +1277,7 @@ class DeltaFunction : public LeafSystem<double> {
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(DeltaFunction)
 
   explicit DeltaFunction(double spike_time) : spike_time_(spike_time) {
-    this->DeclareVectorOutputPort("spike",
-                                  BasicVector<double>(1),
-                                  &DeltaFunction::Output);
+    this->DeclareVectorOutputPort("spike", 1, &DeltaFunction::Output);
   }
 
   // Change the spike time. Be sure to re-initialize after calling this.
@@ -1314,14 +1307,14 @@ class DiscreteInputAccumulator : public LeafSystem<double> {
   DiscreteInputAccumulator() {
     DeclareDiscreteState(1);  // Just one state variable, x[0].
 
-    DeclareVectorInputPort("u", BasicVector<double>(1));
+    DeclareVectorInputPort("u", 1);
 
     // Set initial condition x_0 = 0, and clear the result.
     DeclareInitializationEvent(
         DiscreteUpdateEvent<double>([this](const Context<double>&,
                                            const DiscreteUpdateEvent<double>&,
                                            DiscreteValues<double>* x_0) {
-          x_0->get_mutable_vector()[0] = 0.;
+          (*x_0)[0] = 0.;
           result_.clear();
         }));
 
@@ -1343,7 +1336,7 @@ class DiscreteInputAccumulator : public LeafSystem<double> {
                                            DiscreteValues<double>* x_np1) {
           const double x_n = get_x(context);
           const double u = get_input_port(0).Eval(context)[0];
-          x_np1->get_mutable_vector()[0] = x_n + u;  // x_{n+1} = x_n + u(t)
+          (*x_np1)[0] = x_n + u;  // x_{n+1} = x_n + u(t)
         }));
   }
 
@@ -1577,9 +1570,10 @@ GTEST_TEST(SimulatorTest, ControlledSpringMass) {
 
 // A mock hybrid continuous-discrete System with time as its only continuous
 // variable, discrete updates at 1 kHz, and requests publishes at 400 Hz. Calls
-// user-configured callbacks on DoPublish, DoCalcDiscreteVariableUpdates, and
-// EvalTimeDerivatives. This hybrid system will be used to verify expected state
-// update ordering -- discrete, continuous (i.e., integration), then publish.
+// user-configured callbacks in the publish and discrete variable update event
+// handlers and in EvalTimeDerivatives. This hybrid system will be used to
+// verify expected state update ordering -- discrete, continuous (i.e.,
+// integration), then publish.
 class MixedContinuousDiscreteSystem : public LeafSystem<double> {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(MixedContinuousDiscreteSystem)
@@ -1588,8 +1582,11 @@ class MixedContinuousDiscreteSystem : public LeafSystem<double> {
     // Deliberately choose a period that is identical to, and therefore courts
     // floating-point error with, the default max step size.
     const double offset = 0.0;
-    this->DeclarePeriodicDiscreteUpdate(kUpdatePeriod, offset);
-    this->DeclarePeriodicPublish(kPublishPeriod);
+    DeclarePeriodicDiscreteUpdateEvent(
+        kUpdatePeriod, offset,
+        &MixedContinuousDiscreteSystem::HandleDiscreteVariableUpdates);
+    DeclarePeriodicPublishEvent(kPublishPeriod, 0.0,
+                                &MixedContinuousDiscreteSystem::HandlePublish);
 
     // We need some continuous state (which will be unused) so that the
     // continuous state integration will not be bypassed.
@@ -1600,16 +1597,12 @@ class MixedContinuousDiscreteSystem : public LeafSystem<double> {
 
   ~MixedContinuousDiscreteSystem() override {}
 
-  void DoCalcDiscreteVariableUpdates(
-      const Context<double>& context,
-      const std::vector<const DiscreteUpdateEvent<double>*>& events,
-      DiscreteValues<double>* updates) const override {
+  void HandleDiscreteVariableUpdates(const Context<double>& context,
+                                     DiscreteValues<double>*) const {
     if (update_callback_ != nullptr) update_callback_(context);
   }
 
-  void DoPublish(
-      const Context<double>& context,
-      const std::vector<const PublishEvent<double>*>& events) const override {
+  void HandlePublish(const Context<double>& context) const {
     if (publish_callback_ != nullptr) publish_callback_(context);
   }
 
@@ -1983,19 +1976,17 @@ GTEST_TEST(SimulatorTest, PerStepAction) {
     }
 
     void AddPerStepPublishEvent() {
-      PublishEvent<double> event(TriggerType::kPerStep);
-      this->DeclarePerStepEvent(event);
+      DeclarePerStepPublishEvent(&PerStepActionTestSystem::HandlePublish);
     }
 
     void AddPerStepDiscreteUpdateEvent() {
-      DiscreteUpdateEvent<double> event(TriggerType::kPerStep);
-      this->DeclarePerStepEvent(event);
+      DeclarePerStepDiscreteUpdateEvent(
+          &PerStepActionTestSystem::HandleDiscrete);
     }
 
     void AddPerStepUnrestrictedUpdateEvent() {
-      UnrestrictedUpdateEvent<double> event(
-          TriggerType::kPerStep);
-      this->DeclarePerStepEvent(event);
+      DeclarePerStepUnrestrictedUpdateEvent(
+          &PerStepActionTestSystem::HandleUnrestricted);
     }
 
     const std::vector<double>& get_publish_times() const {
@@ -2018,24 +2009,23 @@ GTEST_TEST(SimulatorTest, PerStepAction) {
       derivatives->get_mutable_vector().SetAtIndex(0, 0.0);
     }
 
-    void DoCalcDiscreteVariableUpdates(
-        const Context<double>& context,
-        const std::vector<const DiscreteUpdateEvent<double>*>& events,
-        DiscreteValues<double>* discrete_state) const override {
+    // TODO(15465) When per-step event declaration sugar allows for callbacks
+    // whose result is "assumed to succeed", change these to void return types.
+    EventStatus HandleDiscrete(const Context<double>& context,
+                               DiscreteValues<double>*) const {
       discrete_update_times_.push_back(context.get_time());
+      return EventStatus::Succeeded();
     }
 
-    void DoCalcUnrestrictedUpdate(
-        const Context<double>& context,
-        const std::vector<const UnrestrictedUpdateEvent<double>*>& events,
-        State<double>* state) const override {
+    EventStatus HandleUnrestricted(const Context<double>& context,
+                                   State<double>*) const {
       unrestricted_update_times_.push_back(context.get_time());
+      return EventStatus::Succeeded();
     }
 
-    void DoPublish(
-        const Context<double>& context,
-        const std::vector<const PublishEvent<double>*>& events) const override {
+    EventStatus HandlePublish(const Context<double>& context) const {
       publish_times_.push_back(context.get_time());
+      return EventStatus::Succeeded();
     }
 
     // A hack to test actions easily.
@@ -2399,9 +2389,8 @@ GTEST_TEST(SimulatorTest, MissedPublishEventIssue13296) {
     void reset_count() { publish_counter_ = 0; }
 
    private:
-    EventStatus MakeItCount(const Context<double>&) const {
+    void MakeItCount(const Context<double>&) const {
       ++publish_counter_;
-      return EventStatus::Succeeded();
     }
     mutable int publish_counter_{0};
   };

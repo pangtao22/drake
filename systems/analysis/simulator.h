@@ -282,7 +282,7 @@ class Simulator {
   /// constraints -- it is up to you to make sure that constraints are
   /// satisfied by the initial conditions.
   ///
-  /// This method will throw `std::logic_error` if the combination of options
+  /// This method will throw `std::exception` if the combination of options
   /// doesn't make sense. Other failures are possible from the System and
   /// integrator in use.
   ///
@@ -612,7 +612,7 @@ class Simulator {
   template <class Integrator>
   Integrator& reset_integrator() {
     static_assert(
-        std::is_constructible<Integrator, const System<T>&, Context<T>*>::value,
+        std::is_constructible_v<Integrator, const System<T>&, Context<T>*>,
         "Integrator needs a constructor of the form "
         "Integrator::Integrator(const System&, Context*); this "
         "constructor is usually associated with error-controlled integrators.");
@@ -637,8 +637,8 @@ class Simulator {
   template <class Integrator>
   Integrator& reset_integrator(const T max_step_size) {
     static_assert(
-        std::is_constructible<Integrator, const System<T>&, double,
-                              Context<T>*>::value,
+        std::is_constructible_v<Integrator, const System<T>&, double,
+                                Context<T>*>,
         "Integrator needs a constructor of the form "
         "Integrator::Integrator(const System&, const T&, Context*); this "
         "constructor is usually associated with fixed-step integrators.");
@@ -673,7 +673,7 @@ class Simulator {
   ///          (indicating that any witness-triggered events should trigger
   ///          at the end of a time interval over which continuous state is
   ///          integrated).
-  /// @throws std::logic_error if the accuracy is not set in the Context and
+  /// @throws std::exception if the accuracy is not set in the Context and
   ///         the integrator is not operating in fixed step mode (see
   ///         IntegratorBase::get_fixed_step_mode().
   std::optional<T> GetCurrentWitnessTimeIsolation() const;
@@ -710,7 +710,7 @@ class Simulator {
   // TODO(sherm1) Add an option where the Simulator returns failed status
   // rather than throwing.
   void CallMonitorUpdateStatusAndMaybeThrow(SimulatorStatus* status) {
-    DRAKE_DEMAND(status);
+    DRAKE_DEMAND(status != nullptr);
     if (!get_monitor()) return;
     const EventStatus monitor_status = get_monitor()(*context_);
     if (monitor_status.severity() == EventStatus::kReachedTermination) {

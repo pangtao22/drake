@@ -12,7 +12,10 @@ namespace drake {
 namespace systems {
 namespace {
 
-class DummySystem final : public LeafSystem<double> {};
+class DummySystem final : public LeafSystem<double> {
+ public:
+  using SystemBase::get_system_id;
+};
 
 // The mocked-up return value for our DoEval stub, below.
 const AbstractValue* g_do_eval_result = nullptr;
@@ -39,8 +42,8 @@ GTEST_TEST(InputPortTest, VectorTest) {
   const std::optional<RandomDistribution> random_type = std::nullopt;
 
   auto dut = internal::FrameworkFactory::Make<InputPort<T>>(
-      system, system_interface, name, index, ticket, data_type, size,
-      random_type, &DoEval);
+      system, system_interface, dummy_system.get_system_id(), name, index,
+      ticket, data_type, size, random_type, &DoEval);
 
   // Check basic getters.
   EXPECT_EQ(dut->get_name(), name);
@@ -71,12 +74,12 @@ GTEST_TEST(InputPortTest, VectorTest) {
 
   // Check error messages.
   DRAKE_EXPECT_THROWS_MESSAGE(
-      dut->Eval<std::string>(context), std::exception,
+      dut->Eval<std::string>(context),
       "InputPort::Eval..: wrong value type std::string specified; "
       "actual type was drake::systems::MyVector<double,3> "
       "for InputPort.*2.*of.*dummy.*DummySystem.*");
   DRAKE_EXPECT_THROWS_MESSAGE(
-      dut->Eval<MyVector2d>(context), std::exception,
+      dut->Eval<MyVector2d>(context),
       "InputPort::Eval..: wrong value type .*MyVector<double,2> specified; "
       "actual type was .*MyVector<double,3> "
       "for InputPort.*2.*of.*dummy.*DummySystem.*");
@@ -99,8 +102,8 @@ GTEST_TEST(InputPortTest, AbstractTest) {
   const std::optional<RandomDistribution> random_type = std::nullopt;
 
   auto dut = internal::FrameworkFactory::Make<InputPort<T>>(
-      system, system_interface, name, index, ticket, data_type, size,
-      random_type, &DoEval);
+      system, system_interface, dummy_system.get_system_id(), name, index,
+      ticket, data_type, size, random_type, &DoEval);
 
   // Check basic getters.
   EXPECT_EQ(dut->get_name(), name);
@@ -126,22 +129,22 @@ GTEST_TEST(InputPortTest, AbstractTest) {
   EXPECT_EQ(eval_abs.get_value<std::string>(), data);
 
   DRAKE_EXPECT_THROWS_MESSAGE(
-      dut->Eval(context), std::exception,
+      dut->Eval(context),
       "InputPort::Eval..: wrong value type .*BasicVector<double> specified; "
       "actual type was std::string "
       "for InputPort.*2.*of.*dummy.*DummySystem.*");
   DRAKE_EXPECT_THROWS_MESSAGE(
-      dut->Eval<BasicVector<T>>(context), std::exception,
+      dut->Eval<BasicVector<T>>(context),
       "InputPort::Eval..: wrong value type .*BasicVector<double> specified; "
       "actual type was std::string "
       "for InputPort.*2.*of.*dummy.*DummySystem.*");
   DRAKE_EXPECT_THROWS_MESSAGE(
-      dut->Eval<MyVector3d>(context), std::exception,
+      dut->Eval<MyVector3d>(context),
       "InputPort::Eval..: wrong value type .*BasicVector<double> specified; "
       "actual type was std::string "
       "for InputPort.*2.*of.*dummy.*DummySystem.*");
   DRAKE_EXPECT_THROWS_MESSAGE(
-      dut->Eval<int>(context), std::exception,
+      dut->Eval<int>(context),
       "InputPort::Eval..: wrong value type int specified; "
       "actual type was std::string "
       "for InputPort.*2.*of.*dummy.*DummySystem.*");
@@ -151,11 +154,9 @@ GTEST_TEST(InputPortTest, AbstractTest) {
 struct SystemWithInputPorts final : public LeafSystem<double> {
  public:
   SystemWithInputPorts()
-      : basic_vec_port{DeclareVectorInputPort("basic_vec_port",
-                                              BasicVector<double>(3))},
+      : basic_vec_port{DeclareVectorInputPort("basic_vec_port", 3)},
         derived_vec_port{DeclareVectorInputPort(
-            "derived_vec_port",
-            MyVector3d(Eigen::Vector3d(1., 2., 3.)))},
+            "derived_vec_port", MyVector3d(Eigen::Vector3d(1., 2., 3.)))},
         int_port{DeclareAbstractInputPort("int_port", Value<int>(5))},
         double_port{
             DeclareAbstractInputPort("double_port", Value<double>(1.25))},
@@ -340,6 +341,15 @@ GTEST_TEST(InputPortTest, ContextForEmbeddedSystem) {
   EXPECT_EQ(kIntValue, system->int_port.Eval<int>(*context));
   EXPECT_EQ(kDoubleValue, system->double_port.Eval<double>(*context));
   EXPECT_EQ(kStringValue, system->string_port.Eval<std::string>(*context));
+
+  // When given an inapproprate context, we fail-fast.
+  auto diagram_context = diagram->CreateDefaultContext();
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      system->int_port.HasValue(*diagram_context),
+      ".*Context.*was not created for this InputPort.*");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      system->int_port.Eval<int>(*diagram_context),
+      ".*Context.*was not created for this InputPort.*");
 }
 
 }  // namespace

@@ -58,7 +58,7 @@ unique_ptr<GeometryInstance> MakeShape(const RigidTransformd& pose,
 
 template <typename T>
 SolarSystem<T>::SolarSystem(SceneGraph<T>* scene_graph) {
-  DRAKE_DEMAND(scene_graph);
+  DRAKE_DEMAND(scene_graph != nullptr);
   source_id_ = scene_graph->RegisterSource("solar_system");
 
   this->DeclareContinuousState(kBodyCount /* num_q */, kBodyCount /* num_v */,
@@ -68,7 +68,8 @@ SolarSystem<T>::SolarSystem(SceneGraph<T>* scene_graph) {
 
   // Now that frames have been registered, allocate the output port.
   geometry_pose_port_ =
-      this->DeclareAbstractOutputPort(&SolarSystem::CalcFramePoseOutput,
+      this->DeclareAbstractOutputPort(systems::kUseDefaultName,
+                                      &SolarSystem::CalcFramePoseOutput,
                                       {this->configuration_ticket()})
           .get_index();
 }

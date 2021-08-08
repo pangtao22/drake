@@ -65,6 +65,8 @@ class Constraint : public EvaluatorBase {
         lower_bound_(lb),
         upper_bound_(ub) {
     check(num_constraints);
+    DRAKE_DEMAND(!lower_bound_.array().isNaN().any());
+    DRAKE_DEMAND(!upper_bound_.array().isNaN().any());
   }
 
   /**
@@ -184,6 +186,8 @@ class Constraint : public EvaluatorBase {
  * xᵀQ₀x = xᵀQ₀ᵀx = xᵀ*(Q₀+Q₀ᵀ)/2 *x. The first equality holds because the
  * transpose of a scalar is the scalar itself. Hence we can always convert
  * a non-symmetric matrix Q₀ to a symmetric matrix Q.
+ *
+ * @ingroup solver_evaluators
  */
 class QuadraticConstraint : public Constraint {
  public:
@@ -277,18 +281,20 @@ class QuadraticConstraint : public Constraint {
  In case the user wants to enforce this constraint through general nonlinear
  optimization, we provide three different formulations on the Lorentz cone
  constraint
- 1. g(z) = z₀ - sqrt(z₁² + ... + zₙ₋₁²) ≥ 0
+ 1. [kConvex] g(z) = z₀ - sqrt(z₁² + ... + zₙ₋₁²) ≥ 0
     This formulation is not differentiable at z₁=...=zₙ₋₁=0
- 2. g(z) = z₀ - sqrt(z₁² + ... + zₙ₋₁²) ≥ 0
+ 2. [kConvexSmooth] g(z) = z₀ - sqrt(z₁² + ... + zₙ₋₁²) ≥ 0
     but the gradient of g(z) is approximated as
     ∂g(z)/∂z = [1, -z₁/sqrt(z₁² + ... zₙ₋₁² + ε), ...,
  -zₙ₋₁/sqrt(z₁²+...+zₙ₋₁²+ε)] where ε is a small positive number.
- 3. z₀²-(z₁²+...+zₙ₋₁²) ≥ 0
+ 3. [kNonconvex] z₀²-(z₁²+...+zₙ₋₁²) ≥ 0
     z₀ ≥ 0
     This constraint is differentiable everywhere, but z₀²-(z₁²+...+zₙ₋₁²) ≥ 0 is
- non-convex. The default is to use the first formulation. For more information
- and visualization, please refer to
- https://inst.eecs.berkeley.edu/~ee127a/book/login/l_socp_soc.html
+ non-convex. For more information and visualization, please refer to
+ https://www.epfl.ch/labs/disopt/wp-content/uploads/2018/09/7.pdf
+ and https://docs.mosek.com/modeling-cookbook/cqo.html (Fig 3.1)
+
+ @ingroup solver_evaluators
  */
 class LorentzConeConstraint : public Constraint {
  public:
@@ -300,14 +306,20 @@ class LorentzConeConstraint : public Constraint {
    * formulations, refer to LorentzConeConstraint documentation.
    */
   enum class EvalType {
-    kConvex,  ///< The constraint is g(z) = z₀ - sqrt(z₁² + ... + zₙ₋₁²) ≥ 0
-    kConvexSmooth,  ///< Same as kConvex1, but with approximated gradient.
-    kNonconvex  ///< Nonconvex constraint z₀²-(z₁²+...+zₙ₋₁²) ≥ 0 and z₀ ≥ 0
+    kConvex,  ///< The constraint is g(z) = z₀ - sqrt(z₁² + ... + zₙ₋₁²) ≥ 0.
+              ///< Note this formulation is non-differentiable at z₁= ...=
+              ///< zₙ₋₁=0
+    kConvexSmooth,  ///< Same as kConvex, but with approximated gradient that
+                    ///< exists everywhere..
+    kNonconvex  ///< Nonconvex constraint z₀²-(z₁²+...+zₙ₋₁²) ≥ 0 and z₀ ≥ 0.
+                ///< Note this formulation is differentiable, but at z₁= ...=
+                ///< zₙ₋₁=0 the gradient is also 0, so a gradient-based
+                ///< nonlinear solver can get stuck.
   };
 
   LorentzConeConstraint(const Eigen::Ref<const Eigen::MatrixXd>& A,
                         const Eigen::Ref<const Eigen::VectorXd>& b,
-                        EvalType eval_type = EvalType::kConvex);
+                        EvalType eval_type = EvalType::kConvexSmooth);
 
   ~LorentzConeConstraint() override {}
 
@@ -319,6 +331,9 @@ class LorentzConeConstraint : public Constraint {
 
   /** Getter for b. */
   const Eigen::VectorXd& b() const { return b_; }
+
+  /** Getter for eval type. */
+  EvalType eval_type() const { return eval_type_; }
 
  private:
   template <typename DerivedX, typename ScalarY>
@@ -333,6 +348,9 @@ class LorentzConeConstraint : public Constraint {
 
   void DoEval(const Eigen::Ref<const VectorX<symbolic::Variable>>& x,
               VectorX<symbolic::Expression>* y) const override;
+
+  std::ostream& DoDisplay(std::ostream&,
+                          const VectorX<symbolic::Variable>&) const override;
 
   const Eigen::SparseMatrix<double> A_;
   // We need to store a dense matrix of A_, so that we can compute the gradient
@@ -358,7 +376,9 @@ class LorentzConeConstraint : public Constraint {
  * z₀ * z₁ ≥ z₂² + z₃² + ... zₙ₋₁²
  * <-->
  * For more information and visualization, please refer to
- * https://inst.eecs.berkeley.edu/~ee127a/book/login/l_socp_soc.html
+ * https://docs.mosek.com/modeling-cookbook/cqo.html (Fig 3.1)
+ *
+ * @ingroup solver_evaluators
  */
 class RotatedLorentzConeConstraint : public Constraint {
  public:
@@ -401,6 +421,9 @@ class RotatedLorentzConeConstraint : public Constraint {
   void DoEval(const Eigen::Ref<const VectorX<symbolic::Variable>>& x,
               VectorX<symbolic::Expression>* y) const override;
 
+  std::ostream& DoDisplay(std::ostream&,
+                          const VectorX<symbolic::Variable>&) const override;
+
   const Eigen::SparseMatrix<double> A_;
   // We need to store a dense matrix of A_, so that we can compute the gradient
   // using AutoDiffXd, and return the gradient as a dense matrix.
@@ -412,6 +435,8 @@ class RotatedLorentzConeConstraint : public Constraint {
  * A constraint that may be specified using another (potentially nonlinear)
  * evaluator.
  * @tparam EvaluatorType The nested evaluator.
+ *
+ * @ingroup solver_evaluators
  */
 template <typename EvaluatorType = EvaluatorBase>
 class EvaluatorConstraint : public Constraint {
@@ -467,6 +492,8 @@ class EvaluatorConstraint : public Constraint {
  * caller must provide a list of Polynomial::VarType variables that correspond
  * to the members of the MathematicalProgram::Binding (the individual scalar
  * elements of the given VariableList).
+ *
+ * @ingroup solver_evaluators
  */
 class PolynomialConstraint : public EvaluatorConstraint<PolynomialEvaluator> {
  public:
@@ -501,6 +528,8 @@ class PolynomialConstraint : public EvaluatorConstraint<PolynomialEvaluator> {
 
 /**
  * Implements a constraint of the form @f$ lb <= Ax <= ub @f$
+ *
+ * @ingroup solver_evaluators
  */
 class LinearConstraint : public Constraint {
  public:
@@ -512,6 +541,7 @@ class LinearConstraint : public Constraint {
                    const Eigen::MatrixBase<DerivedUB>& ub)
       : Constraint(a.rows(), a.cols(), lb, ub), A_(a) {
     DRAKE_DEMAND(a.rows() == lb.rows());
+    DRAKE_DEMAND(A_.array().isFinite().all());
   }
 
   ~LinearConstraint() override {}
@@ -581,16 +611,24 @@ class LinearConstraint : public Constraint {
 
 /**
  * Implements a constraint of the form @f$ Ax = b @f$
+ *
+ * @ingroup solver_evaluators
  */
 class LinearEqualityConstraint : public LinearConstraint {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(LinearEqualityConstraint)
 
+  /**
+   * Constructs the linear equality constraint Aeq * x = beq
+   */
   template <typename DerivedA, typename DerivedB>
   LinearEqualityConstraint(const Eigen::MatrixBase<DerivedA>& Aeq,
                            const Eigen::MatrixBase<DerivedB>& beq)
       : LinearConstraint(Aeq, beq, beq) {}
 
+  /**
+   * Constructs the linear equality constraint a.dot(x) = beq
+   */
   LinearEqualityConstraint(const Eigen::Ref<const Eigen::RowVectorXd>& a,
                            double beq)
       : LinearEqualityConstraint(a, Vector1d(beq)) {}
@@ -620,7 +658,7 @@ class LinearEqualityConstraint : public LinearConstraint {
                           const Eigen::MatrixBase<DerivedL>&,
                           const Eigen::MatrixBase<DerivedU>&) {
     static_assert(
-        !std::is_same<DerivedA, DerivedA>::value,
+        !std::is_same_v<DerivedA, DerivedA>,
         "This method should not be called form `LinearEqualityConstraint`");
   }
 
@@ -636,6 +674,8 @@ class LinearEqualityConstraint : public LinearConstraint {
  * box constraint, and not something more general.  Some solvers use
  * this information to handle bounding box constraints differently than
  * general constraints, so use of this form is encouraged.
+ *
+ * @ingroup solver_evaluators
  */
 class BoundingBoxConstraint : public LinearConstraint {
  public:
@@ -678,6 +718,8 @@ class BoundingBoxConstraint : public LinearConstraint {
  *
  * An implied slack variable complements any 0 component of x.  To get
  * the slack values at a given solution x, use Eval(x).
+ *
+ * @ingroup solver_evaluators
  */
 class LinearComplementarityConstraint : public Constraint {
  public:
@@ -730,6 +772,8 @@ class LinearComplementarityConstraint : public Constraint {
  *     S is p.s.d
  * }@f]
  * namely, all eigen values of S are non-negative.
+ *
+ * @ingroup solver_evaluators
  */
 class PositiveSemidefiniteConstraint : public Constraint {
  public:
@@ -836,6 +880,8 @@ class PositiveSemidefiniteConstraint : public Constraint {
  * @f]
  * where p.s.d stands for positive semidefinite.
  * @f$ F_0, F_1, ..., F_n @f$ are all given symmetric matrices of the same size.
+ *
+ * @ingroup solver_evaluators
  */
 class LinearMatrixInequalityConstraint : public Constraint {
  public:
@@ -891,6 +937,8 @@ class LinearMatrixInequalityConstraint : public Constraint {
  * constraint evaluation.
  *
  * Uses symbolic::Jacobian to provide the gradients to the AutoDiff method.
+ *
+ * @ingroup solver_evaluators
  */
 class ExpressionConstraint : public Constraint {
  public:
@@ -923,6 +971,9 @@ class ExpressionConstraint : public Constraint {
   void DoEval(const Eigen::Ref<const VectorX<symbolic::Variable>>& x,
               VectorX<symbolic::Expression>* y) const override;
 
+  std::ostream& DoDisplay(std::ostream&,
+                          const VectorX<symbolic::Variable>&) const override;
+
  private:
   VectorX<symbolic::Expression> expressions_{0};
   MatrixX<symbolic::Expression> derivatives_{0, 0};
@@ -953,6 +1004,8 @@ class ExpressionConstraint : public Constraint {
  * can accidentally set z₁ = 0, where the constraint is not well defined.
  * Instead, the user should consider to solve the program through conic solvers
  * that can exploit exponential cone, such as Mosek and SCS.
+ *
+ * @ingroup solver_evaluators
  */
 class ExponentialConeConstraint : public Constraint {
  public:

@@ -69,8 +69,9 @@ Binding<Constraint> ParseConstraint(
  * Assist MathematicalProgram::AddLinearConstraint(...).
  */
 template <typename Derived>
-typename std::enable_if<is_eigen_scalar_same<Derived, symbolic::Formula>::value,
-                        Binding<Constraint>>::type
+typename std::enable_if_t<
+    is_eigen_scalar_same<Derived, symbolic::Formula>::value,
+    Binding<Constraint>>
 ParseConstraint(const Eigen::ArrayBase<Derived>& formulas) {
   const auto n = formulas.rows() * formulas.cols();
 
@@ -151,9 +152,9 @@ Binding<LinearEqualityConstraint> ParseLinearEqualityConstraint(
  * Assist MathematicalProgram::AddLinearEqualityConstraint(...).
  */
 template <typename DerivedV, typename DerivedB>
-typename std::enable_if<
+typename std::enable_if_t<
     is_eigen_vector_expression_double_pair<DerivedV, DerivedB>::value,
-    Binding<LinearEqualityConstraint>>::type
+    Binding<LinearEqualityConstraint>>
 ParseLinearEqualityConstraint(const Eigen::MatrixBase<DerivedV>& V,
                               const Eigen::MatrixBase<DerivedB>& b) {
   return DoParseLinearEqualityConstraint(V, b);
@@ -163,9 +164,9 @@ ParseLinearEqualityConstraint(const Eigen::MatrixBase<DerivedV>& V,
  * Assist MathematicalProgram::AddLinearEqualityConstraint(...).
  */
 template <typename DerivedV, typename DerivedB>
-typename std::enable_if<
+typename std::enable_if_t<
     is_eigen_nonvector_expression_double_pair<DerivedV, DerivedB>::value,
-    Binding<LinearEqualityConstraint>>::type
+    Binding<LinearEqualityConstraint>>
 ParseLinearEqualityConstraint(const Eigen::MatrixBase<DerivedV>& V,
                               const Eigen::MatrixBase<DerivedB>& B,
                               bool lower_triangle = false) {
@@ -241,14 +242,18 @@ std::shared_ptr<Constraint> MakePolynomialConstraint(
  * Assist MathematicalProgram::AddLorentzConeConstraint(...).
  */
 Binding<LorentzConeConstraint> ParseLorentzConeConstraint(
-    const Eigen::Ref<const VectorX<symbolic::Expression>>& v);
+    const Eigen::Ref<const VectorX<symbolic::Expression>>& v,
+    LorentzConeConstraint::EvalType eval_type =
+        LorentzConeConstraint::EvalType::kConvexSmooth);
 
 /*
  * Assist MathematicalProgram::AddLorentzConeConstraint(...).
  */
 Binding<LorentzConeConstraint> ParseLorentzConeConstraint(
     const symbolic::Expression& linear_expr,
-    const symbolic::Expression& quadratic_expr, double tol = 0);
+    const symbolic::Expression& quadratic_expr, double tol = 0,
+    LorentzConeConstraint::EvalType eval_type =
+        LorentzConeConstraint::EvalType::kConvexSmooth);
 
 /*
  * Assist MathematicalProgram::AddRotatedLorentzConeConstraint(...)
@@ -273,8 +278,8 @@ Binding<RotatedLorentzConeConstraint> ParseRotatedLorentzConeConstraint(
 // }
 
 template <typename Derived>
-typename std::enable_if<is_eigen_vector_of<Derived, symbolic::Formula>::value,
-                        Binding<Constraint>>::type
+typename std::enable_if_t<is_eigen_vector_of<Derived, symbolic::Formula>::value,
+                          Binding<Constraint>>
 ParseConstraint(const Eigen::MatrixBase<Derived>&) {
   // TODO(eric.cousineau): Implement this.
   throw std::runtime_error("Not implemented");

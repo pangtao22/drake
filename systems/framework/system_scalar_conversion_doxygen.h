@@ -203,7 +203,7 @@ The relevant details of the examples are:
 The framework's default implementation System scalar-type conversion only
 converts between a limited set of scalar types, as enumerated by the
 drake::systems::SystemScalarConverter::SystemScalarConverter(SystemTypeTag<S>)
-constructor.
+constructor documentation.
 
 Systems may specialize their drake::systems::scalar_conversion::Traits to
 govern the supported scalar types.  The recommended mechanism is to use
@@ -222,7 +222,7 @@ class Foo {
 };
 @endcode
 
-Here, `U` is the donor scalar type (to convert from), and `T` the resulting
+Here, `U` is the source scalar type (to convert from), and `T` the resulting
 scalar type (to convert into).  For example, in the second line of
 @code
 Foo<double> foo;

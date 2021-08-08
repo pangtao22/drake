@@ -1,9 +1,12 @@
 #include <cstdlib>
+#include <optional>
 #include <stdexcept>
+#include <string>
 
 #include <gtest/gtest.h>
 
 #include "drake/common/test_utilities/expect_no_throw.h"
+#include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/solvers/gurobi_solver.h"
 #include "drake/solvers/mathematical_program.h"
 
@@ -14,47 +17,55 @@ namespace {
 // These tests are deliberately not in gurobi_solver_test.cc to avoid causing
 // license issues during tests in that file.
 
-GTEST_TEST(GrbLicenseFileTest, GrbLicenseFileSet) {
-  const char* grb_license_file = std::getenv("GRB_LICENSE_FILE");
-  ASSERT_STRNE(nullptr, grb_license_file);
-
-  MathematicalProgram program;
-  // Add a variable to avoid the "Solve" function terminating without calling
-  // the external Gurobi solver.
-  const auto x = program.NewContinuousVariables<1>();
-  GurobiSolver solver;
-
-  MathematicalProgramResult result;
-  DRAKE_EXPECT_NO_THROW(solver.Solve(program, {}, {}, &result));
+std::optional<std::string> GetEnvStr(const char* name) {
+  const char* const value = std::getenv(name);
+  if (!name) {
+    return std::nullopt;
+  }
+  return std::string(value);
 }
 
-GTEST_TEST(GrbLicenseFileTest, GrbLicenseFileUnset) {
-  const char* grb_license_file = std::getenv("GRB_LICENSE_FILE");
-  ASSERT_STRNE(nullptr, grb_license_file);
+class GrbLicenseFileTest : public ::testing::Test {
+ protected:
+  GrbLicenseFileTest()
+      : orig_grb_license_file_(GetEnvStr("GRB_LICENSE_FILE")) {}
 
-  const int unsetenv_result = ::unsetenv("GRB_LICENSE_FILE");
-  ASSERT_EQ(0, unsetenv_result);
+  void SetUp() override {
+    ASSERT_EQ(solver_.available(), true);
+    ASSERT_TRUE(orig_grb_license_file_);
 
-  MathematicalProgram program;
-  // Add a variable to avoid the "Solve" function terminating without calling
-  // the external Gurobi solver.
-  const auto x = program.NewContinuousVariables<1>();
-  GurobiSolver solver;
-
-  try {
-    MathematicalProgramResult result;
-    solver.Solve(program, {}, {}, &result);
-    ADD_FAILURE() << "Expected exception of type std::runtime_error.";
-  } catch (const std::exception& err) {
-    EXPECT_EQ(err.what(), std::string(
-        "drake::solvers::GurobiSolver::is_enabled() is false; "
-        "see its documentation for how to enable."));
-  } catch (...) {
-    ADD_FAILURE() << "Expected std::exception.";
+    // Add a variable to avoid the "Solve" function terminating without calling
+    // the external Gurobi solver.
+    prog_.NewContinuousVariables<1>();
   }
 
-  const int setenv_result = ::setenv("GRB_LICENSE_FILE", grb_license_file, 1);
-  ASSERT_EQ(0, setenv_result);
+  void TearDown() override {
+    if (orig_grb_license_file_) {
+      const int setenv_result = ::setenv(
+          "GRB_LICENSE_FILE", orig_grb_license_file_->c_str(), 1);
+      EXPECT_EQ(setenv_result, 0);
+    }
+  }
+
+  const std::optional<std::string> orig_grb_license_file_;
+  MathematicalProgram prog_;
+  GurobiSolver solver_;
+};
+
+TEST_F(GrbLicenseFileTest, GrbLicenseFileSet) {
+  EXPECT_EQ(solver_.enabled(), true);
+  DRAKE_EXPECT_NO_THROW(solver_.Solve(prog_));
+}
+
+TEST_F(GrbLicenseFileTest, GrbLicenseFileUnset) {
+  EXPECT_EQ(solver_.enabled(), true);
+  const int unsetenv_result = ::unsetenv("GRB_LICENSE_FILE");
+  ASSERT_EQ(unsetenv_result, 0);
+  EXPECT_EQ(solver_.enabled(), false);
+
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      solver_.Solve(prog_),
+      ".*GurobiSolver has not been properly configured.*");
 }
 
 }  // namespace

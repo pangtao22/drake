@@ -174,9 +174,9 @@ class QueryObject {
 
    These queries detect _collisions_ between geometry. Two geometries collide
    if they overlap each other and are not explicitly excluded through
-   @ref collision_filter_concepts "collision filtering". These algorithms find
-   those colliding cases, characterize them, and report the essential
-   characteristics of that collision.
+   @ref scene_graph_collision_filter_manager "collision filtering".
+   These algorithms find those colliding cases, characterize them, and report
+   the essential characteristics of that collision.
 
    For two colliding geometries g_A and g_B, it is guaranteed that they will
    map to `id_A` and `id_B` in a fixed, repeatable manner, where `id_A` and
@@ -234,7 +234,7 @@ class QueryObject {
    | Ellipsoid | throwsᵈ | throwsᵈ  | throwsᵈ |  throwsᵈ  |   throwsᵈ  |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
    | HalfSpace | throwsᵈ | throwsᵈ  | throwsᵈ |  throwsᵈ  |   throwsᵈ  |   throwsᵃ  |  ░░░░░  |  ░░░░░  |
    | Mesh      |    ᵇ    |    ᵇ     |    ᵇ    |     ᵇ     |      ᵇ     |     ᵇ      |    ᵇ    |  ░░░░░  |
-   | Sphere    |  2e-15  |  3e-15   | throwsᵈ |   2e-15   |   throwsᵈ  |   2e-15    |    ᵇ    |  4e-15  |
+   | Sphere    |  2e-15  |  3e-15   | throwsᵈ |   2e-15   |   throwsᵈ  |   2e-15    |    ᵇ    |  5e-15  |
    __*Table 2*__: Worst observed error (in m) for 2mm penetration between
    geometries approximately 20cm in size for `T` = @ref drake::AutoDiffXd
    "AutoDiffXd".
@@ -263,10 +263,9 @@ class QueryObject {
            `throws` in the support table above.  */
   std::vector<PenetrationAsPointPair<T>> ComputePointPairPenetration() const;
 
-  /**
-   Reports pairwise intersections and characterizes each non-empty intersection
-   as a ContactSurface for hydroelastic contact model. The computation is
-   subject to collision filtering.
+  /** Reports pairwise intersections and characterizes each non-empty
+   intersection as a ContactSurface for hydroelastic contact model. The
+   computation is subject to collision filtering.
 
    For two intersecting geometries g_A and g_B, it is guaranteed that they will
    map to `id_A` and `id_B` in a fixed, repeatable manner, where `id_A` and
@@ -314,7 +313,38 @@ class QueryObject {
             the same.  */
   std::vector<ContactSurface<T>> ComputeContactSurfaces() const;
 
-  /** Reports pair-wise intersections and characterizes each non-empty
+  /** (Advanced) Reports polygonal contact surfaces between pairs of
+   intersecting geometries for hydroelastic contact model. It performs the
+   same task as ComputeContactSurfaces() with a different representation of
+   the output contact surfaces. The computation is subject to collision
+   filtering.
+
+   Each contact surface from this query consists of contact polygons, each of
+   which is an intersecting polygon between mesh elements of two geometries.
+
+   In the current incarnation, each contact polygon is represented by a
+   triangle with the same centroid, area, pressure value, and pressure
+   gradient as the contact polygon.
+
+   @warning The return type in this implementation is a std::vector of
+   ContactSurface that uses the representative triangles, and, in the future,
+   the return type will change to the true polygonal representation without
+   any deprecation period.
+
+   This query has the same handling of GeometryId's, limitations (supported
+   shapes and compliances), user-defined properties (elastic modulus and
+   tessellation), and scalar support (double and AutoDiffXd) as
+   ComputeContactSurfaces().
+
+   @returns A vector populated with all detected intersections characterized as
+            contact surfaces. The ordering of the results is guaranteed to be
+            consistent -- for fixed geometry poses, the results will remain
+            the same.
+   @throws std::exception for the same reason described in
+   ComputeContactSurfaces()  */
+  std::vector<ContactSurface<T>> ComputePolygonalContactSurfaces() const;
+
+  /** Reports pairwise intersections and characterizes each non-empty
    intersection as a ContactSurface _where possible_ and as a
    PenetrationAsPointPair where not.
 
@@ -343,6 +373,27 @@ class QueryObject {
    @throws std::exception for the reasons described in ComputeContactSurfaces()
                           and ComputePointPairPenetration(). */
   void ComputeContactSurfacesWithFallback(
+      std::vector<ContactSurface<T>>* surfaces,
+      std::vector<PenetrationAsPointPair<T>>* point_pairs) const;
+
+  /** (Advanced) Reports pairwise intersections and characterizes each
+   non-empty intersection as a polygonal contact surface _where possible_ and
+   as a PenetrationAsPointPair where not. It performs the same task as
+   ComputeContactSurfacesWithFallback() with a different representation of
+   the contact surfaces.
+
+   This method can be thought of as a combination of
+   ComputePolygonalContactSurfaces() and ComputePointPairPenetration().
+
+   @warning In the current incarnation, the output parameter `surfaces` in
+   this implementation uses ContactSurface consisting of one representative
+   triangle for each contact polygon. In the future, it will change to the
+   true polygonal representation without any deprecation period.
+
+   This method has the same ordering of the results, the same scalar support,
+   the same parameters, and the same exception as
+   ComputeContactSurfacesWithFallback().  */
+  void ComputePolygonalContactSurfacesWithFallback(
       std::vector<ContactSurface<T>>* surfaces,
       std::vector<PenetrationAsPointPair<T>>* point_pairs) const;
 
@@ -461,7 +512,7 @@ class QueryObject {
    | Ellipsoid | throwsᵇ |  throwsᵇ | throwsᵇ |  throwsᵇ  |  throwsᵇ   |   ░░░░░░   |  ░░░░░  |  ░░░░░  |
    | HalfSpace | throwsᵃ |  throwsᵃ | throwsᵃ |  throwsᵃ  |  throwsᵃ   |   throwsᵃ  |  ░░░░░  |  ░░░░░  |
    | Mesh      |    ᶜ    |    ᶜ     |    ᶜ    |     ᶜ     |      ᶜ     |      ᵃ     |    ᶜ    |  ░░░░░  |
-   | Sphere    |  2e-15  |  throwsᵇ | throwsᵇ |  throwsᵇ  |  throwsᵇ   |    2e-15   |    ᶜ    |  4e-15  |
+   | Sphere    |  2e-15  |  throwsᵇ | throwsᵇ |  throwsᵇ  |  throwsᵇ   |    2e-15   |    ᶜ    |  5e-15  |
    __*Table 4*__: Worst observed error (in m) for 2mm penetration/separation
    between geometries approximately 20cm in size for `T` =
    @ref drake::AutoDiffXd "AutoDiffXd".
@@ -556,13 +607,19 @@ class QueryObject {
 
    | Scalar |   %Box  | %Capsule | %Convex | %Cylinder | %Ellipsoid | %HalfSpace |  %Mesh  | %Sphere |
    | :----: | :-----: | :------: | :-----: | :-------: | :--------: | :--------: | :-----: | :-----: |
-   | double |  2e-15  |   4e-15  |    ᵃ    |   3e-15   |      ᵃ     |    5e-15   |    ᵃ    |  4e-15  |
+   | double |  2e-15  |   4e-15  |    ᵃ    |   3e-15   |    3e-5ᵇ   |    5e-15   |    ᵃ    |  4e-15  |
    | ADXd   |  1e-15  |   4e-15  |    ᵃ    |     ᵃ     |      ᵃ     |    5e-15   |    ᵃ    |  3e-15  |
    __*Table 5*__: Worst observed error (in m) for 2mm penetration/separation
    between geometry approximately 20cm in size and a point.
 
    - ᵃ Unsupported geometry/scalar combinations are simply ignored; no results
        are reported for that geometry.
+   - ᵇ This uses an *iterative* algorithm which introduces a relatively large
+       and variable error. For example, as the eccentricity of the ellipsoid
+       increases, this error may get worse. It also depends on the location of
+       the projection of the query point on the ellipsoid; the closer that point
+       is to the high curvature area, the bigger the effect. It is not
+       immediately clear how much worse the answer will get.
 
    @note For a sphere G, the signed distance function φᵢ(p) has an undefined
    gradient vector at the center of the sphere--every point on the sphere's
@@ -578,7 +635,7 @@ class QueryObject {
    box if it lies within a certain tolerance from them.
 
    @note For a box B, if a point p is inside the box, and it is equidistant to
-   to multiple nearest faces, the signed distance function φᵢ(p) at p will have
+   multiple nearest faces, the signed distance function φᵢ(p) at p will have
    an undefined gradient vector. There is a nearest point candidate associated
    with each nearest face. In this case, we arbitrarily pick the point Nᵢ
    associated with one of the nearest faces.  Please note that, due to the
@@ -685,8 +742,8 @@ class QueryObject {
   // `scene_graph` cannot be null.
   void set(const systems::Context<T>* context,
            const SceneGraph<T>* scene_graph) {
-    DRAKE_DEMAND(context);
-    DRAKE_DEMAND(scene_graph);
+    DRAKE_DEMAND(context != nullptr);
+    DRAKE_DEMAND(scene_graph != nullptr);
     state_.reset();
     context_ = context;
     scene_graph_ = scene_graph;

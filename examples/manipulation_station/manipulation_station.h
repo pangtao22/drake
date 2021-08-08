@@ -68,11 +68,13 @@ enum class Setup { kNone, kManipulationClass, kClutterClearing, kPlanarIiwa };
 /// - camera_[NAME]_rgb_image
 /// - camera_[NAME]_depth_image
 /// - <b style="color:orange">camera_[NAME]_label_image</b>
+/// - <b style="color:orange">camera_[NAME]_point_cloud</b>
 /// - ...
 /// - camera_[NAME]_rgb_image
 /// - camera_[NAME]_depth_image
 /// - <b style="color:orange">camera_[NAME]_label_image</b>
-/// - <b style="color:orange">pose_bundle</b>
+/// - <b style="color:orange">camera_[NAME]_point_cloud</b>
+/// - <b style="color:orange">pose_bundle</b> (deprecated for 2021-12-01)
 /// - <b style="color:orange">query_object</b>
 /// - <b style="color:orange">contact_results</b>
 /// - <b style="color:orange">plant_continuous_state</b>
@@ -87,6 +89,9 @@ enum class Setup { kNone, kManipulationClass, kClutterClearing, kPlanarIiwa };
 /// between q_measured and v_estimated is because the Kuka FRI reports
 /// positions directly, but we have estimated v in our code that wraps the
 /// FRI.
+///
+/// @warning The "camera_[NAME]_point_cloud" data currently has registration
+/// errors per issue https://github.com/RobotLocomotion/drake/issues/12125.
 ///
 /// Consider the robot dynamics
 ///   M(q)vdot + C(q,v)v = τ_g(q) + τ_commanded + τ_joint_friction + τ_external,
@@ -440,25 +445,25 @@ class ManipulationStation : public systems::Diagram<T> {
   std::vector<std::string> get_camera_names() const;
 
   /// Set the gains for the WSG controller.
-  /// @throws exception if Finalize() has been called.
+  /// @throws std::exception if Finalize() has been called.
   void SetWsgGains(double kp, double kd);
 
   /// Set the position gains for the IIWA controller.
-  /// @throws exception if Finalize() has been called.
+  /// @throws std::exception if Finalize() has been called.
   void SetIiwaPositionGains(const VectorX<double>& kp) {
     DRAKE_THROW_UNLESS(!plant_->is_finalized());
     iiwa_kp_ = kp;
   }
 
   /// Set the velocity gains for the IIWA controller.
-  /// @throws exception if Finalize() has been called.
+  /// @throws std::exception if Finalize() has been called.
   void SetIiwaVelocityGains(const VectorX<double>& kd) {
     DRAKE_THROW_UNLESS(!plant_->is_finalized());
     iiwa_kd_ = kd;
   }
 
   /// Set the integral gains for the IIWA controller.
-  /// @throws exception if Finalize() has been called.
+  /// @throws std::exception if Finalize() has been called.
   void SetIiwaIntegralGains(const VectorX<double>& ki) {
     DRAKE_THROW_UNLESS(!plant_->is_finalized());
     iiwa_ki_ = ki;

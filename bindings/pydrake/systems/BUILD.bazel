@@ -139,6 +139,7 @@ drake_pybind_library(
     name = "rendering_py",
     cc_deps = [
         "//bindings/pydrake:documentation_pybind",
+        "//bindings/pydrake/common:deprecation_pybind",
         "//bindings/pydrake/common:eigen_geometry_pybind",
         "//bindings/pydrake/common:value_pybind",
     ],
@@ -214,6 +215,7 @@ drake_pybind_library(
     cc_deps = [
         ":lcm_pybind",
         "//bindings/pydrake:documentation_pybind",
+        "//bindings/pydrake/common:deprecation_pybind",
         "//lcmtypes:contact_results_for_viz",
         "//lcmtypes:iiwa",
         "//lcmtypes:image_array",
@@ -543,6 +545,7 @@ drake_py_unittest(
         ":framework_py",
         ":planar_scenegraph_visualizer_py",
         "//bindings/pydrake:geometry_py",
+        "//bindings/pydrake/common/test_utilities",
         "//bindings/pydrake/multibody",
     ],
 )
@@ -563,6 +566,7 @@ drake_py_unittest(
     data = ["//multibody/benchmarks/acrobot:models"],
     deps = [
         ":rendering_py",
+        "//bindings/pydrake/common/test_utilities:deprecation_py",
         "//bindings/pydrake/multibody:math_py",
         "//bindings/pydrake/multibody:parsing_py",
         "//bindings/pydrake/multibody:plant_py",

@@ -26,6 +26,7 @@ void AddTwoFreeBodiesToPlant(MultibodyPlant<T>* model);
 
 /**
  * Constructs a MultibodyPlant consisting of two free bodies.
+ * @tparam_nonsymbolic_scalar
  */
 template <typename T>
 std::unique_ptr<MultibodyPlant<T>> ConstructTwoFreeBodiesPlant();
@@ -41,9 +42,9 @@ std::unique_ptr<MultibodyPlant<double>> ConstructIiwaPlant(
  * gradients.
  */
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename DerivedA::Scalar, typename DerivedB::Scalar>::value &&
-    std::is_same<typename DerivedA::Scalar, AutoDiffXd>::value>::type
+typename std::enable_if_t<
+    std::is_same_v<typename DerivedA::Scalar, typename DerivedB::Scalar> &&
+    std::is_same_v<typename DerivedA::Scalar, AutoDiffXd>>
 CompareAutoDiffVectors(const Eigen::MatrixBase<DerivedA>& a,
                        const Eigen::MatrixBase<DerivedB>& b, double tol) {
   EXPECT_TRUE(CompareMatrices(math::autoDiffToValueMatrix(a),
@@ -141,6 +142,7 @@ class TwoFreeSpheresTest : public ::testing::Test {
  * @param radius The radius of the sphere.
  * @param X_WB the pose of the box (B) in the world frame (W).
  * @param X_WS the pose of the sphere (S) in the world frame (W).
+ * @tparam_nonsymbolic_scalar
  */
 template <typename T>
 T BoxSphereSignedDistance(const Eigen::Ref<const Eigen::Vector3d>& box_size,

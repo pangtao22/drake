@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "drake/common/drake_assert.h"
@@ -57,10 +58,9 @@ using drake::symbolic::test::PolyNotEqual;
 
 using std::all_of;
 using std::cref;
-using std::enable_if;
 using std::endl;
 using std::is_permutation;
-using std::is_same;
+using std::is_same_v;
 using std::make_shared;
 using std::map;
 using std::move;
@@ -120,7 +120,7 @@ template <typename ExpectedType, typename T>
 void CheckAddedVariable(const MathematicalProgram& prog, const T& var, int rows,
                         int cols, const string& var_name, bool is_symmetric,
                         MathematicalProgram::VarType type_expected) {
-  static_assert(is_same<T, ExpectedType>::value, "Type not match");
+  static_assert(is_same_v<T, ExpectedType>, "Type not match");
   EXPECT_EQ(var.rows(), rows);
   EXPECT_EQ(var.cols(), cols);
   // Checks the name of the newly added variables.
@@ -396,6 +396,8 @@ GTEST_TEST(TestAddDecisionVariables, AddDecisionVariables1) {
   EXPECT_EQ(prog.FindDecisionVariableIndex(x2), 2);
   EXPECT_EQ(prog.initial_guess().rows(), 3);
   EXPECT_EQ(prog.decision_variables().rows(), 3);
+  EXPECT_GT(
+      prog.required_capabilities().count(ProgramAttribute::kBinaryVariable), 0);
 
   const auto decision_variable_index = prog.decision_variable_index();
   {
@@ -457,13 +459,26 @@ GTEST_TEST(TestAddDecisionVariables, AddVariable3) {
   // variables intersects with the indeterminates.
   EXPECT_THROW(prog.AddDecisionVariables(VectorDecisionVariable<2>(x0, z(0))),
                std::runtime_error);
+
+  // Call AddDecisionVariables with unsupported variable type.
+  for (symbolic::Variable::Type unsupported_type :
+       {symbolic::Variable::Type::BOOLEAN,
+        symbolic::Variable::Type::RANDOM_UNIFORM,
+        symbolic::Variable::Type::RANDOM_GAUSSIAN,
+        symbolic::Variable::Type::RANDOM_EXPONENTIAL}) {
+    const symbolic::Variable unsupported_var("b", unsupported_type);
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        prog.AddDecisionVariables(VectorDecisionVariable<1>(unsupported_var)),
+        std::runtime_error,
+        "MathematicalProgram does not support .* variables.");
+  }
 }
 
 GTEST_TEST(TestAddIndeterminates, TestAddIndeterminates1) {
   // Adds a dynamic-sized matrix of Indeterminates.
   MathematicalProgram prog;
   auto X = prog.NewIndeterminates(2, 3, "X");
-  static_assert(is_same<decltype(X), MatrixXIndeterminate>::value,
+  static_assert(is_same_v<decltype(X), MatrixXIndeterminate>,
                 "should be a dynamic sized matrix");
   EXPECT_EQ(X.rows(), 2);
   EXPECT_EQ(X.cols(), 3);
@@ -475,7 +490,7 @@ GTEST_TEST(TestAddIndeterminates, TestAddIndeterminates2) {
   // Adds a static-sized matrix of Indeterminates.
   MathematicalProgram prog;
   auto X = prog.NewIndeterminates<2, 3>("X");
-  static_assert(is_same<decltype(X), MatrixIndeterminate<2, 3>>::value,
+  static_assert(is_same_v<decltype(X), MatrixIndeterminate<2, 3>>,
                 "should be a static sized matrix");
   CheckAddedIndeterminates(prog, X,
                            "X(0,0) X(0,1) X(0,2)\nX(1,0) X(1,1) X(1,2)\n");
@@ -485,7 +500,7 @@ GTEST_TEST(TestAddIndeterminates, TestAddIndeterminates3) {
   // Adds a dynamic-sized vector of Indeterminates.
   MathematicalProgram prog;
   auto x = prog.NewIndeterminates(4, "x");
-  static_assert(is_same<decltype(x), VectorXIndeterminate>::value,
+  static_assert(is_same_v<decltype(x), VectorXIndeterminate>,
                 "Should be a VectorXDecisionVariable object.");
   EXPECT_EQ(x.rows(), 4);
   CheckAddedIndeterminates(prog, x, "x(0)\nx(1)\nx(2)\nx(3)\n");
@@ -495,7 +510,7 @@ GTEST_TEST(TestAddIndeterminates, TestAddIndeterminates4) {
   // Adds a static-sized vector of Indeterminate variables.
   MathematicalProgram prog;
   auto x = prog.NewIndeterminates<4>("x");
-  static_assert(is_same<decltype(x), VectorIndeterminate<4>>::value,
+  static_assert(is_same_v<decltype(x), VectorIndeterminate<4>>,
                 "Should be a VectorXDecisionVariable object.");
   CheckAddedIndeterminates(prog, x, "x(0)\nx(1)\nx(2)\nx(3)\n");
 }
@@ -1923,9 +1938,11 @@ bool AreTwoPolynomialsNear(
 
 void CheckParsedSymbolicLorentzConeConstraint(
     MathematicalProgram* prog, const Expression& linear_expr,
-    const Expression& quadratic_expr) {
-  const auto& binding1 =
-      prog->AddLorentzConeConstraint(linear_expr, quadratic_expr);
+    const Expression& quadratic_expr,
+    LorentzConeConstraint::EvalType eval_type) {
+  const auto& binding1 = prog->AddLorentzConeConstraint(
+      linear_expr, quadratic_expr, 0., eval_type);
+  EXPECT_EQ(binding1.evaluator()->eval_type(), eval_type);
   const auto& binding2 = prog->lorentz_cone_constraints().back();
   EXPECT_EQ(binding1.evaluator(), binding2.evaluator());
   EXPECT_EQ(binding1.variables(), binding2.variables());
@@ -1950,19 +1967,24 @@ void CheckParsedSymbolicLorentzConeConstraint(
 void CheckParsedSymbolicLorentzConeConstraint(
     MathematicalProgram* prog,
     const Eigen::Ref<const Eigen::Matrix<Expression, Eigen::Dynamic, 1>>& e) {
-  const auto& binding1 = prog->AddLorentzConeConstraint(e);
-  const auto& binding2 = prog->lorentz_cone_constraints().back();
+  for (const auto eval_type : {LorentzConeConstraint::EvalType::kConvex,
+                               LorentzConeConstraint::EvalType::kConvexSmooth,
+                               LorentzConeConstraint::EvalType::kNonconvex}) {
+    const auto& binding1 = prog->AddLorentzConeConstraint(e, eval_type);
+    EXPECT_EQ(binding1.evaluator()->eval_type(), eval_type);
+    const auto& binding2 = prog->lorentz_cone_constraints().back();
 
-  EXPECT_EQ(binding1.evaluator(), binding2.evaluator());
-  EXPECT_EQ(binding1.evaluator()->A() * binding1.variables() +
-                binding1.evaluator()->b(),
-            e);
-  EXPECT_EQ(binding2.evaluator()->A() * binding2.variables() +
-                binding2.evaluator()->b(),
-            e);
+    EXPECT_EQ(binding1.evaluator(), binding2.evaluator());
+    EXPECT_EQ(binding1.evaluator()->A() * binding1.variables() +
+                  binding1.evaluator()->b(),
+              e);
+    EXPECT_EQ(binding2.evaluator()->A() * binding2.variables() +
+                  binding2.evaluator()->b(),
+              e);
 
-  CheckParsedSymbolicLorentzConeConstraint(prog, e(0),
-                                           e.tail(e.rows() - 1).squaredNorm());
+    CheckParsedSymbolicLorentzConeConstraint(
+        prog, e(0), e.tail(e.rows() - 1).squaredNorm(), eval_type);
+  }
 }
 
 void CheckParsedSymbolicRotatedLorentzConeConstraint(
@@ -2054,26 +2076,41 @@ TEST_F(SymbolicLorentzConeTest, Test6) {
 
 TEST_F(SymbolicLorentzConeTest, Test7) {
   CheckParsedSymbolicLorentzConeConstraint(
-      &prog_, x_(0) + 2, pow(x_(0), 2) + 4 * x_(0) * x_(1) + 4 * pow(x_(1), 2));
+      &prog_, x_(0) + 2, pow(x_(0), 2) + 4 * x_(0) * x_(1) + 4 * pow(x_(1), 2),
+      LorentzConeConstraint::EvalType::kConvex);
+  CheckParsedSymbolicLorentzConeConstraint(
+      &prog_, x_(0) + 2, pow(x_(0), 2) + 4 * x_(0) * x_(1) + 4 * pow(x_(1), 2),
+      LorentzConeConstraint::EvalType::kConvexSmooth);
 }
 
 TEST_F(SymbolicLorentzConeTest, Test8) {
   CheckParsedSymbolicLorentzConeConstraint(
       &prog_, x_(0) + 2,
-      pow(x_(0), 2) - (x_(0) - x_(1)) * (x_(0) + x_(1)) + 2 * x_(1) + 3);
+      pow(x_(0), 2) - (x_(0) - x_(1)) * (x_(0) + x_(1)) + 2 * x_(1) + 3,
+      LorentzConeConstraint::EvalType::kConvex);
+  CheckParsedSymbolicLorentzConeConstraint(
+      &prog_, x_(0) + 2,
+      pow(x_(0), 2) - (x_(0) - x_(1)) * (x_(0) + x_(1)) + 2 * x_(1) + 3,
+      LorentzConeConstraint::EvalType::kConvexSmooth);
 }
 
 TEST_F(SymbolicLorentzConeTest, Test9) {
-  CheckParsedSymbolicLorentzConeConstraint(&prog_, 2,
-                                           pow(x_(0), 2) + pow(x_(1), 2));
+  CheckParsedSymbolicLorentzConeConstraint(
+      &prog_, 2, pow(x_(0), 2) + pow(x_(1), 2),
+      LorentzConeConstraint::EvalType::kConvex);
+  CheckParsedSymbolicLorentzConeConstraint(
+      &prog_, 2, pow(x_(0), 2) + pow(x_(1), 2),
+      LorentzConeConstraint::EvalType::kConvexSmooth);
 }
 
 TEST_F(SymbolicLorentzConeTest, TestLinearConstraint) {
   // Actually adding linear constraint, that the quadratic expression is
   // actually a constant.
-  CheckParsedSymbolicLorentzConeConstraint(&prog_, x_(0) + 2, 1);
-  CheckParsedSymbolicLorentzConeConstraint(&prog_, x_(0) + 2,
-                                           x_(0) - 2 * (0.5 * x_(0) + 1) + 3);
+  CheckParsedSymbolicLorentzConeConstraint(
+      &prog_, x_(0) + 2, 1, LorentzConeConstraint::EvalType::kConvexSmooth);
+  CheckParsedSymbolicLorentzConeConstraint(
+      &prog_, x_(0) + 2, x_(0) - 2 * (0.5 * x_(0) + 1) + 3,
+      LorentzConeConstraint::EvalType::kConvexSmooth);
 }
 
 TEST_F(SymbolicLorentzConeTest, TestError) {
@@ -2207,7 +2244,7 @@ GTEST_TEST(TestMathematicalProgram, AddSymbolicRotatedLorentzConeConstraint5) {
 
 namespace {
 template <typename Derived>
-typename enable_if<is_same<typename Derived::Scalar, Expression>::value>::type
+typename std::enable_if_t<is_same_v<typename Derived::Scalar, Expression>>
 CheckAddedSymbolicPositiveSemidefiniteConstraint(
     MathematicalProgram* prog, const Eigen::MatrixBase<Derived>& V) {
   int num_psd_cnstr = prog->positive_semidefinite_constraints().size();
@@ -2291,6 +2328,7 @@ GTEST_TEST(TestMathematicalProgram, TestExponentialConeConstraint) {
   EXPECT_GT(prog.required_capabilities().count(
                 ProgramAttribute::kExponentialConeConstraint),
             0);
+  EXPECT_EQ(prog.GetAllConstraints().size(), 1);
   const VectorX<symbolic::Expression> expr_reconstructed =
       binding.evaluator()->A() * binding.variables() + binding.evaluator()->b();
   EXPECT_EQ(expr_reconstructed.rows(), 3);
@@ -2485,7 +2523,7 @@ GTEST_TEST(TestMathematicalProgram, TestL2NormCost) {
   Eigen::Vector2d b = A * x_desired;
 
   auto obj1 = prog.AddQuadraticErrorCost(Q, x_desired, x).evaluator();
-  auto obj2 = prog.AddL2NormCost(A, b, x).evaluator();
+  auto obj2 = prog.Add2NormSquaredCost(A, b, x).evaluator();
 
   // Test the objective at a 6 arbitrary values (to guarantee correctness
   // of the six-parameter quadratic form.
@@ -2684,9 +2722,11 @@ GTEST_TEST(TestMathematicalProgram, TestClone) {
   prog.AddBoundingBoxConstraint(-10, 10, x(0));
   prog.AddBoundingBoxConstraint(-4, 5, x(1));
   prog.AddLorentzConeConstraint(
-      Vector3<symbolic::Expression>(+x(0), +x(1), x(2) - 0.5 * x(1)));
+      Vector3<symbolic::Expression>(+x(0), +x(1), x(2) - 0.5 * x(1)),
+      LorentzConeConstraint::EvalType::kConvexSmooth);
   prog.AddLorentzConeConstraint(
-      Vector3<symbolic::Expression>(x(0) + x(1), +x(0), x(2) - x(1)));
+      Vector3<symbolic::Expression>(x(0) + x(1), +x(0), x(2) - x(1)),
+      LorentzConeConstraint::EvalType::kConvexSmooth);
   prog.AddRotatedLorentzConeConstraint(Vector4<symbolic::Expression>(
       +x(0), +x(1), 0.5 * (x(0) + x(1)), 0.5 * x(2)));
   prog.AddRotatedLorentzConeConstraint(
@@ -2821,6 +2861,51 @@ GTEST_TEST(TestMathematicalProgram, TestGetBindingVariableValues) {
                               Vector1d(-2)));
   EXPECT_TRUE(CompareMatrices(prog.GetBindingVariableValues(binding2, x_val),
                               Vector2d(-2, 2)));
+}
+
+GTEST_TEST(TestMathematicalProgram, TestCheckSatisfied) {
+  MathematicalProgram prog;
+  const auto x = prog.NewContinuousVariables<3>();
+  const auto y = prog.NewContinuousVariables<2>();
+  std::vector<Binding<Constraint>> bindings;
+  bindings.emplace_back(prog.AddBoundingBoxConstraint(-.3, .4, x));
+  bindings.emplace_back(prog.AddBoundingBoxConstraint(-2, 5, y));
+  bindings.emplace_back(
+      prog.AddLinearEqualityConstraint(y[0] == 3 * x[0] + 2 * x[1]));
+
+  Vector3d x_guess = Vector3d::Constant(.39);
+  Vector2d y_guess = Vector2d::Constant(4.99);
+  y_guess[0] = 3*x_guess[0] + 2*x_guess[1];
+  prog.SetInitialGuess(x, x_guess);
+  prog.SetInitialGuess(y, y_guess);
+  EXPECT_TRUE(prog.CheckSatisfied(bindings[0], prog.initial_guess(), 0));
+  EXPECT_TRUE(prog.CheckSatisfied(bindings[1], prog.initial_guess(), 0));
+  EXPECT_TRUE(prog.CheckSatisfied(bindings[2], prog.initial_guess(), 1e-16));
+
+  EXPECT_TRUE(prog.CheckSatisfiedAtInitialGuess(bindings[0], 0));
+  EXPECT_TRUE(prog.CheckSatisfiedAtInitialGuess(bindings[1], 0));
+  EXPECT_TRUE(prog.CheckSatisfiedAtInitialGuess(bindings[2], 1e-16));
+
+  EXPECT_TRUE(prog.CheckSatisfied(bindings, prog.initial_guess(), 1e-16));
+  EXPECT_TRUE(prog.CheckSatisfiedAtInitialGuess(bindings, 1e-16));
+
+  x_guess[2] = .41;
+  prog.SetInitialGuess(x, x_guess);
+  EXPECT_FALSE(prog.CheckSatisfied(bindings[0], prog.initial_guess(), 0));
+  EXPECT_FALSE(prog.CheckSatisfiedAtInitialGuess(bindings[0], 0));
+  EXPECT_FALSE(prog.CheckSatisfied(bindings, prog.initial_guess(), 1e-16));
+  EXPECT_FALSE(prog.CheckSatisfiedAtInitialGuess(bindings, 1e-16));
+  EXPECT_TRUE(prog.CheckSatisfiedAtInitialGuess(bindings[1], 0));
+
+  x_guess[2] = .39;
+  y_guess[0] = 3*x_guess[0] + 2*x_guess[1] + 0.2;
+  prog.SetInitialGuess(x, x_guess);
+  prog.SetInitialGuess(y, y_guess);
+  EXPECT_TRUE(prog.CheckSatisfiedAtInitialGuess(bindings[0], 0));
+  EXPECT_FALSE(prog.CheckSatisfied(bindings[2], prog.initial_guess(), 1e-16));
+  EXPECT_FALSE(prog.CheckSatisfiedAtInitialGuess(bindings[2], 1e-16));
+  EXPECT_FALSE(prog.CheckSatisfied(bindings, prog.initial_guess(), 1e-16));
+  EXPECT_FALSE(prog.CheckSatisfiedAtInitialGuess(bindings, 1e-16));
 }
 
 GTEST_TEST(TestMathematicalProgram, TestSetAndGetInitialGuess) {
@@ -3201,6 +3286,193 @@ GTEST_TEST(TestMathematicalProgram, ReparsePolynomial) {
   }
 }
 
+template <typename C>
+void RemoveCostTest(MathematicalProgram* prog,
+                    const symbolic::Expression& cost1_expr,
+                    const std::vector<Binding<C>>* program_costs,
+                    ProgramAttribute affected_capability) {
+  auto cost1 = prog->AddCost(cost1_expr);
+  // cost1 and cost2 represent the same cost, but their evaluators point to
+  // different objects.
+  auto cost2 = prog->AddCost(cost1_expr);
+  ASSERT_NE(cost1.evaluator().get(), cost2.evaluator().get());
+  EXPECT_EQ(program_costs->size(), 2u);
+  EXPECT_EQ(prog->RemoveCost(cost1), 1);
+  EXPECT_EQ(program_costs->size(), 1u);
+  EXPECT_EQ(program_costs->at(0).evaluator().get(), cost2.evaluator().get());
+  EXPECT_GT(prog->required_capabilities().count(affected_capability), 0);
+  // Now add another cost2 to program. If we remove cost2, now we get a program
+  // with empty linear cost.
+  prog->AddCost(cost2);
+  EXPECT_EQ(program_costs->size(), 2u);
+  EXPECT_EQ(prog->RemoveCost(cost2), 2);
+  EXPECT_EQ(program_costs->size(), 0u);
+  EXPECT_EQ(prog->required_capabilities().count(affected_capability), 0);
+
+  // Currently program_costs is empty.
+  EXPECT_EQ(prog->RemoveCost(cost1), 0);
+  EXPECT_EQ(prog->required_capabilities().count(affected_capability), 0);
+
+  prog->AddCost(cost1);
+  // prog doesn't contain cost2, removing cost2 from prog ends up as a no-opt.
+  EXPECT_EQ(prog->RemoveCost(cost2), 0);
+  EXPECT_EQ(program_costs->size(), 1u);
+  EXPECT_GT(prog->required_capabilities().count(affected_capability), 0);
+
+  // cost3 and cost1 share the same evaluator, but the associated variables are
+  // different.
+  VectorX<symbolic::Variable> cost3_vars = cost1.variables();
+  cost3_vars[0] = cost1.variables()[1];
+  cost3_vars[1] = cost1.variables()[0];
+  auto cost3 = prog->AddCost(cost1.evaluator(), cost3_vars);
+  EXPECT_EQ(prog->RemoveCost(cost1), 1);
+  EXPECT_EQ(program_costs->size(), 1u);
+  EXPECT_GT(prog->required_capabilities().count(affected_capability), 0);
+  EXPECT_EQ(program_costs->at(0).evaluator().get(), cost3.evaluator().get());
+}
+
+GTEST_TEST(TestMathematicalProgram, RemoveLinearCost) {
+  MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables<2>();
+  RemoveCostTest<LinearCost>(&prog, x[0] + 2 * x[1], &(prog.linear_costs()),
+                             ProgramAttribute::kLinearCost);
+}
+
+GTEST_TEST(TestMathematicalProgram, RemoveQuadraticCost) {
+  MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables<2>();
+  RemoveCostTest(&prog, x[0] * x[0] + 2 * x[1] * x[1],
+                 &(prog.quadratic_costs()), ProgramAttribute::kQuadraticCost);
+}
+
+GTEST_TEST(TestMathematicalProgram, RemoveGenericCost) {
+  MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables<2>();
+  RemoveCostTest(&prog, x[0] * x[0] * x[1], &(prog.generic_costs()),
+                 ProgramAttribute::kGenericCost);
+}
+
+GTEST_TEST(TestMathematicalProgram, TestToString) {
+  MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables<2>("x");
+  auto y = prog.NewIndeterminates<1>("y");
+  prog.AddLinearCost(2*x[0] + 3*x[1]);
+  prog.AddLinearConstraint(x[0]+x[1] <= 2.0);
+  prog.AddSosConstraint(x[0]*y[0]*y[0]);
+
+  std::string s = prog.to_string();
+  EXPECT_THAT(s, testing::HasSubstr("Decision variables"));
+  EXPECT_THAT(s, testing::HasSubstr("Indeterminates"));
+  EXPECT_THAT(s, testing::HasSubstr("Cost"));
+  EXPECT_THAT(s, testing::HasSubstr("Constraint"));
+  EXPECT_THAT(s, testing::HasSubstr("x"));
+  EXPECT_THAT(s, testing::HasSubstr("y"));
+  EXPECT_THAT(s, testing::HasSubstr("2"));
+  EXPECT_THAT(s, testing::HasSubstr("3"));
+}
+
+GTEST_TEST(TestMathematicalProgram, RemoveLinearConstraint) {
+  // ProgramAttribute::kLinearConstraint depends on both
+  // prog.linear_constraints() and prog.bounding_box_constraints().
+  MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables<2>();
+  auto lin_con1 = prog.AddLinearConstraint(x[0] + x[1] <= 1);
+  auto lin_con2 = prog.AddLinearConstraint(x[0] + 2 * x[1] <= 1);
+  EXPECT_EQ(prog.RemoveConstraint(lin_con1), 1);
+  EXPECT_EQ(prog.linear_constraints().size(), 1u);
+  EXPECT_GT(
+      prog.required_capabilities().count(ProgramAttribute::kLinearConstraint),
+      0);
+  // Now the program contains 2 lin_con2
+  prog.AddConstraint(lin_con2);
+  EXPECT_EQ(prog.RemoveConstraint(lin_con1), 0);
+  EXPECT_EQ(prog.RemoveConstraint(lin_con2), 2);
+  EXPECT_EQ(prog.linear_constraints().size(), 0u);
+  EXPECT_EQ(
+      prog.required_capabilities().count(ProgramAttribute::kLinearConstraint),
+      0);
+
+  auto bbcon = prog.AddBoundingBoxConstraint(1, 2, x);
+  EXPECT_GT(
+      prog.required_capabilities().count(ProgramAttribute::kLinearConstraint),
+      0);
+  EXPECT_EQ(prog.RemoveConstraint(bbcon), 1);
+  EXPECT_EQ(
+      prog.required_capabilities().count(ProgramAttribute::kLinearConstraint),
+      0);
+}
+
+GTEST_TEST(TestMathematicalProgram, RemoveConstraintPSD) {
+  // ProgramAttribute::kPositiveSemidefiniteConstraint depends on both
+  // prog.positive_semidefinite_constraints() and
+  // prog.linear_matrix_inequality_constraints().
+  MathematicalProgram prog;
+  auto X = prog.NewSymmetricContinuousVariables<3>();
+  auto psd_con = prog.AddPositiveSemidefiniteConstraint(X);
+  auto x = prog.NewContinuousVariables<2>();
+  auto lmi_con = prog.AddLinearMatrixInequalityConstraint(
+      {Eigen::Matrix3d::Identity(), Eigen::Matrix3d::Ones(),
+       2 * Eigen::Matrix3d::Ones()},
+      x);
+  EXPECT_EQ(prog.RemoveConstraint(psd_con), 1);
+  EXPECT_EQ(prog.positive_semidefinite_constraints().size(), 0u);
+  EXPECT_GT(prog.required_capabilities().count(
+                ProgramAttribute::kPositiveSemidefiniteConstraint),
+            0);
+  EXPECT_EQ(prog.RemoveConstraint(lmi_con), 1);
+  EXPECT_EQ(prog.linear_matrix_inequality_constraints().size(), 0u);
+  EXPECT_EQ(prog.required_capabilities().count(
+                ProgramAttribute::kPositiveSemidefiniteConstraint),
+            0);
+}
+
+// Remove a constraint from @p prog. Before removing the constraint, @p
+// prog_constraints has only one entry.
+template <typename C>
+void TestRemoveConstraint(MathematicalProgram* prog,
+                          const Binding<C>& constraint,
+                          const std::vector<Binding<C>>* prog_constraints,
+                          ProgramAttribute removed_capability) {
+  ASSERT_EQ(prog_constraints->size(), 1);
+  ASSERT_GT(prog->required_capabilities().count(removed_capability), 0);
+  EXPECT_EQ(prog->RemoveConstraint(constraint), 1);
+  EXPECT_EQ(prog_constraints->size(), 0u);
+  EXPECT_EQ(prog->required_capabilities().count(removed_capability), 0);
+}
+
+GTEST_TEST(TestMathematicalProgram, RemoveConstraint) {
+  MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables<3>();
+  auto lin_eq_con = prog.AddLinearEqualityConstraint(x[0] + x[1] == 1);
+  auto lorentz_con = prog.AddLorentzConeConstraint(
+      x.cast<symbolic::Expression>(),
+      LorentzConeConstraint::EvalType::kConvexSmooth);
+  auto rotated_lorentz_con =
+      prog.AddRotatedLorentzConeConstraint(x.cast<symbolic::Expression>());
+  Eigen::SparseMatrix<double> A(3, 3);
+  A.setIdentity();
+  auto exponential_con =
+      prog.AddExponentialConeConstraint(A, Eigen::Vector3d(1, 2, 3), x);
+  auto generic_con = prog.AddConstraint(x(0) * x(0) * x(1) == 1);
+  TestRemoveConstraint(&prog, lin_eq_con, &(prog.linear_equality_constraints()),
+                       ProgramAttribute::kLinearEqualityConstraint);
+  TestRemoveConstraint(&prog, lorentz_con, &(prog.lorentz_cone_constraints()),
+                       ProgramAttribute::kLorentzConeConstraint);
+  TestRemoveConstraint(&prog, rotated_lorentz_con,
+                       &(prog.rotated_lorentz_cone_constraints()),
+                       ProgramAttribute::kRotatedLorentzConeConstraint);
+  TestRemoveConstraint(&prog, exponential_con,
+                       &(prog.exponential_cone_constraints()),
+                       ProgramAttribute::kExponentialConeConstraint);
+  TestRemoveConstraint(&prog, generic_con, &(prog.generic_constraints()),
+                       ProgramAttribute::kGenericConstraint);
+
+  auto lcp_con = prog.AddLinearComplementarityConstraint(
+      Eigen::Matrix3d::Identity(), Eigen::Vector3d::Ones(), x);
+  TestRemoveConstraint(&prog, lcp_con,
+                       &(prog.linear_complementarity_constraints()),
+                       ProgramAttribute::kLinearComplementarityConstraint);
+}
 }  // namespace test
 }  // namespace solvers
 }  // namespace drake

@@ -29,7 +29,7 @@ auto make_function_info(Func&& func, Return (*infer)(Args...) = nullptr) {
 // lambda objects. It does *not* distinguish among other types.
 template <typename Func, typename T = void>
 using enable_if_lambda_t =
-    std::enable_if_t<!std::is_function<std::decay_t<Func>>::value, T>;
+    std::enable_if_t<!std::is_function_v<std::decay_t<Func>>, T>;
 
 // Infers `function_info<>` from a function pointer.
 template <typename Return, typename... Args>
@@ -40,7 +40,7 @@ auto infer_function_info(Return (*func)(Args...)) {
 // Infers `function_info<>` from a mutable method pointer.
 template <typename Return, typename Class, typename... Args>
 auto infer_function_info(Return (Class::*method)(Args...)) {
-  auto func = [method](Class* self, Args... args) {
+  auto func = [method](Class* self, Args... args) -> Return {
     return (self->*method)(std::forward<Args>(args)...);
   };
   return make_function_info<Return, Class*, Args...>(func);
@@ -49,7 +49,7 @@ auto infer_function_info(Return (Class::*method)(Args...)) {
 // Infers `function_info<>` from a const method pointer.
 template <typename Return, typename Class, typename... Args>
 auto infer_function_info(Return (Class::*method)(Args...) const) {
-  auto func = [method](const Class* self, Args... args) {
+  auto func = [method](const Class* self, Args... args) -> Return {
     return (self->*method)(std::forward<Args>(args)...);
   };
   return make_function_info<Return, const Class*, Args...>(func);
@@ -123,7 +123,7 @@ struct wrap_function_impl {
   // Determines which overload should be used, since we cannot wrap a `void`
   // type using `wrap_arg<void>::wrap()`.
   template <typename Return>
-  static constexpr bool enable_wrap_output = !std::is_same<Return, void>::value;
+  static constexpr bool enable_wrap_output = !std::is_same_v<Return, void>;
 
   // Specialization for callbacks of the form `std::function<>`.
   // @note We could generalize this using SFINAE for functors of any form, but

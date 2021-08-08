@@ -467,47 +467,6 @@ GTEST_TEST(ComputeNarrowPhaseDistance, sphere_touches_shape) {
   EXPECT_EQ(Vector3d(1, 0, 0), result.nhat_BA_W);
 }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-// Confirms that `is_nhat_BA_W_unique` is passed from point_distance to
-// shape_distance correctly. It is a pass through from DistanceToPoint() to
-// SphereShapeDistance(). We use Sphere-Box as a representative sample and
-// test two cases when `is_nhat_BA_W_unique` is true and is false.
-GTEST_TEST(ComputeNarrowPhaseDistance, is_nhat_BA_W_well_defined) {
-  // Sphere
-  CollisionObjectd sphere(make_shared<Sphered>(1));
-  const GeometryId sphere_id = GeometryId::get_new_id();
-  EncodedData(sphere_id, true).write_to(&sphere);
-
-  // Box [-1,1]x[-1,1]x[-1,1].
-  CollisionObjectd box(make_shared<Boxd>(2, 2, 2));
-  const GeometryId box_id = GeometryId::get_new_id();
-  EncodedData(box_id, true).write_to(&box);
-  const RigidTransformd X_WB(RigidTransformd::Identity());
-
-  const fcl::DistanceRequestd request{};
-
-  // Tests when `is_nhat_BA_W_unique` is true.
-  {
-    // The center of the sphere is outside the box.
-    const RigidTransformd X_WS(Vector3d{3, 3, 3});
-    SignedDistancePair<double> result;
-    ComputeNarrowPhaseDistance<double>(sphere, X_WS, box, X_WB, request,
-                                       &result);
-    EXPECT_EQ(true, result.is_nhat_BA_W_unique);
-  }
-  // Tests when `is_nhat_BA_W_unique` is false.
-  {
-    // The center of the sphere is at a corner of the box.
-    const RigidTransformd X_WS(Vector3d{1, 1, 1});
-    SignedDistancePair<double> result;
-    ComputeNarrowPhaseDistance<double>(sphere, X_WS, box, X_WB, request,
-                                       &result);
-    EXPECT_EQ(false, result.is_nhat_BA_W_unique);
-  }
-}
-#pragma GCC diagnostic pop
-
 template <typename T>
 class CallbackScalarSupport : public ::testing::Test {
  public:
@@ -525,8 +484,8 @@ class CallbackScalarSupport : public ::testing::Test {
     const GeometryId id_B = GeometryId::get_new_id();
     EncodedData data_A(id_A, true);
     EncodedData data_B(id_B, true);
-    collision_filter_.AddGeometry(data_A.encoding());
-    collision_filter_.AddGeometry(data_B.encoding());
+    collision_filter_.AddGeometry(data_A.id());
+    collision_filter_.AddGeometry(data_B.id());
     X_WGs_[id_A] = RigidTransform<T>{Translation3<T>{10, 11, 12}};
     X_WGs_[id_B] = RigidTransform<T>::Identity();
 
@@ -571,7 +530,7 @@ class CallbackScalarSupport : public ::testing::Test {
   }
 
  protected:
-  CollisionFilterLegacy collision_filter_;
+  CollisionFilter collision_filter_;
   std::unordered_map<GeometryId, RigidTransform<T>> X_WGs_;
   std::vector<SignedDistancePair<T>> results_;
   CallbackData<T> data_;
@@ -659,15 +618,23 @@ GTEST_TEST(Callback, ScalarSupportWithFilters) {
   using T = AutoDiffXd;
   const GeometryId id_A = GeometryId::get_new_id();
   const GeometryId id_B = GeometryId::get_new_id();
-  CollisionFilterLegacy collision_filter;
+  CollisionFilter collision_filter;
 
   EncodedData data_A(id_A, true);
   EncodedData data_B(id_B, true);
-  collision_filter.AddGeometry(data_A.encoding());
-  collision_filter.AddGeometry(data_B.encoding());
-  // Filter the pair (A, B) by adding them to the same clique.
-  collision_filter.AddToCollisionClique(data_A.encoding(), 1);
-  collision_filter.AddToCollisionClique(data_B.encoding(), 1);
+  collision_filter.AddGeometry(data_A.id());
+  collision_filter.AddGeometry(data_B.id());
+
+  // Filter the pair (A, B); we'll put the ids in a set and simply return that
+  // set for the extract ids function.
+  std::unordered_set<GeometryId> ids{data_A.id(), data_B.id()};
+  CollisionFilter::ExtractIds extract = [&ids](const GeometrySet&) {
+    return ids;
+  };
+  collision_filter.Apply(CollisionFilterDeclaration().ExcludeWithin(
+                             GeometrySet{data_A.id(), data_B.id()}),
+                         extract, false /* is_permanent */);
+
   const std::unordered_map<GeometryId, RigidTransform<T>> X_WGs{
       {id_A, RigidTransform<T>::Identity()},
       {id_B, RigidTransform<T>::Identity()}};
@@ -698,9 +665,9 @@ GTEST_TEST(Callback, RespectCollisionFiltering) {
       {id_B, RigidTransformd::Identity()}};
 
   std::vector<SignedDistancePair<double>> results;
-  CollisionFilterLegacy collision_filter;
-  collision_filter.AddGeometry(data_A.encoding());
-  collision_filter.AddGeometry(data_B.encoding());
+  CollisionFilter collision_filter;
+  collision_filter.AddGeometry(data_A.id());
+  collision_filter.AddGeometry(data_B.id());
 
   CallbackData<double> data{&collision_filter, &X_WGs, kInf, &results};
 
@@ -710,8 +677,16 @@ GTEST_TEST(Callback, RespectCollisionFiltering) {
   EXPECT_EQ(results.size(), 1u);
 
   // Case: filtered collisions.
-  collision_filter.AddToCollisionClique(data_A.encoding(), 3);
-  collision_filter.AddToCollisionClique(data_B.encoding(), 3);
+
+  // Filter the pair (A, B); we'll put the ids in a set and simply return that
+  // set for the extract ids function.
+  std::unordered_set<GeometryId> ids{data_A.id(), data_B.id()};
+  CollisionFilter::ExtractIds extract = [&ids](const GeometrySet&) {
+    return ids;
+  };
+  collision_filter.Apply(CollisionFilterDeclaration().ExcludeWithin(
+                             GeometrySet{data_A.id(), data_B.id()}),
+                         extract, false /* is_permanent */);
   results.clear();
   threshold = std::numeric_limits<double>::max();
   Callback<double>(&sphere_A, &sphere_B, &data, threshold);
@@ -732,9 +707,9 @@ GTEST_TEST(Callback, ABOrdering) {
   const std::unordered_map<GeometryId, RigidTransformd> X_WGs{
       {id_A, RigidTransformd{Vector3d{10, 11, 12}}},
       {id_B, RigidTransformd::Identity()}};
-  CollisionFilterLegacy collision_filter;
-  collision_filter.AddGeometry(data_A.encoding());
-  collision_filter.AddGeometry(data_B.encoding());
+  CollisionFilter collision_filter;
+  collision_filter.AddGeometry(data_A.id());
+  collision_filter.AddGeometry(data_B.id());
   double threshold = std::numeric_limits<double>::max();
 
   // Pass in the two geometries in order (A, B).
@@ -771,14 +746,14 @@ TYPED_TEST_SUITE(CallbackMaxDistanceTest, ScalarTypes);
 TYPED_TEST(CallbackMaxDistanceTest, MaxDistanceThreshold) {
   using T = TypeParam;
 
-  CollisionFilterLegacy collision_filter;
+  CollisionFilter collision_filter;
 
   const GeometryId id_A = GeometryId::get_new_id();
   const GeometryId id_B = GeometryId::get_new_id();
   EncodedData data_A(id_A, true);
   EncodedData data_B(id_B, true);
-  collision_filter.AddGeometry(data_A.encoding());
-  collision_filter.AddGeometry(data_B.encoding());
+  collision_filter.AddGeometry(data_A.id());
+  collision_filter.AddGeometry(data_B.id());
 
   // Two spheres with arbitrary radii. One is at the origin and the other is
   // placed at two distances: one just inside the max distance and one just

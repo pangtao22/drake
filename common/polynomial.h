@@ -189,7 +189,7 @@ class Polynomial {
   /** Evaluate a univariate Polynomial at a specific point.
    *
    * Evaluates a univariate Polynomial at the given x.
-   * @throws std::runtime_error if this Polynomial is not univariate.
+   * @throws std::exception if this Polynomial is not univariate.
    *
    * @p x may be of any type supporting the ** and + operations (which can be
    * different from both CoefficientsType and RealScalar).
@@ -206,7 +206,7 @@ class Polynomial {
       const U& x, int derivative_order = 0) const {
     // Note: have to remove_const because Product<AutoDiff, AutoDiff>::type and
     // even Product<double, AutoDiff>::type returns const AutoDiff.
-    typedef typename std::remove_const<typename Product<T, U>::type>::type
+    typedef typename std::remove_const_t<typename Product<T, U>::type>
         ProductType;
 
     if (!is_univariate_)
@@ -239,7 +239,7 @@ class Polynomial {
   /** Evaluate a multivariate Polynomial at a specific point.
    *
    * Evaluates a Polynomial with the given values for each variable.
-   * @throws std::out_of_range if the Polynomial contains variables for which
+   * @throws std::exception if the Polynomial contains variables for which
    * values were not provided.
    *
    * The provided values may be of any type which is std::is_arithmetic
@@ -250,8 +250,8 @@ class Polynomial {
   typename Product<T, U>::type EvaluateMultivariate(
       const std::map<VarType, U>& var_values) const {
     using std::pow;
-    typedef typename std::remove_const<
-      typename Product<T, U>::type>::type ProductType;
+    typedef typename std::remove_const_t<
+      typename Product<T, U>::type> ProductType;
     ProductType value = 0;
     for (const Monomial& monomial : monomials_) {
       ProductType monomial_value = monomial.coefficient;
@@ -406,7 +406,7 @@ class Polynomial {
   /** Constructs a Polynomial representing the symbolic expression `e`.
    * Note that the ID of a variable is preserved in this translation.
    *
-   * @throw std::runtime_error if `e` is not polynomial-convertible.
+   * @throws std::exception if `e` is not polynomial-convertible.
    * @pre e.is_polynomial() is true.
    */
   static Polynomial<T> FromExpression(const drake::symbolic::Expression& e);

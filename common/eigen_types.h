@@ -46,6 +46,9 @@ using Vector4 = Eigen::Matrix<Scalar, 4, 1>;
 template <typename Scalar>
 using Vector6 = Eigen::Matrix<Scalar, 6, 1>;
 
+/// A column vector of size 6 of doubles.
+using Vector6d = Eigen::Matrix<double, 6, 1>;
+
 /// A column vector templated on the number of rows.
 template <typename Scalar, int Rows>
 using Vector = Eigen::Matrix<Scalar, Rows, 1>;
@@ -221,9 +224,9 @@ struct is_eigen_type : std::is_base_of<Eigen::EigenBase<Derived>, Derived> {};
  */
 template <typename Derived, typename Scalar>
 struct is_eigen_scalar_same
-    : std::integral_constant<
-          bool, is_eigen_type<Derived>::value &&
-                    std::is_same<typename Derived::Scalar, Scalar>::value> {};
+    : std::bool_constant<
+          is_eigen_type<Derived>::value &&
+              std::is_same_v<typename Derived::Scalar, Scalar>> {};
 
 /*
  * Determines if an EigenBase<> type is a compile-time (column) vector.
@@ -231,8 +234,8 @@ struct is_eigen_scalar_same
  */
 template <typename Derived>
 struct is_eigen_vector
-    : std::integral_constant<bool, is_eigen_type<Derived>::value &&
-                                       Derived::ColsAtCompileTime == 1> {};
+    : std::bool_constant<is_eigen_type<Derived>::value &&
+                         Derived::ColsAtCompileTime == 1> {};
 
 /*
  * Determines if an EigenBase<> type is a compile-time (column) vector of a
@@ -240,9 +243,9 @@ struct is_eigen_vector
  */
 template <typename Derived, typename Scalar>
 struct is_eigen_vector_of
-    : std::integral_constant<
-          bool, is_eigen_scalar_same<Derived, Scalar>::value &&
-                    is_eigen_vector<Derived>::value> {};
+    : std::bool_constant<
+          is_eigen_scalar_same<Derived, Scalar>::value &&
+              is_eigen_vector<Derived>::value> {};
 
 // TODO(eric.cousineau): A 1x1 matrix will be disqualified in this case, and
 // this logic will qualify it as a vector. Address the downstream logic if this
@@ -256,9 +259,9 @@ struct is_eigen_vector_of
  */
 template <typename Derived, typename Scalar>
 struct is_eigen_nonvector_of
-    : std::integral_constant<
-          bool, is_eigen_scalar_same<Derived, Scalar>::value &&
-                    !is_eigen_vector<Derived>::value> {};
+    : std::bool_constant<
+          is_eigen_scalar_same<Derived, Scalar>::value &&
+              !is_eigen_vector<Derived>::value> {};
 
 // TODO(eric.cousineau): Add alias is_eigen_matrix_of = is_eigen_scalar_same if
 // appropriate.

@@ -16,7 +16,9 @@ class TestSnoptSolver(unittest.TestCase):
         prog.AddLinearCost(x[0])
 
         solver = SnoptSolver()
+        self.assertEqual(solver.solver_id(), SnoptSolver.id())
         if solver.available():
+            self.assertTrue(solver.enabled())
             self.assertEqual(solver.solver_type(), mp.SolverType.kSnopt)
 
             result = solver.Solve(prog, None, None)

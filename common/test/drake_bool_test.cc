@@ -35,9 +35,9 @@ class BoolTestDouble : public ::testing::Test {
 };
 
 TEST_F(BoolTestDouble, TypeCheck) {
-  static_assert(std::is_same<boolean<double>, bool>::value,
+  static_assert(std::is_same_v<boolean<double>, bool>,
                 "boolean<double> should be bool");
-  static_assert(std::is_same<scalar_predicate<double>::type, bool>::value,
+  static_assert(std::is_same_v<scalar_predicate<double>::type, bool>,
                 "scalar_predicate<double>::type should be bool");
   static_assert(scalar_predicate<double>::is_bool,
                 "scalar_predicate<double>::is_bool should be true");
@@ -45,12 +45,12 @@ TEST_F(BoolTestDouble, TypeCheck) {
 
 TEST_F(BoolTestDouble, All) {
   auto bools = Eigen::Matrix<bool, 3, 3>::Constant(true).eval();
-  EXPECT_TRUE(all(bools));
+  EXPECT_TRUE(drake::all(bools));
   bools(0, 0) = false;
-  EXPECT_FALSE(all(bools));
+  EXPECT_FALSE(drake::all(bools));
 
   // Vacuously true.
-  EXPECT_TRUE(all(Eigen::Matrix<bool, 0, 0>::Constant(false)));
+  EXPECT_TRUE(drake::all(Eigen::Matrix<bool, 0, 0>::Constant(false)));
 }
 
 TEST_F(BoolTestDouble, AllOf) {
@@ -116,9 +116,9 @@ class BoolTestAutoDiffXd : public ::testing::Test {
 };
 
 TEST_F(BoolTestAutoDiffXd, TypeCheck) {
-  static_assert(std::is_same<boolean<AutoDiffXd>, bool>::value,
+  static_assert(std::is_same_v<boolean<AutoDiffXd>, bool>,
                 "boolean<AutoDiffXd> should be bool");
-  static_assert(std::is_same<scalar_predicate<AutoDiffXd>::type, bool>::value,
+  static_assert(std::is_same_v<scalar_predicate<AutoDiffXd>::type, bool>,
                 "scalar_predicate<AutoDiffXd>::type should be bool");
   static_assert(scalar_predicate<AutoDiffXd>::is_bool,
                 "scalar_predicate<AutoDiffXd>::is_bool should be true");
@@ -194,10 +194,10 @@ class BoolTestSymbolic : public ::testing::Test {
 
 TEST_F(BoolTestSymbolic, TypeCheck) {
   static_assert(
-      std::is_same<boolean<Expression>, Formula>::value,
+      std::is_same_v<boolean<Expression>, Formula>,
       "boolean<Expression> should be Formula");
   static_assert(
-      std::is_same<scalar_predicate<Expression>::type, Formula>::value,
+      std::is_same_v<scalar_predicate<Expression>::type, Formula>,
       "scalar_predicate<Expression>::type should be Formula");
   static_assert(
       !scalar_predicate<Expression>::is_bool,
@@ -210,7 +210,7 @@ TEST_F(BoolTestSymbolic, All) {
                isnan(x_) && isnan(y_) && isnan(z_) && isnan(w_));
 
   // Vacuously true.
-  EXPECT_TRUE(all(MatrixX<Formula>::Constant(0, 0, Formula::False())));
+  EXPECT_TRUE(drake::all(MatrixX<Formula>::Constant(0, 0, Formula::False())));
 }
 
 TEST_F(BoolTestSymbolic, AllOf) {

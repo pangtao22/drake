@@ -114,8 +114,8 @@ class YamlReadArchive final {
   }
 
   /// (Advanced.)  Sets the value pointed to by `nvp.value()` based on the YAML
-  /// file associated with this archive.  Most users should should call Accept,
-  /// not Visit.
+  /// file associated with this archive.  Most users should call Accept, not
+  /// Visit.
   template <typename NameValuePair>
   void Visit(const NameValuePair& nvp) {
     this->Visit(nvp, VisitShouldMemorizeType::kYes);
@@ -344,7 +344,7 @@ class YamlReadArchive final {
   void VariantHelperImpl(
       const std::string& tag, const char* name, Variant* storage) {
     if (((I == 0) && (tag.empty() || (tag == "?"))) ||
-        IsTagMatch(drake::NiceTypeName::Get<T>(), tag)) {
+        IsTagMatch(drake::NiceTypeName::GetFromStorage<T>(), tag)) {
       T typed_storage{};
       this->Visit(drake::MakeNameValue(name, &typed_storage));
       storage->template emplace<I>(std::move(typed_storage));
@@ -469,7 +469,7 @@ class YamlReadArchive final {
 
   template <typename Key, typename Value, typename NVP>
   void VisitMap(const NVP& nvp) {
-    static_assert(std::is_same<Key, std::string>::value,
+    static_assert(std::is_same_v<Key, std::string>,
                   "std::map keys must be strings");
     const auto& sub_node = GetSubNode(nvp.name(), YAML::NodeType::Map);
     if (!sub_node) { return; }

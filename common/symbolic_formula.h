@@ -167,10 +167,10 @@ class Formula {
    * value and use it to substitute all occurrences of the random variable in
    * this formula.
    *
-   * @throws std::runtime_error if a variable `v` is needed for an evaluation
-   *                            but not provided by @p env.
-   * @throws std::runtime_error if an unassigned random variable is detected
-   *                            while @p random_generator is `nullptr`.
+   * @throws std::exception if a variable `v` is needed for an evaluation
+   *                        but not provided by @p env.
+   * @throws std::exception if an unassigned random variable is detected
+   *                        while @p random_generator is `nullptr`.
    */
   bool Evaluate(const Environment& env = Environment{},
                 RandomGenerator* random_generator = nullptr) const;
@@ -183,7 +183,7 @@ class Formula {
 
   /** Returns a copy of this formula replacing all occurrences of @p var
    * with @p e.
-   * @throws std::runtime_error if NaN is detected during substitution.
+   * @throws std::exception if NaN is detected during substitution.
    */
   [[nodiscard]] Formula Substitute(const Variable& var,
                                    const Expression& e) const;
@@ -192,7 +192,7 @@ class Formula {
    * variables in @p s with corresponding expressions in @p s. Note that the
    * substitutions occur simultaneously. For example, (x / y >
    * 0).Substitute({{x, y}, {y, x}}) gets (y / x > 0).
-   * @throws std::runtime_error if NaN is detected during substitution.
+   * @throws std::exception if NaN is detected during substitution.
    */
   [[nodiscard]] Formula Substitute(const Substitution& s) const;
 
@@ -317,20 +317,20 @@ Formula operator>=(const Expression& e1, const Expression& e2);
  *
  * When this formula is evaluated, there are two possible outcomes:
  * - Returns false if the e.Evaluate() is not NaN.
- * - Throws std::runtime_error if NaN is detected during evaluation.
+ * - Throws std::exception if NaN is detected during evaluation.
  * Note that the evaluation of `isnan(e)` never returns true.
  */
 Formula isnan(const Expression& e);
 
 /** Returns a Formula determining if the given expression @p e is a
  * positive or negative infinity.
- * @throws std::runtime_error if NaN is detected during evaluation.
+ * @throws std::exception if NaN is detected during evaluation.
  */
 Formula isinf(const Expression& e);
 
 /** Returns a Formula determining if the given expression @p e has a finite
  * value.
- * @throws std::runtime_error if NaN is detected during evaluation.
+ * @throws std::exception if NaN is detected during evaluation.
  */
 Formula isfinite(const Expression& e);
 
@@ -338,7 +338,7 @@ Formula isfinite(const Expression& e);
  * matrix. By definition, a symmetric matrix @p m is positive-semidefinte if xᵀ
  * m x ≥ 0 for all vector x ∈ ℝⁿ.
  *
- * @throws std::runtime_error if @p m is not symmetric.
+ * @throws std::exception if @p m is not symmetric.
  *
  * @note This method checks if @p m is symmetric, which can be costly. If you
  * want to avoid it, please consider using
@@ -351,7 +351,7 @@ Formula positive_semidefinite(const Eigen::Ref<const MatrixX<Expression>>& m);
 /** Constructs and returns a symbolic positive-semidefinite formula from @p
  * m. If @p mode is Eigen::Lower, it's using the lower-triangular part of @p m
  * to construct a positive-semidefinite formula. If @p mode is Eigen::Upper, the
- * upper-triangular part of @p m is used. It throws std::runtime_error if @p has
+ * upper-triangular part of @p m is used. It throws std::exception if @p has
  * other values. See the following code snippet.
  *
  * @code
@@ -385,11 +385,11 @@ Formula positive_semidefinite(const MatrixX<Expression>& m,
  * @endcode
  */
 template <typename Derived>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::MatrixXpr>::value &&
-        std::is_same<typename Derived::Scalar, Expression>::value,
-    Formula>::type
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::MatrixXpr> &&
+        std::is_same_v<typename Derived::Scalar, Expression>,
+    Formula>
 positive_semidefinite(const Eigen::TriangularView<Derived, Eigen::Lower>& l) {
   return positive_semidefinite(l, Eigen::Lower);
 }
@@ -408,11 +408,11 @@ positive_semidefinite(const Eigen::TriangularView<Derived, Eigen::Lower>& l) {
  * @endcode
  */
 template <typename Derived>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::MatrixXpr>::value &&
-        std::is_same<typename Derived::Scalar, Expression>::value,
-    Formula>::type
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::MatrixXpr> &&
+        std::is_same_v<typename Derived::Scalar, Expression>,
+    Formula>
 positive_semidefinite(const Eigen::TriangularView<Derived, Eigen::Upper>& u) {
   return positive_semidefinite(u, Eigen::Upper);
 }
@@ -503,15 +503,17 @@ namespace internal {
 /// @tparam DerivedB A derived type of Eigen::ArrayBase.
 /// @pre The type of (DerivedA::Scalar() == DerivedB::Scalar()) is symbolic
 /// formula.
-template <typename DerivedA, typename DerivedB,
-          typename = std::enable_if<
-              std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                           Eigen::ArrayXpr>::value &&
-              std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                           Eigen::ArrayXpr>::value &&
-              std::is_same<decltype(typename DerivedA::Scalar() ==
-                                    typename DerivedB::Scalar()),
-                           Formula>::value>>
+template <
+  typename DerivedA,
+  typename DerivedB,
+  typename = std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                   Eigen::ArrayXpr> &&
+    std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                   Eigen::ArrayXpr> &&
+    std::is_same_v<decltype(typename DerivedA::Scalar() ==
+                            typename DerivedB::Scalar()),
+                   Formula>>>
 struct RelationalOpTraits {
   using ReturnType =
       Eigen::Array<Formula,
@@ -554,15 +556,15 @@ inline Formula logic_or(const Formula& f1, const Formula& f2) {
 /// - Eigen::Array<double> == Eigen::Array<double>
 ///
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() ==
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() ==
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>::type
+                     Formula>,
+    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>
 operator==(const DerivedA& a1, const DerivedB& a2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(a1.rows() == a2.rows() && a1.cols() == a2.cols());
@@ -584,13 +586,13 @@ operator==(const DerivedA& a1, const DerivedB& a2) {
 ///     //          |(z == 3.5)  (w == 3.5)|.
 /// @endcode
 template <typename Derived, typename ScalarType>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename Derived::Scalar() == ScalarType()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename Derived::Scalar() == ScalarType()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator==(const Derived& a, const ScalarType& v) {
   return a.unaryExpr(
       [&v](const typename Derived::Scalar& x) { return x == v; });
@@ -611,13 +613,13 @@ operator==(const Derived& a, const ScalarType& v) {
 ///     //          |(3.5 == z)  (3.5 == w)|.
 /// @endcode
 template <typename ScalarType, typename Derived>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(ScalarType() == typename Derived::Scalar()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(ScalarType() == typename Derived::Scalar()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator==(const ScalarType& v, const Derived& a) {
   return a.unaryExpr(
       [&v](const typename Derived::Scalar& x) { return v == x; });
@@ -627,15 +629,15 @@ operator==(const ScalarType& v, const Derived& a) {
 /// element-wise comparison of two arrays @p a1 and @p a2 using
 /// less-than-or-equal operator (<=).
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() <=
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() <=
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>::type
+                     Formula>,
+    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>
 operator<=(const DerivedA& a1, const DerivedB& a2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(a1.rows() == a2.rows() && a1.cols() == a2.cols());
@@ -647,13 +649,13 @@ operator<=(const DerivedA& a1, const DerivedB& a2) {
 /// less-than-or-equal operator (<=). That is, for all i and j, the (i, j)-th
 /// entry of `(a <= v)` has a symbolic formula `a(i, j) <= v`.
 template <typename Derived, typename ScalarType>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename Derived::Scalar() <= ScalarType()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename Derived::Scalar() <= ScalarType()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator<=(const Derived& a, const ScalarType& v) {
   return a.unaryExpr(
       [&v](const typename Derived::Scalar& x) { return x <= v; });
@@ -664,13 +666,13 @@ operator<=(const Derived& a, const ScalarType& v) {
 /// less-than-or-equal operator (<=). That is, for all i and j, the (i, j)-th
 /// entry of `(v <= a)` has a symbolic formula `v <= a(i, j)`.
 template <typename ScalarType, typename Derived>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(ScalarType() <= typename Derived::Scalar()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(ScalarType() <= typename Derived::Scalar()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator<=(const ScalarType& v, const Derived& a) {
   return a.unaryExpr(
       [&v](const typename Derived::Scalar& x) { return v <= x; });
@@ -680,15 +682,15 @@ operator<=(const ScalarType& v, const Derived& a) {
 /// element-wise comparison of two arrays @p a1 and @p a2 using less-than
 /// operator (<).
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() <
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() <
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>::type
+                     Formula>,
+    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>
 operator<(const DerivedA& a1, const DerivedB& a2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(a1.rows() == a2.rows() && a1.cols() == a2.cols());
@@ -700,13 +702,13 @@ operator<(const DerivedA& a1, const DerivedB& a2) {
 /// less-than operator (<). That is, for all i and j, the (i, j)-th
 /// entry of `(a < v)` has a symbolic formula `a(i, j) < v`.
 template <typename Derived, typename ScalarType>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename Derived::Scalar() < ScalarType()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename Derived::Scalar() < ScalarType()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator<(const Derived& a, const ScalarType& v) {
   return a.unaryExpr([&v](const typename Derived::Scalar& x) { return x < v; });
 }
@@ -716,13 +718,13 @@ operator<(const Derived& a, const ScalarType& v) {
 /// less-than operator (<). That is, for all i and j, the (i, j)-th
 /// entry of `(v < a)` has a symbolic formula `v < a(i, j)`.
 template <typename ScalarType, typename Derived>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(ScalarType() < typename Derived::Scalar()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(ScalarType() < typename Derived::Scalar()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator<(const ScalarType& v, const Derived& a) {
   return a.unaryExpr([&v](const typename Derived::Scalar& x) { return v < x; });
 }
@@ -731,15 +733,15 @@ operator<(const ScalarType& v, const Derived& a) {
 /// element-wise comparison of two arrays @p a1 and @p a2 using
 /// greater-than-or-equal operator (>=).
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() >=
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() >=
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>::type
+                     Formula>,
+    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>
 operator>=(const DerivedA& a1, const DerivedB& a2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(a1.rows() == a2.rows() && a1.cols() == a2.cols());
@@ -751,13 +753,13 @@ operator>=(const DerivedA& a1, const DerivedB& a2) {
 /// greater-than-or-equal operator (>=). That is, for all i and j, the (i, j)-th
 /// entry of `(a >= v)` has a symbolic formula `a(i, j) >= v`.
 template <typename Derived, typename ScalarType>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename Derived::Scalar() >= ScalarType()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename Derived::Scalar() >= ScalarType()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator>=(const Derived& a, const ScalarType& v) {
   return a.unaryExpr(
       [&v](const typename Derived::Scalar& x) { return x >= v; });
@@ -775,13 +777,13 @@ operator>=(const Derived& a, const ScalarType& v) {
 /// Eigen's semantics. See the definition of `EIGEN_MAKE_CWISE_COMP_R_OP` in
 /// ArrayCwiseBinaryOps.h file in Eigen.
 template <typename ScalarType, typename Derived>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(ScalarType() >= typename Derived::Scalar()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(ScalarType() >= typename Derived::Scalar()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator>=(const ScalarType& v, const Derived& a) {
   return a <= v;
 }
@@ -790,15 +792,15 @@ operator>=(const ScalarType& v, const Derived& a) {
 /// element-wise comparison of two arrays @p a1 and @p a2 using greater-than
 /// operator (>).
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() >
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() >
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>::type
+                     Formula>,
+    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>
 operator>(const DerivedA& a1, const DerivedB& a2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(a1.rows() == a2.rows() && a1.cols() == a2.cols());
@@ -810,13 +812,13 @@ operator>(const DerivedA& a1, const DerivedB& a2) {
 /// greater-than operator (>). That is, for all i and j, the (i, j)-th
 /// entry of `(a > v)` has a symbolic formula `a(i, j) > v`.
 template <typename Derived, typename ScalarType>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename Derived::Scalar() > ScalarType()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename Derived::Scalar() > ScalarType()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator>(const Derived& a, const ScalarType& v) {
   return a.unaryExpr([&v](const typename Derived::Scalar& x) { return x > v; });
 }
@@ -833,13 +835,13 @@ operator>(const Derived& a, const ScalarType& v) {
 /// Eigen's semantics. See the definition of `EIGEN_MAKE_CWISE_COMP_R_OP` in
 /// ArrayCwiseBinaryOps.h file in Eigen.
 template <typename ScalarType, typename Derived>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(ScalarType() > typename Derived::Scalar()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(ScalarType() > typename Derived::Scalar()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator>(const ScalarType& v, const Derived& a) {
   return a < v;
 }
@@ -848,15 +850,15 @@ operator>(const ScalarType& v, const Derived& a) {
 /// element-wise comparison of two arrays @p a1 and @p a2 using not-equal
 /// operator (!=).
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() !=
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() !=
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>::type
+                     Formula>,
+    typename internal::RelationalOpTraits<DerivedA, DerivedB>::ReturnType>
 operator!=(const DerivedA& a1, const DerivedB& a2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(a1.rows() == a2.rows() && a1.cols() == a2.cols());
@@ -868,13 +870,13 @@ operator!=(const DerivedA& a1, const DerivedB& a2) {
 /// not-equal operator (!=). That is, for all i and j, the (i, j)-th
 /// entry of `(a != v)` has a symbolic formula `a(i, j) != v`.
 template <typename Derived, typename ScalarType>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(typename Derived::Scalar() != ScalarType()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(typename Derived::Scalar() != ScalarType()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator!=(const Derived& a, const ScalarType& v) {
   return a.unaryExpr(
       [&v](const typename Derived::Scalar& x) { return x != v; });
@@ -885,13 +887,13 @@ operator!=(const Derived& a, const ScalarType& v) {
 /// not-equal operator (!=). That is, for all i and j, the (i, j)-th
 /// entry of `(v != a)` has a symbolic formula `v != a(i, j)`.
 template <typename ScalarType, typename Derived>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<Derived>::XprKind,
-                 Eigen::ArrayXpr>::value &&
-        std::is_same<decltype(ScalarType() != typename Derived::Scalar()),
-                     Formula>::value,
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<Derived>::XprKind,
+                 Eigen::ArrayXpr> &&
+        std::is_same_v<decltype(ScalarType() != typename Derived::Scalar()),
+                     Formula>,
     Eigen::Array<Formula, Derived::RowsAtCompileTime,
-                 Derived::ColsAtCompileTime>>::type
+                 Derived::ColsAtCompileTime>>
 operator!=(const ScalarType& v, const Derived& a) {
   return a.unaryExpr(
       [&v](const typename Derived::Scalar& x) { return v != x; });
@@ -940,15 +942,15 @@ operator!=(const ScalarType& v, const Derived& a) {
 ///     (y = 1)
 /// @endcode
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::MatrixXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::MatrixXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() ==
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::MatrixXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::MatrixXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() ==
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    Formula>::type
+                     Formula>,
+    Formula>
 operator==(const DerivedA& m1, const DerivedB& m2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(m1.rows() == m2.rows() && m1.cols() == m2.cols());
@@ -973,15 +975,15 @@ operator==(const DerivedA& m1, const DerivedB& m2) {
 ///
 /// - Eigen::Matrix<double> != Eigen::Matrix<double>
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::MatrixXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::MatrixXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() !=
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::MatrixXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::MatrixXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() !=
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    Formula>::type
+                     Formula>,
+    Formula>
 operator!=(const DerivedA& m1, const DerivedB& m2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(m1.rows() == m2.rows() && m1.cols() == m2.cols());
@@ -1001,15 +1003,15 @@ operator!=(const DerivedA& m1, const DerivedB& m2) {
 ///
 /// In the table, `EM` is a short-hand of `Eigen::Matrix`.
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::MatrixXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::MatrixXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() <
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::MatrixXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::MatrixXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() <
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    Formula>::type
+                     Formula>,
+    Formula>
 operator<(const DerivedA& m1, const DerivedB& m2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(m1.rows() == m2.rows() && m1.cols() == m2.cols());
@@ -1029,15 +1031,15 @@ operator<(const DerivedA& m1, const DerivedB& m2) {
 ///
 /// In the table, `EM` is a short-hand of `Eigen::Matrix`.
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::MatrixXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::MatrixXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() <=
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::MatrixXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::MatrixXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() <=
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    Formula>::type
+                     Formula>,
+    Formula>
 operator<=(const DerivedA& m1, const DerivedB& m2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(m1.rows() == m2.rows() && m1.cols() == m2.cols());
@@ -1057,15 +1059,15 @@ operator<=(const DerivedA& m1, const DerivedB& m2) {
 ///
 /// In the table, `EM` is a short-hand of `Eigen::Matrix`.
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::MatrixXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::MatrixXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() >
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::MatrixXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::MatrixXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() >
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    Formula>::type
+                     Formula>,
+    Formula>
 operator>(const DerivedA& m1, const DerivedB& m2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(m1.rows() == m2.rows() && m1.cols() == m2.cols());
@@ -1085,15 +1087,15 @@ operator>(const DerivedA& m1, const DerivedB& m2) {
 ///
 /// In the table, `EM` is a short-hand of `Eigen::Matrix`.
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_same<typename Eigen::internal::traits<DerivedA>::XprKind,
-                 Eigen::MatrixXpr>::value &&
-        std::is_same<typename Eigen::internal::traits<DerivedB>::XprKind,
-                     Eigen::MatrixXpr>::value &&
-        std::is_same<decltype(typename DerivedA::Scalar() >=
+typename std::enable_if_t<
+    std::is_same_v<typename Eigen::internal::traits<DerivedA>::XprKind,
+                 Eigen::MatrixXpr> &&
+        std::is_same_v<typename Eigen::internal::traits<DerivedB>::XprKind,
+                     Eigen::MatrixXpr> &&
+        std::is_same_v<decltype(typename DerivedA::Scalar() >=
                               typename DerivedB::Scalar()),
-                     Formula>::value,
-    Formula>::type
+                     Formula>,
+    Formula>
 operator>=(const DerivedA& m1, const DerivedB& m2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(m1.rows() == m2.rows() && m1.cols() == m2.cols());
@@ -1330,19 +1332,37 @@ struct scalar_cmp_op<drake::symbolic::Variable, drake::symbolic::Variable,
 }  // namespace internal
 
 namespace numext {
-// not_equal_strict was only added in Eigen 3.3.5. Since the current minimum
-// Eigen version used by drake is 3.3.4, a version check is needed.
+
+// Provides specializations for equal_strict and not_equal_strict with
+// Expression. As of Eigen 3.4.0, these are called at least as part of
+// triangular vector solve (though they could also potentially come up
+// elsewhere). The default template relies on an implicit conversion to
+// bool but our bool operator is explicit, so we need to specialize.
+//
+// Furthermore, various Eigen algorithms will use "short-circuit when zero"
+// guards as an optimization to skip expensive computation if it can show
+// that the end result will remain unchanged. If our Expression has any
+// unbound variables during that guard, we will throw instead of skipping
+// the optimizaton. Therefore, we tweak these guards to special-case the
+// result when either of the operands is a literal zero, with no throwing
+// even if the other operand has unbound variables.
+//
+// These functions were only added in Eigen 3.3.5, but the minimum
+// Eigen version used by drake is 3.3.4, so a version check is needed.
 #if EIGEN_VERSION_AT_LEAST(3, 3, 5)
-/// Provides specialization for not_equal_strict with Expression.
-/// As of Eigen 3.4.0, this is called at least as part of triangular vector
-/// solve (though it could also potentially come up elsewhere). The default
-/// template relies on an implicit conversion to bool but our bool operator
-/// is explicit, so we need to specialize.
+template <>
+EIGEN_STRONG_INLINE bool equal_strict(
+    const drake::symbolic::Expression& x,
+    const drake::symbolic::Expression& y) {
+  if (is_zero(x)) { return is_zero(y); }
+  if (is_zero(y)) { return is_zero(x); }
+  return static_cast<bool>(x == y);
+}
 template <>
 EIGEN_STRONG_INLINE bool not_equal_strict(
     const drake::symbolic::Expression& x,
     const drake::symbolic::Expression& y) {
-  return static_cast<bool>(x != y);
+  return !Eigen::numext::equal_strict(x, y);
 }
 #endif
 

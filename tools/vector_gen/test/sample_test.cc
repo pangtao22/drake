@@ -88,7 +88,7 @@ GTEST_TEST(SampleTest, SimpleCoverage) {
 // When inheritance is in use, we should only permit public copy & move
 // operations to exist on classes that are marked as final.
 static_assert(
-    std::is_final<Sample<double>>::value,
+    std::is_final_v<Sample<double>>,
     "Sample<T> should have been final");
 
 // Confirm that copy semantics work.
@@ -125,7 +125,7 @@ GTEST_TEST(SampleTest, Move) {
   const int nominal_size = SampleIndices::kNumCoordinates;
   const double* const original_storage = &first.x();
 
-  // Note than we we move-construct or move-assign from a prvalue, the size of
+  // Note that when we move-construct or move-assign from a prvalue, the size of
   // the donor object goes to zero, even though it is still a Sample object.
   // That means that methods such as get_x etc. will throw if we call them.
 

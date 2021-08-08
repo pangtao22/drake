@@ -39,6 +39,7 @@ from pydrake.systems.primitives import (
     IsObservable,
     Linearize,
     LinearSystem, LinearSystem_,
+    LinearTransformDensity, LinearTransformDensity_,
     LogOutput,
     MatrixGain,
     Multiplexer, Multiplexer_,
@@ -52,6 +53,7 @@ from pydrake.systems.primitives import (
     StateInterpolatorWithDiscreteDerivative_,
     SymbolicVectorSystem, SymbolicVectorSystem_,
     TrajectoryAffineSystem, TrajectoryAffineSystem_,
+    TrajectoryLinearSystem, TrajectoryLinearSystem_,
     TrajectorySource,
     WrapToSystem, WrapToSystem_,
     ZeroOrderHold, ZeroOrderHold_,
@@ -89,6 +91,8 @@ class TestGeneral(unittest.TestCase):
         self._check_instantiations(Gain_)
         self._check_instantiations(Integrator_)
         self._check_instantiations(LinearSystem_)
+        self._check_instantiations(LinearTransformDensity_,
+                                   supports_symbolic=False)
         self._check_instantiations(Multiplexer_)
         self._check_instantiations(PassThrough_)
         self._check_instantiations(Saturation_)
@@ -97,6 +101,8 @@ class TestGeneral(unittest.TestCase):
         self._check_instantiations(StateInterpolatorWithDiscreteDerivative_)
         self._check_instantiations(SymbolicVectorSystem_)
         self._check_instantiations(TrajectoryAffineSystem_,
+                                   supports_symbolic=False)
+        self._check_instantiations(TrajectoryLinearSystem_,
                                    supports_symbolic=False)
         self._check_instantiations(WrapToSystem_)
         self._check_instantiations(ZeroOrderHold_)
@@ -276,6 +282,16 @@ class TestGeneral(unittest.TestCase):
         self.assertNotEqual(
             context.get_discrete_state_vector().CopyToVector()[1], x0[1])
 
+        system = TrajectoryLinearSystem(
+            A=PiecewisePolynomial(A),
+            B=PiecewisePolynomial(B),
+            C=PiecewisePolynomial(C),
+            D=PiecewisePolynomial(D),
+            time_period=0.1)
+        self.assertEqual(system.time_period(), .1)
+        system.configure_default_state(x0=np.array([1, 2]))
+        system.configure_random_state(covariance=np.eye(2))
+
     def test_linear_system_zero_size(self):
         # Explicitly test #12633.
         num_x = 0
@@ -286,6 +302,29 @@ class TestGeneral(unittest.TestCase):
         C = np.zeros((num_y, num_x))
         D = np.zeros((num_y, num_u))
         self.assertIsNotNone(LinearSystem(A, B, C, D))
+
+    @numpy_compare.check_nonsymbolic_types
+    def test_linear_transform_density(self, T):
+        dut = LinearTransformDensity_[T](
+            distribution=RandomDistribution.kGaussian,
+            input_size=3,
+            output_size=3)
+        w_in = np.array([T(0.5), T(0.1), T(1.5)])
+        context = dut.CreateDefaultContext()
+        dut.get_input_port_w_in().FixValue(context, w_in)
+        self.assertEqual(dut.get_input_port_A().size(), 9)
+        self.assertEqual(dut.get_input_port_b().size(), 3)
+        self.assertEqual(dut.get_distribution(), RandomDistribution.kGaussian)
+        A = np.array([
+            [T(0.5), T(1), T(2)], [T(1), T(2), T(3)], [T(3), T(4), T(5)]])
+        dut.FixConstantA(context=context, A=A)
+        b = np.array([T(1), T(2), T(3)])
+        dut.FixConstantB(context=context, b=b)
+
+        dut.CalcDensity(context=context)
+
+        self.assertEqual(dut.get_output_port_w_out().size(), 3)
+        self.assertEqual(dut.get_output_port_w_out_density().size(), 1)
 
     def test_vector_pass_through(self):
         model_value = BasicVector([1., 2, 3])
@@ -539,6 +578,9 @@ class TestGeneral(unittest.TestCase):
         # Note: There are no random inputs to add to the empty diagram, but it
         # confirms the API works.
         AddRandomInputs(sampling_interval_sec=0.01, builder=builder)
+
+        builder_ad = DiagramBuilder_[AutoDiffXd]()
+        AddRandomInputs(sampling_interval_sec=0.01, builder=builder_ad)
 
     def test_constant_vector_source(self):
         source = ConstantVectorSource(source_value=[1., 2.])

@@ -27,8 +27,6 @@ using symbolic::Variables;
 using symbolic::test::ExprEqual;
 using symbolic::test::PolyEqual;
 
-using Vector6d = Vector6<double>;
-
 class SymbolicVectorSystemTest : public ::testing::Test {
  protected:
   const Variable t_{"t"};
@@ -235,8 +233,8 @@ class CalcRecorder final : public LeafSystem<T> {
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(CalcRecorder);
 
   explicit CalcRecorder(int output_size = 1) {
-    this->DeclareVectorOutputPort(BasicVector<T>(output_size),
-        &CalcRecorder::CalcOutput);
+    this->DeclareVectorOutputPort(kUseDefaultName, output_size,
+                                  &CalcRecorder::CalcOutput);
   }
 
   bool calculated() const { return calculated_; }

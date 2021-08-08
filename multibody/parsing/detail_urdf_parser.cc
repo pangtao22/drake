@@ -3,6 +3,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -18,6 +19,7 @@
 #include "drake/multibody/parsing/detail_tinyxml.h"
 #include "drake/multibody/parsing/detail_urdf_geometry.h"
 #include "drake/multibody/parsing/package_map.h"
+#include "drake/multibody/parsing/scoped_names.h"
 #include "drake/multibody/tree/ball_rpy_joint.h"
 #include "drake/multibody/tree/fixed_offset_frame.h"
 #include "drake/multibody/tree/planar_joint.h"
@@ -150,7 +152,7 @@ void ParseBody(const multibody::PackageMap& package_map,
          collision_node = collision_node->NextSiblingElement("collision")) {
       geometry::GeometryInstance geometry_instance =
           ParseCollision(body_name, package_map, root_dir, collision_node);
-      DRAKE_DEMAND(geometry_instance.proximity_properties());
+      DRAKE_DEMAND(geometry_instance.proximity_properties() != nullptr);
       plant->RegisterCollisionGeometry(
           body, geometry_instance.pose(), geometry_instance.shape(),
           geometry_instance.name(),
@@ -295,10 +297,11 @@ void ParseJointKeyParams(XMLElement* node,
 }
 
 void ParseJointLimits(XMLElement* node, double* lower, double* upper,
-                      double* velocity, double* effort) {
+                      double* velocity, double* acceleration, double* effort) {
   *lower = -std::numeric_limits<double>::infinity();
   *upper = std::numeric_limits<double>::infinity();
   *velocity = std::numeric_limits<double>::infinity();
+  *acceleration = std::numeric_limits<double>::infinity();
   *effort = std::numeric_limits<double>::infinity();
 
   XMLElement* limit_node = node->FirstChildElement("limit");
@@ -306,6 +309,7 @@ void ParseJointLimits(XMLElement* node, double* lower, double* upper,
     ParseScalarAttribute(limit_node, "lower", lower);
     ParseScalarAttribute(limit_node, "upper", upper);
     ParseScalarAttribute(limit_node, "velocity", velocity);
+    ParseScalarAttribute(limit_node, "drake:acceleration", acceleration);
     ParseScalarAttribute(limit_node, "effort", effort);
   }
 }
@@ -397,6 +401,7 @@ void ParseJoint(ModelInstanceIndex model_instance,
   double upper = std::numeric_limits<double>::infinity();
   double lower = -std::numeric_limits<double>::infinity();
   double velocity = std::numeric_limits<double>::infinity();
+  double acceleration = std::numeric_limits<double>::infinity();
 
   // In MultibodyPlant, the effort limit is a property of the actuator, which
   // isn't created until the transmission element is parsed.  Stash a value
@@ -420,13 +425,15 @@ void ParseJoint(ModelInstanceIndex model_instance,
 
   if (type.compare("revolute") == 0 || type.compare("continuous") == 0) {
     throw_on_custom_joint(false);
-    ParseJointLimits(node, &lower, &upper, &velocity, &effort);
+    ParseJointLimits(node, &lower, &upper, &velocity, &acceleration, &effort);
     ParseJointDynamics(name, node, &damping);
     const JointIndex index = plant->AddJoint<RevoluteJoint>(
         name, parent_body, X_PJ,
         child_body, std::nullopt, axis, lower, upper, damping).index();
     Joint<double>& joint = plant->get_mutable_joint(index);
     joint.set_velocity_limits(Vector1d(-velocity), Vector1d(velocity));
+    joint.set_acceleration_limits(
+        Vector1d(-acceleration), Vector1d(acceleration));
   } else if (type.compare("fixed") == 0) {
     throw_on_custom_joint(false);
     plant->AddJoint<WeldJoint>(name, parent_body, X_PJ,
@@ -434,13 +441,15 @@ void ParseJoint(ModelInstanceIndex model_instance,
                                RigidTransformd::Identity());
   } else if (type.compare("prismatic") == 0) {
     throw_on_custom_joint(false);
-    ParseJointLimits(node, &lower, &upper, &velocity, &effort);
+    ParseJointLimits(node, &lower, &upper, &velocity, &acceleration, &effort);
     ParseJointDynamics(name, node, &damping);
     const JointIndex index = plant->AddJoint<PrismaticJoint>(
         name, parent_body, X_PJ,
         child_body, std::nullopt, axis, lower, upper, damping).index();
     Joint<double>& joint = plant->get_mutable_joint(index);
     joint.set_velocity_limits(Vector1d(-velocity), Vector1d(velocity));
+    joint.set_acceleration_limits(
+        Vector1d(-acceleration), Vector1d(acceleration));
   } else if (type.compare("floating") == 0) {
     throw_on_custom_joint(false);
     drake::log()->warn("Joint {} specified as type floating which is not "
@@ -675,6 +684,7 @@ void ParseBushing(XMLElement* node, MultibodyPlant<double>* plant) {
 
 ModelInstanceIndex ParseUrdf(
     const std::string& model_name_in,
+    const std::optional<std::string>& parent_model_name,
     const multibody::PackageMap& package_map,
     const std::string& root_dir,
     XMLDocument* xml_doc,
@@ -691,6 +701,8 @@ ModelInstanceIndex ParseUrdf(
           "ERROR: Your robot must have a name attribute or a model name "
           "must be specified.");
   }
+
+  model_name = parsing::PrefixName(parent_model_name.value_or(""), model_name);
 
   // Parses the model's material elements. Throws an exception if there's a
   // material name clash regardless of whether the associated RGBA values are
@@ -773,6 +785,7 @@ ModelInstanceIndex ParseUrdf(
 ModelInstanceIndex AddModelFromUrdf(
     const DataSource& data_source,
     const std::string& model_name_in,
+    const std::optional<std::string>& parent_model_name,
     const PackageMap& package_map,
     MultibodyPlant<double>* plant,
     geometry::SceneGraph<double>* scene_graph) {
@@ -805,7 +818,7 @@ ModelInstanceIndex AddModelFromUrdf(
           full_path, xml_doc.ErrorName()));
     }
   } else {
-    DRAKE_DEMAND(data_source.file_contents);
+    DRAKE_DEMAND(data_source.file_contents != nullptr);
     xml_doc.Parse(data_source.file_contents->c_str());
     if (xml_doc.ErrorID()) {
       throw std::runtime_error(fmt::format(
@@ -818,7 +831,7 @@ ModelInstanceIndex AddModelFromUrdf(
     plant->RegisterAsSourceForSceneGraph(scene_graph);
   }
 
-  return ParseUrdf(model_name_in, package_map, root_dir,
+  return ParseUrdf(model_name_in, parent_model_name, package_map, root_dir,
                    &xml_doc, plant);
 }
 

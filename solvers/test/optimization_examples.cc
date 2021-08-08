@@ -3,7 +3,14 @@
 #include <gtest/gtest.h>
 
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
-#include "drake/solvers/solver_type_converter.h"
+#include "drake/solvers/clp_solver.h"
+#include "drake/solvers/gurobi_solver.h"
+#include "drake/solvers/ipopt_solver.h"
+#include "drake/solvers/mosek_solver.h"
+#include "drake/solvers/nlopt_solver.h"
+#include "drake/solvers/osqp_solver.h"
+#include "drake/solvers/scs_solver.h"
+#include "drake/solvers/snopt_solver.h"
 #include "drake/solvers/test/mathematical_program_test_util.h"
 
 using Eigen::Matrix2d;
@@ -72,42 +79,37 @@ void OptimizationProgram::RunProblem(SolverInterface* solver) {
     EXPECT_EQ(solver->ExplainUnsatisfiedProgramAttributes(*prog_), "");
     const MathematicalProgramResult result =
         RunSolver(*prog_, *solver, initial_guess());
-    const std::optional<SolverType> solver_type =
-        SolverTypeConverter::IdToType(result.get_solver_id());
-    ASSERT_TRUE(solver_type != std::nullopt);
     CheckSolution(result);
   }
 }
 
 double OptimizationProgram::GetSolverSolutionDefaultCompareTolerance(
-    SolverType solver_type) const {
-  switch (solver_type) {
-    case SolverType::kClp: {
-      return 1E-8;
-    }
-    case SolverType::kMosek: {
-      return 1E-10;
-    }
-    case SolverType::kGurobi: {
-      return 1E-10;
-    }
-    case SolverType::kSnopt: {
-      return 1E-8;
-    }
-    case SolverType::kIpopt: {
-      return 1E-6;
-    }
-    case SolverType::kNlopt: {
-      return 1E-6;
-    }
-    case SolverType::kOsqp: {
-      return 1E-10;
-    }
-    case SolverType::kScs: {
-      return 3E-5;  // Scs is not very accurate.
-    }
-    default: { throw std::runtime_error("Unsupported solver type."); }
+    SolverId solver_id) const {
+  if (solver_id == ClpSolver::id()) {
+    return 1E-8;
   }
+  if (solver_id == MosekSolver::id()) {
+    return 1E-10;
+  }
+  if (solver_id == GurobiSolver::id()) {
+    return 1E-10;
+  }
+  if (solver_id == SnoptSolver::id()) {
+    return 1E-8;
+  }
+  if (solver_id == IpoptSolver::id()) {
+    return 1E-6;
+  }
+  if (solver_id == NloptSolver::id()) {
+    return 1E-6;
+  }
+  if (solver_id == OsqpSolver::id()) {
+    return 1E-10;
+  }
+  if (solver_id == ScsSolver::id()) {
+    return 3E-5;  // Scs is not very accurate.
+  }
+  throw std::runtime_error("Unsupported solver type.");
 }
 
 LinearSystemExample1::LinearSystemExample1()
@@ -308,7 +310,7 @@ void NonConvexQPproblem2::AddQuadraticCost() {
   Eigen::Matrix<double, 6, 6> Q =
       -100.0 * Eigen::Matrix<double, 6, 6>::Identity();
   Q(5, 5) = 0.0;
-  Eigen::Matrix<double, 6, 1> c{};
+  Vector6d c{};
   c << -10.5, -7.5, -3.5, -2.5, -1.5, -10.0;
 
   prog_->AddQuadraticCost(Q, c, x_);
@@ -335,8 +337,8 @@ LowerBoundedProblem::LowerBoundedProblem(ConstraintForm constraint_form)
     : prog_(std::make_unique<MathematicalProgram>()), x_{}, x_expected_{} {
   x_ = prog_->NewContinuousVariables<6>("x");
 
-  Eigen::Matrix<double, 6, 1> lb{};
-  Eigen::Matrix<double, 6, 1> ub{};
+  Vector6d lb{};
+  Vector6d ub{};
   lb << 0, 0, 1, 0, 1, 0;
   ub << kInf, kInf, 5, 6, 5, 10;
   prog_->AddBoundingBoxConstraint(lb, ub, x_);
@@ -373,15 +375,15 @@ void LowerBoundedProblem::CheckSolution(
 
 Vector6<double> LowerBoundedProblem::initial_guess1() const {
   std::srand(0);
-  Eigen::Matrix<double, 6, 1> delta =
-      0.05 * Eigen::Matrix<double, 6, 1>::Random();
+  Vector6d delta =
+      0.05 * Vector6d::Random();
   return x_expected_ + delta;
 }
 
 Vector6<double> LowerBoundedProblem::initial_guess2() const {
   std::srand(0);
-  Eigen::Matrix<double, 6, 1> delta =
-      0.05 * Eigen::Matrix<double, 6, 1>::Random();
+  Vector6d delta =
+      0.05 * Vector6d::Random();
   return x_expected_ - delta;
 }
 

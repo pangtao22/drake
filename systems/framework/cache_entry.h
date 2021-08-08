@@ -10,6 +10,7 @@
 #include "drake/common/value.h"
 #include "drake/systems/framework/context_base.h"
 #include "drake/systems/framework/framework_common.h"
+#include "drake/systems/framework/value_producer.h"
 
 namespace drake {
 namespace systems {
@@ -43,18 +44,20 @@ class CacheEntry {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(CacheEntry)
 
-  // TODO(sherm1) These callbacks should not be specific to this class. Move
-  // elsewhere, e.g. framework_common.h so they can be shared with output port.
-
   /** Signature of a function suitable for allocating an object that can hold
   a value of a particular cache entry. The result is always returned as an
   AbstractValue but must contain the correct concrete type. */
-  using AllocCallback =
-      std::function<std::unique_ptr<AbstractValue>()>;
+  using AllocCallback
+      DRAKE_DEPRECATED("2021-10-01",
+          "Use ValueProducer::AllocateCallback instead.")
+      = ValueProducer::AllocateCallback;
 
   /** Signature of a function suitable for calculating a value of a particular
   cache entry, given a place to put the value. */
-  using CalcCallback = std::function<void(const ContextBase&, AbstractValue*)>;
+  using CalcCallback
+      DRAKE_DEPRECATED("2021-10-01",
+          "Use ValueProducer::CalcCallback instead.")
+      = ValueProducer::CalcCallback;
 
   // All the nontrivial parameters here are moved to the CacheEntry which is
   // why they aren't references.
@@ -66,6 +69,7 @@ class CacheEntry {
   @ref DeclareCacheEntry_documentation "DeclareCacheEntry" for the
   user-facing API documentation.
 
+  The ValueProducer embeds both an allocator and calculator function.
   The supplied allocator must return a suitable AbstractValue in which to
   hold the result. The supplied calculator function must write to an
   AbstractValue of the same underlying concrete type as is returned by the
@@ -82,13 +86,21 @@ class CacheEntry {
   and the cache index and ticket must be valid. The description is an arbitrary
   string not interpreted in any way by Drake.
 
-  @throws std::logic_error if the prerequisite list is empty.
+  @throws std::exception if the prerequisite list is empty.
 
   @see drake::systems::SystemBase::DeclareCacheEntry() */
   CacheEntry(const internal::SystemMessageInterface* owning_system,
              CacheIndex index, DependencyTicket ticket, std::string description,
-             AllocCallback alloc_function, CalcCallback calc_function,
+             ValueProducer value_producer,
              std::set<DependencyTicket> prerequisites_of_calc);
+
+  DRAKE_DEPRECATED("2021-10-01", "Use the ValueProducer overload instead.")
+  CacheEntry(
+      const internal::SystemMessageInterface* owning_system,
+      CacheIndex index, DependencyTicket ticket, std::string description,
+      std::function<std::unique_ptr<AbstractValue>()> alloc_function,
+      std::function<void(const ContextBase&, AbstractValue*)> calc_function,
+      std::set<DependencyTicket> prerequisites_of_calc);
 
   /** Returns a reference to the set of prerequisites needed by this cache
   entry's Calc() function. These are all within the same subsystem that
@@ -120,7 +132,7 @@ class CacheEntry {
   /** Invokes this cache entry's allocator function to allocate a concrete
   object suitable for holding the value to be held in this cache entry, and
   returns that as an AbstractValue. The returned object will never be null.
-  @throws std::logic_error if the allocator function returned null. */
+  @throws std::exception if the allocator function returned null. */
   std::unique_ptr<AbstractValue> Allocate() const;
 
   /** Unconditionally computes the value this cache entry should have given a
@@ -141,7 +153,7 @@ class CacheEntry {
   to date already, you may use the GetKnownUpToDate() method instead.
   @pre `context` is a subcontext that is compatible with the subsystem that owns
        this cache entry.
-  @throws std::logic_error if the value doesn't actually have type V. */
+  @throws std::exception if the value doesn't actually have type V. */
   template <typename ValueType>
   const ValueType& Eval(const ContextBase& context) const {
     const AbstractValue& abstract_value = EvalAbstract(context);
@@ -174,8 +186,8 @@ class CacheEntry {
   is disabled. This method is constant time and _very_ fast if it succeeds.
   @pre `context` is a subcontext that is compatible with the subsystem that owns
        this cache entry.
-  @throws std::logic_error if the value is out of date or if it does not
-                           actually have type `ValueType`. */
+  @throws std::exception if the value is out of date or if it does not
+                         actually have type `ValueType`. */
   // Keep this method as small as possible to encourage inlining; it gets
   // called *a lot*.
   template <typename ValueType>
@@ -191,7 +203,7 @@ class CacheEntry {
   information.
   @pre `context` is a subcontext that is compatible with the subsystem that owns
        this cache entry.
-  @throws std::logic_error if the value is not up to date. */
+  @throws std::exception if the value is not up to date. */
   // Keep this method as small as possible to encourage inlining; it gets
   // called *a lot*.
   const AbstractValue& GetKnownUpToDateAbstract(
@@ -260,6 +272,7 @@ class CacheEntry {
   all circumstances. */
   const CacheEntryValue& get_cache_entry_value(
       const ContextBase& context) const {
+    DRAKE_ASSERT_VOID(owning_system_->ValidateContext(context));
     return context.get_cache().get_cache_entry_value(cache_index_);
   }
 
@@ -270,6 +283,7 @@ class CacheEntry {
   all circumstances. */
   CacheEntryValue& get_mutable_cache_entry_value(
       const ContextBase& context) const {
+    DRAKE_ASSERT_VOID(owning_system_->ValidateContext(context));
     return context.get_mutable_cache().get_mutable_cache_entry_value(
         cache_index_);
   }
@@ -358,8 +372,7 @@ class CacheEntry {
   // but useful for error messages.
   const std::string description_;
 
-  const AllocCallback alloc_function_;
-  const CalcCallback calc_function_;
+  const ValueProducer value_producer_;
 
   // The list of prerequisites for the calc_function. Whenever one of these
   // changes, the cache value must be recalculated. Note that all possible

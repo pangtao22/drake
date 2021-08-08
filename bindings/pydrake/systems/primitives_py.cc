@@ -18,6 +18,7 @@
 #include "drake/systems/primitives/gain.h"
 #include "drake/systems/primitives/integrator.h"
 #include "drake/systems/primitives/linear_system.h"
+#include "drake/systems/primitives/linear_transform_density.h"
 #include "drake/systems/primitives/matrix_gain.h"
 #include "drake/systems/primitives/multiplexer.h"
 #include "drake/systems/primitives/pass_through.h"
@@ -27,6 +28,7 @@
 #include "drake/systems/primitives/sine.h"
 #include "drake/systems/primitives/symbolic_vector_system.h"
 #include "drake/systems/primitives/trajectory_affine_system.h"
+#include "drake/systems/primitives/trajectory_linear_system.h"
 #include "drake/systems/primitives/trajectory_source.h"
 #include "drake/systems/primitives/wrap_to_system.h"
 #include "drake/systems/primitives/zero_order_hold.h"
@@ -339,6 +341,41 @@ PYBIND11_MODULE(primitives, m) {
   auto bind_non_symbolic_scalar_types = [m, &doc](auto dummy) {
     using T = decltype(dummy);
 
+    DefineTemplateClassWithDefault<LinearTransformDensity<T>, LeafSystem<T>>(m,
+        "LinearTransformDensity", GetPyParam<T>(),
+        doc.LinearTransformDensity.doc)
+        .def(py::init<RandomDistribution, int, int>(), py::arg("distribution"),
+            py::arg("input_size"), py::arg("output_size"),
+            doc.LinearTransformDensity.ctor.doc)
+        .def("get_input_port_w_in",
+            &LinearTransformDensity<T>::get_input_port_w_in,
+            py_rvp::reference_internal,
+            doc.LinearTransformDensity.get_input_port_w_in.doc)
+        .def("get_input_port_A", &LinearTransformDensity<T>::get_input_port_A,
+            py_rvp::reference_internal,
+            doc.LinearTransformDensity.get_input_port_A.doc)
+        .def("get_input_port_b", &LinearTransformDensity<T>::get_input_port_b,
+            py_rvp::reference_internal,
+            doc.LinearTransformDensity.get_input_port_b.doc)
+        .def("get_output_port_w_out",
+            &LinearTransformDensity<T>::get_output_port_w_out,
+            py_rvp::reference_internal,
+            doc.LinearTransformDensity.get_output_port_w_out.doc)
+        .def("get_output_port_w_out_density",
+            &LinearTransformDensity<T>::get_output_port_w_out_density,
+            py_rvp::reference_internal,
+            doc.LinearTransformDensity.get_output_port_w_out_density.doc)
+        .def("get_distribution", &LinearTransformDensity<T>::get_distribution,
+            doc.LinearTransformDensity.get_distribution.doc)
+        .def("FixConstantA", &LinearTransformDensity<T>::FixConstantA,
+            py::arg("context"), py::arg("A"), py_rvp::reference_internal,
+            doc.LinearTransformDensity.FixConstantA.doc)
+        .def("FixConstantB", &LinearTransformDensity<T>::FixConstantB,
+            py::arg("context"), py::arg("b"), py_rvp::reference_internal,
+            doc.LinearTransformDensity.FixConstantB.doc)
+        .def("CalcDensity", &LinearTransformDensity<T>::CalcDensity,
+            py::arg("context"), doc.LinearTransformDensity.CalcDensity.doc);
+
     DefineTemplateClassWithDefault<TrajectoryAffineSystem<T>, LeafSystem<T>>(m,
         "TrajectoryAffineSystem", GetPyParam<T>(),
         doc.TrajectoryAffineSystem.doc)
@@ -387,6 +424,44 @@ PYBIND11_MODULE(primitives, m) {
             &TimeVaryingAffineSystem<T>::configure_random_state,
             py::arg("covariance"),
             doc.TimeVaryingAffineSystem.configure_random_state.doc);
+
+    DefineTemplateClassWithDefault<TrajectoryLinearSystem<T>, LeafSystem<T>>(m,
+        "TrajectoryLinearSystem", GetPyParam<T>(),
+        doc.TrajectoryLinearSystem.doc)
+        .def(py::init<const trajectories::Trajectory<double>&,
+                 const trajectories::Trajectory<double>&,
+                 const trajectories::Trajectory<double>&,
+                 const trajectories::Trajectory<double>&, double>(),
+            py::arg("A"), py::arg("B"), py::arg("C"), py::arg("D"),
+            py::arg("time_period") = 0.0, doc.TrajectoryLinearSystem.ctor.doc)
+        .def("A",
+            overload_cast_explicit<MatrixX<T>, const T&>(
+                &TrajectoryLinearSystem<T>::A),
+            doc.TrajectoryLinearSystem.A.doc)
+        .def("B",
+            overload_cast_explicit<MatrixX<T>, const T&>(
+                &TrajectoryLinearSystem<T>::B),
+            doc.TrajectoryLinearSystem.B.doc)
+        .def("C",
+            overload_cast_explicit<MatrixX<T>, const T&>(
+                &TrajectoryLinearSystem<T>::C),
+            doc.TrajectoryLinearSystem.C.doc)
+        .def("D",
+            overload_cast_explicit<MatrixX<T>, const T&>(
+                &TrajectoryLinearSystem<T>::D),
+            doc.TrajectoryLinearSystem.D.doc)
+        // Wrap a few methods from the TimeVaryingAffineSystem parent class.
+        // TODO(russt): Move to TimeVaryingAffineSystem if/when that class is
+        // wrapped.
+        .def("time_period", &TrajectoryAffineSystem<T>::time_period,
+            doc.TimeVaryingAffineSystem.time_period.doc)
+        .def("configure_default_state",
+            &TimeVaryingAffineSystem<T>::configure_default_state, py::arg("x0"),
+            doc.TimeVaryingAffineSystem.configure_default_state.doc)
+        .def("configure_random_state",
+            &TimeVaryingAffineSystem<T>::configure_random_state,
+            py::arg("covariance"),
+            doc.TimeVaryingAffineSystem.configure_random_state.doc);
   };
   type_visit(bind_non_symbolic_scalar_types, NonSymbolicScalarPack{});
 
@@ -401,11 +476,14 @@ PYBIND11_MODULE(primitives, m) {
           &BarycentricMeshSystem<double>::get_output_values,
           doc.BarycentricMeshSystem.get_output_values.doc);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   py::class_<RandomSource, LeafSystem<double>>(
-      m, "RandomSource", doc.RandomSource.doc)
+      m, "RandomSource", doc.RandomSourced.doc)
       .def(py::init<RandomDistribution, int, double>(), py::arg("distribution"),
           py::arg("num_outputs"), py::arg("sampling_interval_sec"),
           doc.RandomSource.ctor.doc);
+#pragma GCC diagnostic pop
 
   py::class_<TrajectorySource<double>, LeafSystem<double>>(
       m, "TrajectorySource", doc.TrajectorySource.doc)
@@ -414,8 +492,12 @@ PYBIND11_MODULE(primitives, m) {
           py::arg("zero_derivatives_beyond_limits") = true,
           doc.TrajectorySource.ctor.doc);
 
-  m.def("AddRandomInputs", &AddRandomInputs, py::arg("sampling_interval_sec"),
-      py::arg("builder"), doc.AddRandomInputs.doc);
+  m.def("AddRandomInputs", &AddRandomInputs<double>,
+       py::arg("sampling_interval_sec"), py::arg("builder"),
+       doc.AddRandomInputs.doc)
+      .def("AddRandomInputs", &AddRandomInputs<AutoDiffXd>,
+          py::arg("sampling_interval_sec"), py::arg("builder"),
+          doc.AddRandomInputs.doc);
 
   m.def("Linearize", &Linearize, py::arg("system"), py::arg("context"),
       py::arg("input_port_index") =

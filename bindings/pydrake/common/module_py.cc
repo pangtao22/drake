@@ -2,6 +2,7 @@
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 
+#include "drake/bindings/pydrake/autodiff_types_pybind.h"
 #include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/common/text_logging_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
@@ -40,7 +41,7 @@ py::handle ResolvePyObject(const type_erased_ptr& ptr) {
 
 // Gets a class's fully-qualified name.
 std::string GetPyClassName(py::handle obj) {
-  DRAKE_DEMAND(!!obj);
+  DRAKE_DEMAND(bool{obj});
   py::handle cls = obj.get_type();
   return py::str("{}.{}").format(
       cls.attr("__module__"), cls.attr("__qualname__"));
@@ -105,36 +106,11 @@ PYBIND11_MODULE(_module_py, m) {
 
   internal::RedirectPythonLogging();
 
-  py::enum_<drake::ToleranceType> tolerance_enum(
-      m, "ToleranceType", doc.ToleranceType.doc);
-  tolerance_enum  // BR
+  py::enum_<drake::ToleranceType>(m, "ToleranceType", doc.ToleranceType.doc)
       .value("kAbsolute", drake::ToleranceType::kAbsolute,
           doc.ToleranceType.kAbsolute.doc)
       .value("kRelative", drake::ToleranceType::kRelative,
           doc.ToleranceType.kRelative.doc);
-  // Define these as properties so we can deprecate them.
-  constexpr char absolute_deprecated[] =
-      "Deprecated:\n  ToleranceType.absolute is deprecated. Please use "
-      "ToleranceType.kAbsolute instead. This will be removed on or "
-      "after 2021-06-01.";
-  tolerance_enum.def_property_static(
-      "absolute",
-      [absolute_deprecated](py::handle /* cls */) {
-        WarnDeprecated(absolute_deprecated);
-        return drake::ToleranceType::kAbsolute;
-      },
-      nullptr, absolute_deprecated);
-  constexpr char relative_deprecated[] =
-      "Deprecated:\n  ToleranceType.relative is deprecated. Please use "
-      "ToleranceType.kRelative instead. This will be removed on or "
-      "after 2021-06-01.";
-  tolerance_enum.def_property_static(
-      "relative",
-      [relative_deprecated](py::handle /* cls */) {
-        WarnDeprecated(relative_deprecated);
-        return drake::ToleranceType::kRelative;
-      },
-      nullptr, relative_deprecated);
 
   py::enum_<drake::RandomDistribution>(
       m, "RandomDistribution", doc.RandomDistribution.doc)
@@ -144,6 +120,12 @@ PYBIND11_MODULE(_module_py, m) {
           doc.RandomDistribution.kGaussian.doc)
       .value("kExponential", drake::RandomDistribution::kExponential,
           doc.RandomDistribution.kExponential.doc);
+
+  m.def("CalcProbabilityDensity", &CalcProbabilityDensity<double>,
+       py::arg("distribution"), py::arg("x"), doc.CalcProbabilityDensity.doc)
+      .def("CalcProbabilityDensity", &CalcProbabilityDensity<AutoDiffXd>,
+          py::arg("distribution"), py::arg("x"),
+          doc.CalcProbabilityDensity.doc);
 
   // Adds a binding for drake::RandomGenerator.
   py::class_<RandomGenerator> random_generator_cls(m, "RandomGenerator",

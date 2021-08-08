@@ -30,7 +30,7 @@ namespace solvers {
  * @param variable_values The values of all variables.
  * @return variable_values(variable_index[var.get_id()]) if
  * var.get_id() is a valid key of @p variable_index.
- * @throws an invalid_argument error if var.get_id() is not a valid key of @p
+ * @throws std::exception if var.get_id() is not a valid key of @p
  * variable_index.
  * @pre All the mapped value in variable_index is in the range [0,
  * variable_values.rows())
@@ -47,7 +47,7 @@ double GetVariableValue(
  */
 template <typename Derived>
 typename std::enable_if_t<
-    std::is_same<typename Derived::Scalar, symbolic::Variable>::value,
+    std::is_same_v<typename Derived::Scalar, symbolic::Variable>,
     Eigen::Matrix<double, Derived::RowsAtCompileTime,
                   Derived::ColsAtCompileTime>>
 GetVariableValue(
@@ -182,10 +182,10 @@ class MathematicalProgramResult final {
    * @return The value of the decision variable after solving the problem.
    */
   template <typename Derived>
-  typename std::enable_if<
-      std::is_same<typename Derived::Scalar, symbolic::Variable>::value,
+  typename std::enable_if_t<
+      std::is_same_v<typename Derived::Scalar, symbolic::Variable>,
       Eigen::Matrix<double, Derived::RowsAtCompileTime,
-                    Derived::ColsAtCompileTime>>::type
+                    Derived::ColsAtCompileTime>>
   GetSolution(const Eigen::MatrixBase<Derived>& var) const {
     return GetVariableValue(var, decision_variable_index_, x_val_);
   }
@@ -194,7 +194,7 @@ class MathematicalProgramResult final {
    * Gets the solution of a single decision variable.
    * @param var The decision variable.
    * @return The value of the decision variable after solving the problem.
-   * @throws invalid_argument if `var` is not captured in the mapping @p
+   * @throws std::exception if `var` is not captured in the mapping @p
    * decision_variable_index, as the input argument of
    * set_decision_variable_index().
    */
@@ -227,10 +227,10 @@ class MathematicalProgramResult final {
    * doc_was_unable_to_choose_unambiguous_name. }
    */
   template <typename Derived>
-  typename std::enable_if<
-      std::is_same<typename Derived::Scalar, symbolic::Expression>::value,
+  typename std::enable_if_t<
+      std::is_same_v<typename Derived::Scalar, symbolic::Expression>,
       Eigen::Matrix<symbolic::Expression, Derived::RowsAtCompileTime,
-          Derived::ColsAtCompileTime>>::type
+          Derived::ColsAtCompileTime>>
   GetSolution(const Eigen::MatrixBase<Derived>& m) const {
     Eigen::Matrix<symbolic::Expression, Derived::RowsAtCompileTime,
                   Derived::ColsAtCompileTime>
@@ -386,10 +386,10 @@ class MathematicalProgramResult final {
    * problem.
    */
   template <typename Derived>
-  typename std::enable_if<
-      std::is_same<typename Derived::Scalar, symbolic::Variable>::value,
+  typename std::enable_if_t<
+      std::is_same_v<typename Derived::Scalar, symbolic::Variable>,
       Eigen::Matrix<double, Derived::RowsAtCompileTime,
-                    Derived::ColsAtCompileTime>>::type
+                    Derived::ColsAtCompileTime>>
   GetSuboptimalSolution(const Eigen::MatrixBase<Derived>& var,
                         int solution_number) const {
     return GetVariableValue(var, decision_variable_index_,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include "drake/common/eigen_types.h"
@@ -9,7 +10,7 @@
 
 namespace drake {
 namespace multibody {
-namespace fixed_fem {
+namespace fem {
 
 /** %FemState implements FemStateBase for a particular type of FemElement.
  It is templated on the concrete FemElement type in order to allow compile time
@@ -113,6 +114,10 @@ class FemState : public FemStateBase<typename Element::T> {
  private:
   friend class FemStateTest;
 
+  std::unique_ptr<FemStateBase<T>> DoClone() const final {
+    return std::make_unique<FemState<Element>>(*this);
+  }
+
   // TODO(xuchenhan-tri): Currently, all cache entries are thrashed when *any*
   //  state (q, qdot, or qddot) is changed. For many FEM models (e.g.
   //  static/dynamic elasticity), there exist more fine-grained caching
@@ -129,6 +134,6 @@ class FemState : public FemStateBase<typename Element::T> {
       internal::ElementCacheEntry<typename Element::Traits::Data>>
       element_cache_{};
 };
-}  // namespace fixed_fem
+}  // namespace fem
 }  // namespace multibody
 }  // namespace drake

@@ -23,6 +23,7 @@ drake_cc_library(
         "//geometry:geometry_ids",
         "//geometry:proximity_properties",
         "//geometry:shape_specification",
+        "//geometry/proximity:bvh",
         "//geometry/proximity:make_box_mesh",
         "//geometry/proximity:make_capsule_mesh",
         "//geometry/proximity:make_cylinder_mesh",
@@ -39,8 +40,9 @@ drake_cc_library(
         "constitutive_model.h",
     ],
     deps = [
-        ":deformation_gradient_cache_entry",
+        ":fem_indexes",
         "//common:essential",
+        "//multibody/fem:deformation_gradient_data",
     ],
 )
 
@@ -59,7 +61,7 @@ drake_cc_library(
     deps = [
         ":constitutive_model",
         ":constitutive_model_utilities",
-        ":corotated_model_cache_entry",
+        ":corotated_model_data",
         ":matrix_utilities",
         "//common:default_scalars",
         "//common:essential",
@@ -67,15 +69,15 @@ drake_cc_library(
 )
 
 drake_cc_library(
-    name = "corotated_model_cache_entry",
+    name = "corotated_model_data",
     hdrs = [
-        "corotated_model_cache_entry.h",
+        "corotated_model_data.h",
     ],
     deps = [
-        ":deformation_gradient_cache_entry",
         ":matrix_utilities",
         "//common:default_scalars",
         "//common:essential",
+        "//multibody/fem:deformation_gradient_data",
     ],
 )
 
@@ -101,9 +103,95 @@ drake_cc_library(
     srcs = ["deformable_contact.cc"],
     hdrs = ["deformable_contact.h"],
     deps = [
+        "//common:default_scalars",
+        "//geometry/proximity:bvh",
+        "//geometry/proximity:deformable_volume_mesh",
         "//geometry/proximity:posed_half_space",
         "//geometry/proximity:surface_mesh",
+    ],
+)
+
+drake_cc_library(
+    name = "deformable_contact_data",
+    srcs = ["deformable_contact_data.cc"],
+    hdrs = ["deformable_contact_data.h"],
+    deps = [
+        ":deformable_rigid_contact_pair",
+        ":reference_deformable_geometry",
+    ],
+)
+
+drake_cc_library(
+    name = "reference_deformable_geometry",
+    srcs = [
+        "reference_deformable_geometry.cc",
+    ],
+    hdrs = [
+        "reference_deformable_geometry.h",
+    ],
+    deps = [
+        "//common:default_scalars",
+        "//common:essential",
+        "//geometry/proximity:mesh_field",
         "//geometry/proximity:volume_mesh",
+    ],
+)
+
+drake_cc_library(
+    name = "deformable_model",
+    srcs = [
+        "deformable_model.cc",
+    ],
+    hdrs = [
+        "deformable_model.h",
+    ],
+    deps = [
+        ":corotated_model",
+        ":deformable_body_config",
+        ":dirichlet_boundary_condition",
+        ":dynamic_elasticity_element",
+        ":dynamic_elasticity_model",
+        ":fem_model_base",
+        ":linear_constitutive_model",
+        ":mesh_utilities",
+        "//common:essential",
+        "//geometry/proximity:volume_mesh",
+        "//multibody/fem:linear_simplex_element",
+        "//multibody/fem:simplex_gaussian_quadrature",
+        "//multibody/plant",
+    ],
+)
+
+drake_cc_library(
+    name = "deformable_rigid_contact_pair",
+    hdrs = ["deformable_rigid_contact_pair.h"],
+    deps = [
+        ":deformable_contact",
+        ":fem_indexes",
+        "//geometry:geometry_ids",
+        "//math:geometric_transform",
+    ],
+)
+
+drake_cc_library(
+    name = "deformable_rigid_manager",
+    srcs = [
+        "deformable_rigid_manager.cc",
+    ],
+    hdrs = [
+        "deformable_rigid_manager.h",
+    ],
+    deps = [
+        ":collision_objects",
+        ":deformable_contact_data",
+        ":deformable_model",
+        ":deformable_rigid_contact_pair",
+        ":fem_solver",
+        ":permute_block_sparse_matrix",
+        ":schur_complement",
+        "//common:essential",
+        "//multibody/contact_solvers:block_sparse_matrix",
+        "//multibody/plant",
     ],
 )
 
@@ -112,23 +200,13 @@ drake_cc_library(
     srcs = ["deformable_visualizer.cc"],
     hdrs = ["deformable_visualizer.h"],
     deps = [
+        ":reference_deformable_geometry",
         "//common:essential",
         "//geometry/proximity:sorted_triplet",
         "//geometry/proximity:volume_mesh",
         "//lcm:drake_lcm",
         "//lcmtypes:experimental_deformable_mesh",
         "//systems/framework:leaf_system",
-    ],
-)
-
-drake_cc_library(
-    name = "deformation_gradient_cache_entry",
-    hdrs = [
-        "deformation_gradient_cache_entry.h",
-    ],
-    deps = [
-        ":fem_indexes",
-        "//common:essential",
     ],
 )
 
@@ -186,10 +264,10 @@ drake_cc_library(
     deps = [
         ":constitutive_model",
         ":fem_element",
-        ":isoparametric_element",
-        ":quadrature",
         "//common:essential",
         "//common:unused",
+        "//multibody/fem:isoparametric_element",
+        "//multibody/fem:quadrature",
     ],
 )
 
@@ -247,7 +325,6 @@ drake_cc_library(
         ":fem_indexes",
         ":fem_model_base",
         ":fem_state",
-        ":state_updater",
         "//common:essential",
         "//common:unused",
     ],
@@ -264,6 +341,7 @@ drake_cc_library(
     deps = [
         ":dirichlet_boundary_condition",
         ":fem_state_base",
+        ":state_updater",
         "//common:default_scalars",
         "//common:essential",
     ],
@@ -281,30 +359,6 @@ drake_cc_library(
         ":state_updater",
         "//common:essential",
         "//multibody/contact_solvers:sparse_linear_operator",
-    ],
-)
-
-drake_cc_library(
-    name = "softsim_system",
-    srcs = [
-        "softsim_system.cc",
-    ],
-    hdrs = [
-        "softsim_system.h",
-    ],
-    deps = [
-        ":corotated_model",
-        ":deformable_body_config",
-        ":dirichlet_boundary_condition",
-        ":dynamic_elasticity_element",
-        ":dynamic_elasticity_model",
-        ":fem_solver",
-        ":linear_constitutive_model",
-        ":linear_simplex_element",
-        ":simplex_gaussian_quadrature",
-        "//common:essential",
-        "//geometry/proximity:volume_mesh",
-        "//systems/framework:leaf_system",
     ],
 )
 
@@ -335,16 +389,6 @@ drake_cc_library(
 )
 
 drake_cc_library(
-    name = "isoparametric_element",
-    hdrs = [
-        "isoparametric_element.h",
-    ],
-    deps = [
-        "//common:essential",
-    ],
-)
-
-drake_cc_library(
     name = "linear_constitutive_model",
     hdrs = [
         "linear_constitutive_model.h",
@@ -352,31 +396,23 @@ drake_cc_library(
     deps = [
         ":constitutive_model",
         ":constitutive_model_utilities",
-        ":linear_constitutive_model_cache_entry",
+        ":linear_constitutive_model_data",
         "//common:default_scalars",
         "//common:essential",
     ],
 )
 
 drake_cc_library(
-    name = "linear_constitutive_model_cache_entry",
+    name = "linear_constitutive_model_data",
+    srcs = [
+        "linear_constitutive_model_data.cc",
+    ],
     hdrs = [
-        "linear_constitutive_model_cache_entry.h",
+        "linear_constitutive_model_data.h",
     ],
     deps = [
-        ":deformation_gradient_cache_entry",
-        "//common:default_scalars",
         "//common:essential",
-    ],
-)
-
-drake_cc_library(
-    name = "linear_simplex_element",
-    hdrs = [
-        "linear_simplex_element.h",
-    ],
-    deps = [
-        ":isoparametric_element",
+        "//multibody/fem:deformation_gradient_data",
     ],
 )
 
@@ -410,8 +446,10 @@ drake_cc_library(
         "mesh_utilities.h",
     ],
     deps = [
+        ":reference_deformable_geometry",
         "//common:default_scalars",
         "//common:essential",
+        "//geometry:scene_graph",
         "//geometry/proximity:make_box_mesh",
         "//geometry/proximity:volume_mesh",
         "//math:geometric_transform",
@@ -429,9 +467,12 @@ drake_cc_library(
 )
 
 drake_cc_library(
-    name = "quadrature",
+    name = "permute_block_sparse_matrix",
+    srcs = [
+        "permute_block_sparse_matrix.cc",
+    ],
     hdrs = [
-        "quadrature.h",
+        "permute_block_sparse_matrix.h",
     ],
     deps = [
         "//common:default_scalars",
@@ -459,9 +500,10 @@ drake_cc_binary(
         "run_cantilever_beam.cc",
     ],
     deps = [
+        ":deformable_model",
+        ":deformable_rigid_manager",
         ":deformable_visualizer",
         ":mesh_utilities",
-        ":softsim_system",
         "//common:add_text_logging_gflags",
         "//math:geometric_transform",
         "//systems/analysis:simulator_gflags",
@@ -470,12 +512,16 @@ drake_cc_binary(
 )
 
 drake_cc_library(
-    name = "simplex_gaussian_quadrature",
+    name = "schur_complement",
+    srcs = [
+        "schur_complement.cc",
+    ],
     hdrs = [
-        "simplex_gaussian_quadrature.h",
+        "schur_complement.h",
     ],
     deps = [
-        ":quadrature",
+        "//common:default_scalars",
+        "//common:essential",
     ],
 )
 
@@ -546,9 +592,34 @@ drake_cc_googletest(
     name = "deformable_contact_test",
     deps = [
         ":deformable_contact",
+        ":deformable_contact_data",
+        ":mesh_utilities",
         "//common/test_utilities:eigen_matrix_compare",
         "//geometry/proximity:surface_mesh",
         "//geometry/proximity:volume_mesh",
+    ],
+)
+
+drake_cc_googletest(
+    name = "deformable_model_test",
+    deps = [
+        ":deformable_model",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
+        "//geometry/proximity:make_box_mesh",
+    ],
+)
+
+drake_cc_googletest(
+    name = "deformable_rigid_manager_test",
+    deps = [
+        ":deformable_rigid_manager",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
+        "//examples/multibody/rolling_sphere:make_rolling_sphere_plant",
+        "//geometry/proximity:make_box_mesh",
+        "//multibody/contact_solvers:pgs_solver",
+        "//systems/analysis:simulator",
     ],
 )
 
@@ -579,10 +650,10 @@ drake_cc_googletest(
     deps = [
         ":dynamic_elasticity_element",
         ":linear_constitutive_model",
-        ":linear_simplex_element",
-        ":simplex_gaussian_quadrature",
         "//common/test_utilities:eigen_matrix_compare",
         "//math:gradient",
+        "//multibody/fem:linear_simplex_element",
+        "//multibody/fem:simplex_gaussian_quadrature",
     ],
 )
 
@@ -592,11 +663,11 @@ drake_cc_googletest(
         ":dynamic_elasticity_element",
         ":dynamic_elasticity_model",
         ":linear_constitutive_model",
-        ":linear_simplex_element",
-        ":simplex_gaussian_quadrature",
         "//common/test_utilities:eigen_matrix_compare",
         "//geometry/proximity:make_box_mesh",
         "//math:gradient",
+        "//multibody/fem:linear_simplex_element",
+        "//multibody/fem:simplex_gaussian_quadrature",
     ],
 )
 
@@ -615,11 +686,11 @@ drake_cc_googletest(
     deps = [
         ":elasticity_element",
         ":linear_constitutive_model",
-        ":linear_simplex_element",
-        ":simplex_gaussian_quadrature",
         "//common/test_utilities:eigen_matrix_compare",
         "//math:geometric_transform",
         "//math:gradient",
+        "//multibody/fem:linear_simplex_element",
+        "//multibody/fem:simplex_gaussian_quadrature",
     ],
 )
 
@@ -637,8 +708,6 @@ drake_cc_googletest(
         ":eigen_conjugate_gradient_solver",
         ":fem_solver",
         ":linear_constitutive_model",
-        ":linear_simplex_element",
-        ":simplex_gaussian_quadrature",
         ":static_elasticity_element",
         ":static_elasticity_model",
         ":zeroth_order_state_updater",
@@ -646,6 +715,8 @@ drake_cc_googletest(
         "//common/test_utilities:expect_throws_message",
         "//geometry/proximity:make_box_mesh",
         "//math:gradient",
+        "//multibody/fem:linear_simplex_element",
+        "//multibody/fem:simplex_gaussian_quadrature",
     ],
 )
 
@@ -673,27 +744,10 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
-    name = "isoparametric_element_test",
+    name = "linear_constitutive_model_data_test",
     deps = [
-        ":isoparametric_element",
-        ":linear_simplex_element",
+        ":linear_constitutive_model_data",
         "//common/test_utilities:eigen_matrix_compare",
-        "//common/test_utilities:expect_throws_message",
-    ],
-)
-
-drake_cc_googletest(
-    name = "linear_constitutive_model_cache_entry_test",
-    deps = [
-        ":linear_constitutive_model_cache_entry",
-        "//common/test_utilities:expect_throws_message",
-    ],
-)
-
-drake_cc_googletest(
-    name = "linear_simplex_element_test",
-    deps = [
-        ":linear_simplex_element",
     ],
 )
 
@@ -727,19 +781,18 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
-    name = "simplex_gaussian_quadrature_test",
+    name = "permute_block_sparse_matrix_test",
     deps = [
-        ":simplex_gaussian_quadrature",
+        ":permute_block_sparse_matrix",
+        "//common/test_utilities:eigen_matrix_compare",
     ],
 )
 
 drake_cc_googletest(
-    name = "softsim_system_test",
+    name = "schur_complement_test",
     deps = [
-        ":softsim_system",
+        ":schur_complement",
         "//common/test_utilities:eigen_matrix_compare",
-        "//common/test_utilities:expect_throws_message",
-        "//geometry/proximity:make_box_mesh",
     ],
 )
 
@@ -747,12 +800,12 @@ drake_cc_googletest(
     name = "static_elasticity_element_test",
     deps = [
         ":linear_constitutive_model",
-        ":linear_simplex_element",
-        ":simplex_gaussian_quadrature",
         ":static_elasticity_element",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
         "//math:gradient",
+        "//multibody/fem:linear_simplex_element",
+        "//multibody/fem:simplex_gaussian_quadrature",
     ],
 )
 
@@ -760,13 +813,13 @@ drake_cc_googletest(
     name = "static_elasticity_model_test",
     deps = [
         ":linear_constitutive_model",
-        ":linear_simplex_element",
-        ":simplex_gaussian_quadrature",
         ":static_elasticity_element",
         ":static_elasticity_model",
         "//common/test_utilities:eigen_matrix_compare",
         "//geometry/proximity:make_box_mesh",
         "//math:gradient",
+        "//multibody/fem:linear_simplex_element",
+        "//multibody/fem:simplex_gaussian_quadrature",
     ],
 )
 
@@ -775,13 +828,13 @@ drake_cc_googletest(
     deps = [
         ":fem_solver",
         ":linear_constitutive_model",
-        ":linear_simplex_element",
         ":mesh_utilities",
-        ":simplex_gaussian_quadrature",
         ":static_elasticity_element",
         ":static_elasticity_model",
         "//common/test_utilities:eigen_matrix_compare",
         "//geometry/proximity:make_box_mesh",
+        "//multibody/fem:linear_simplex_element",
+        "//multibody/fem:simplex_gaussian_quadrature",
     ],
 )
 

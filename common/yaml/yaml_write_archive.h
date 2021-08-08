@@ -118,7 +118,7 @@ class YamlWriteArchive final {
   void EraseMatchingMaps(const YamlWriteArchive& other);
 
   /// (Advanced.)  Copies the value pointed to by `nvp.value()` into the YAML
-  /// object.  Most users should should call Accept, not Visit.
+  /// object.  Most users should call Accept, not Visit.
   template <typename NameValuePair>
   void Visit(const NameValuePair& nvp) {
     // Use int32_t for the final argument to prefer the specialized overload.
@@ -306,13 +306,13 @@ class YamlWriteArchive final {
 
   template <typename T>
   static std::string GetVariantTag() {
-    const std::string full_name = NiceTypeName::Get<T>();
+    const std::string full_name = NiceTypeName::GetFromStorage<T>();
     if ((full_name == "std::string")
         || (full_name == "double")
         || (full_name == "int")) {
       // TODO(jwnimmer-tri) Add support for well-known YAML primitive types
       // within variants (when placed other than at the 0'th index).
-      throw std::runtime_error(fmt::format(
+      throw std::invalid_argument(fmt::format(
           "Cannot YamlWriteArchive the variant type {} with a non-zero index",
           full_name));
     }
@@ -354,7 +354,7 @@ class YamlWriteArchive final {
 
   template <typename Key, typename Value, typename NVP>
   void VisitMap(const NVP& nvp) {
-    static_assert(std::is_same<Key, std::string>::value,
+    static_assert(std::is_same_v<Key, std::string>,
                   "Map keys must be strings");
     YAML::Node sub_node(YAML::NodeType::Map);
     // N.B. For std::unordered_map, this iteration order is non-deterministic,

@@ -9,6 +9,9 @@ using drake::geometry::FrameId;
 using drake::geometry::SourceId;
 using drake::math::RigidTransform;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 namespace drake {
 namespace systems {
 namespace rendering {
@@ -21,9 +24,10 @@ RenderPoseToGeometryPose<T>::RenderPoseToGeometryPose(
       frame_id_(frame_id) {
   using Input = PoseVector<T>;
   using Output = geometry::FramePoseVector<T>;
-  this->DeclareVectorInputPort(Input{});
+  this->DeclareVectorInputPort(kUseDefaultName, Input{});
   this->DeclareAbstractOutputPort(
-      []() { return Value<Output>{}.Clone(); },
+      kUseDefaultName,
+      []() { return AbstractValue::Make<Output>(); },
       [this, frame_id](const Context<T>& context, AbstractValue* calculated) {
         const Input& input =
             this->get_input_port().template Eval<Input>(context);
@@ -47,3 +51,5 @@ RenderPoseToGeometryPose<T>::~RenderPoseToGeometryPose() = default;
 
 DRAKE_DEFINE_CLASS_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_SCALARS(
     class ::drake::systems::rendering::RenderPoseToGeometryPose)
+
+#pragma GCC diagnostic pop

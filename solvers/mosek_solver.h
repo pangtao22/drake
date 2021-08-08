@@ -32,6 +32,18 @@ struct MosekSolverDetails {
 };
 
 /**
+ * An implementation of SolverInterface for the commercially-licensed MOSEK
+ * solver (https://www.mosek.com/).
+ *
+ * The default build of Drake is not configured to use MOSEK, so therefore
+ * SolverInterface::available() will return false. You must compile Drake
+ * from source in order to link against MOSEK. For details, refer to the
+ * documentation at https://drake.mit.edu/bazel.html#mosek.
+ *
+ * The MOSEKLM_LICENSE_FILE environment variable controls whether or not
+ * SolverInterface::enabled() returns true.  Iff it is set to any non-empty
+ * value, then the solver is enabled; otherwise, the solver is not enabled.
+ *
  * @note Mosek only cares about the initial guess of integer variables. The
  * initial guess of continuous variables are not passed to MOSEK. If all the
  * integer variables are set to some integer values, then MOSEK will be forced
@@ -40,6 +52,18 @@ struct MosekSolverDetails {
  * subsequent iterations.) If the specified integer solution is infeasible or
  * incomplete, MOSEK will simply ignore it. For more details, check
  * https://docs.mosek.com/9.2/capi/tutorial-mio-shared.html?highlight=initial
+ *
+ * Mosek supports many solver parameters. You can refer to the full list of
+ * parameters in
+ * https://docs.mosek.com/9.2/capi/param-groups.html#doc-param-groups. On top of
+ * these parameters, we also provide the following additional parameters
+ * 1. "writedata", set to a file name so that Mosek solver will write the
+ *    optimization model to this file. check
+ *    https://docs.mosek.com/9.2/capi/solver-io.html#saving-a-problem-to-a-file
+ *    for more details. The supported file extensions are listed in
+ *    https://docs.mosek.com/9.2/capi/supported-file-formats.html#doc-shared-file-formats.
+ *    Set this parameter to "" if you don't want to write to a file. Default is
+ *    not to write to a file.
  */
 class MosekSolver final : public SolverBase {
  public:
@@ -59,6 +83,9 @@ class MosekSolver final : public SolverBase {
    * set @p log_file to the name of that file. If the user wants to output the
    * logging to the console, then set log_file to empty string.
    */
+  DRAKE_DEPRECATED("2021-11-01",
+                   "Please set CommonSolverOption::kPrintFileName or "
+                   "CommonSolverOption::kPrintToConsole in SolverOptions")
   void set_stream_logging(bool flag, const std::string& log_file) {
     stream_logging_ = flag;
     log_file_ = log_file;
@@ -80,7 +107,7 @@ class MosekSolver final : public SolverBase {
    * @return A shared pointer to a license environment that will stay valid
    * as long as any shared_ptr returned by this function is alive. If MOSEK is
    * not available in your build, this will return a null (empty) shared_ptr.
-   * @throws std::runtime_error if MOSEK is available but a license cannot be
+   * @throws std::exception if MOSEK is available but a license cannot be
    * obtained.
    */
   static std::shared_ptr<License> AcquireLicense();

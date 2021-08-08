@@ -43,14 +43,11 @@ BouncingBallPlant<T>::BouncingBallPlant(SourceId source_id,
   geometry_query_port_ = this->DeclareAbstractInputPort(
       systems::kUseDefaultName, Value<geometry::QueryObject<T>>{})
           .get_index();
+  auto state_index = this->DeclareContinuousState(
+      BouncingBallVector<T>(), 1 /* num_q */, 1 /* num_v */, 0 /* num_z */);
   state_port_ =
-      this->DeclareVectorOutputPort(BouncingBallVector<T>(),
-                                    &BouncingBallPlant::CopyStateToOutput,
-                                    {this->all_state_ticket()})
+      this->DeclareStateOutputPort(systems::kUseDefaultName, state_index)
           .get_index();
-
-  this->DeclareContinuousState(BouncingBallVector<T>(), 1 /* num_q */,
-                               1 /* num_v */, 0 /* num_z */);
   static_assert(BouncingBallVectorIndices::kNumCoordinates == 1 + 1, "");
 
   ball_frame_id_ = scene_graph->RegisterFrame(
@@ -72,6 +69,7 @@ BouncingBallPlant<T>::BouncingBallPlant(SourceId source_id,
 
   // Allocate the output port now that the frame has been registered.
   geometry_pose_port_ = this->DeclareAbstractOutputPort(
+          systems::kUseDefaultName,
           &BouncingBallPlant::CalcFramePoseOutput,
           {this->configuration_ticket()})
       .get_index();
@@ -96,14 +94,6 @@ template <typename T>
 const systems::OutputPort<T>&
 BouncingBallPlant<T>::get_geometry_pose_output_port() const {
   return systems::System<T>::get_output_port(geometry_pose_port_);
-}
-
-// Updates the state output port.
-template <typename T>
-void BouncingBallPlant<T>::CopyStateToOutput(
-    const Context<T>& context,
-    BouncingBallVector<T>* state_output_vector) const {
-  state_output_vector->set_value(get_state(context).get_value());
 }
 
 template <typename T>

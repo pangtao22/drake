@@ -275,7 +275,7 @@ class ConstraintSolver {
   // @{
   /// Computes the base time-discretization of the system using the problem
   /// data, resulting in the `MM` and `qq` described in
-  /// @ref velocity-level-MLCPs; if `MM` and `qq` are modified no further, the
+  /// @ref Velocity-level-MLCPs; if `MM` and `qq` are modified no further, the
   /// LCP corresponds to an impact problem (i.e., the multibody dynamics problem
   /// would not be discretized). The data output (`mlcp_to_lcp_data`, `MM`, and
   /// `qq`) can be updated using a particular time step in
@@ -341,11 +341,11 @@ class ConstraintSolver {
   ///           CalcContactForcesInContactFrames(). `cf` will be resized as
   ///           necessary.
   /// @pre Constraint data has been computed.
-  /// @throws std::runtime_error if the constraint forces cannot be computed
+  /// @throws std::exception if the constraint forces cannot be computed
   ///         (due to, e.g., the effects of roundoff error in attempting to
   ///         solve a complementarity problem); in such cases, it is
   ///         recommended to increase regularization and attempt again.
-  /// @throws std::logic_error if `cf` is null.
+  /// @throws std::exception if `cf` is null.
   void SolveImpactProblem(const ConstraintVelProblemData<T>& problem_data,
                           VectorX<T>* cf) const;
 
@@ -402,9 +402,9 @@ class ConstraintSolver {
   ///           CalcContactForcesInContactFrames(). `cf` will be resized as
   ///           necessary.
   /// @pre Constraint data has been computed.
-  /// @throws std::runtime_error if the constraint forces cannot be computed
+  /// @throws std::exception if the constraint forces cannot be computed
   ///         (due to, e.g., an "inconsistent" rigid contact configuration).
-  /// @throws std::logic_error if `cf` is null.
+  /// @throws std::exception if `cf` is null.
   void SolveConstraintProblem(const ConstraintAccelProblemData<T>& problem_data,
                               VectorX<T>* cf) const;
 
@@ -418,7 +418,7 @@ class ConstraintSolver {
   ///             This method will resize `generalized_force` as necessary. The
   ///             indices of `generalized_force` will exactly match the indices
   ///             of `problem_data.f`.
-  /// @throws std::logic_error if `generalized_force` is null or `cf`
+  /// @throws std::exception if `generalized_force` is null or `cf`
   ///         vector is incorrectly sized.
   static void ComputeGeneralizedForceFromConstraintForces(
       const ConstraintAccelProblemData<T>& problem_data,
@@ -436,7 +436,7 @@ class ConstraintSolver {
   ///             This method will resize `generalized_force` as necessary. The
   ///             indices of `generalized_force` will exactly match the indices
   ///             of `problem_data.f`.
-  /// @throws std::logic_error if `generalized_force` is null or `cf`
+  /// @throws std::exception if `generalized_force` is null or `cf`
   ///         vector is incorrectly sized.
   static void ComputeGeneralizedForceFromConstraintForces(
       const ConstraintVelProblemData<T>& problem_data,
@@ -450,7 +450,7 @@ class ConstraintSolver {
   ///           format described in documentation for SolveConstraintProblem.
   /// @param[out] generalized_acceleration The generalized acceleration, on
   ///             return.
-  /// @throws std::logic_error if @p generalized_acceleration is null or
+  /// @throws std::exception if @p generalized_acceleration is null or
   ///         @p cf vector is incorrectly sized.
   static void ComputeGeneralizedAcceleration(
       const ConstraintAccelProblemData<T>& problem_data,
@@ -477,7 +477,7 @@ class ConstraintSolver {
   /// @warning This method uses the method `problem_data.solve_inertia()` in
   ///          order to compute `v(t+dt)`, so the computational demands may
   ///          be significant.
-  /// @throws std::logic_error if `generalized_acceleration` is null or
+  /// @throws std::exception if `generalized_acceleration` is null or
   ///         `cf` vector is incorrectly sized.
   /// @pre `dt` is positive.
   static void ComputeGeneralizedAcceleration(
@@ -491,7 +491,7 @@ class ConstraintSolver {
   /// forces.
   /// @param cf The computed constraint forces, in the packed storage
   ///           format described in documentation for SolveConstraintProblem.
-  /// @throws std::logic_error if @p generalized_acceleration is null or
+  /// @throws std::exception if @p generalized_acceleration is null or
   ///         @p cf vector is incorrectly sized.
   static void ComputeGeneralizedAccelerationFromConstraintForces(
       const ConstraintAccelProblemData<T>& problem_data,
@@ -502,7 +502,7 @@ class ConstraintSolver {
   /// forces.
   /// @param cf The computed constraint forces, in the packed storage
   ///           format described in documentation for SolveConstraintProblem.
-  /// @throws std::logic_error if @p generalized_acceleration is null or
+  /// @throws std::exception if @p generalized_acceleration is null or
   ///         @p cf vector is incorrectly sized.
   static void ComputeGeneralizedAccelerationFromConstraintForces(
     const ConstraintVelProblemData<T>& problem_data,
@@ -513,7 +513,7 @@ class ConstraintSolver {
   /// impulses.
   /// @param cf The computed constraint impulses, in the packed storage
   ///           format described in documentation for SolveImpactProblem.
-  /// @throws std::logic_error if `generalized_delta_v` is null or
+  /// @throws std::exception if `generalized_delta_v` is null or
   ///         `cf` vector is incorrectly sized.
   static void ComputeGeneralizedVelocityChange(
       const ConstraintVelProblemData<T>& problem_data,
@@ -534,7 +534,7 @@ class ConstraintSolver {
   /// @param[out] contact_forces a non-null vector of a doublet of values, where
   ///             the iᵗʰ element represents the force along each basis
   ///             vector in the iᵗʰ contact frame.
-  /// @throws std::logic_error if `contact_forces` is null, if
+  /// @throws std::exception if `contact_forces` is null, if
   ///         `contact_forces` is not empty, if `cf` is not the
   ///         proper size, if the number of tangent directions is not one per
   ///         non-sliding contact (indicating that the contact problem might not
@@ -565,7 +565,7 @@ class ConstraintSolver {
   /// @param[out] contact_forces a non-null vector of a doublet of values,
   ///             where the iᵗʰ element represents the force along
   ///             each basis vector in the iᵗʰ contact frame.
-  /// @throws std::logic_error if `contact_forces` is null, if
+  /// @throws std::exception if `contact_forces` is null, if
   ///         `contact_forces` is not empty, if `cf` is not the
   ///         proper size, if the number of tangent directions is not one per
   ///         contact (indicating that the contact problem might not be 2D), if
@@ -816,7 +816,7 @@ ProblemData* ConstraintSolver<T>::UpdateProblemDataForUnilateralConstraints(
     int gv_dim,
     ProblemData* modified_problem_data) {
   // Verify that the modified problem data points to something.
-  DRAKE_DEMAND(modified_problem_data);
+  DRAKE_DEMAND(modified_problem_data != nullptr);
 
   // Get the number of equality constraints.
   const int num_eq_constraints = problem_data.kG.size();
@@ -882,7 +882,7 @@ void ConstraintSolver<T>::FormAndSolveConstraintLinearSystem(
   using std::max;
   using std::abs;
 
-  DRAKE_DEMAND(cf);
+  DRAKE_DEMAND(cf != nullptr);
 
   // Alias problem data.
   const std::vector<int>& sliding_contacts = problem_data.sliding_contacts;
@@ -944,7 +944,7 @@ void ConstraintSolver<T>::FormAndSolveConstraintLcp(
   using std::max;
   using std::abs;
 
-  DRAKE_DEMAND(cf);
+  DRAKE_DEMAND(cf != nullptr);
 
   // Alias problem data.
   const std::vector<int>& sliding_contacts = problem_data.sliding_contacts;
@@ -1528,9 +1528,9 @@ void ConstraintSolver<T>::UpdateDiscretizedTimeLcp(
     VectorX<T>* a,
     MatrixX<T>* MM,
     VectorX<T>* qq) {
-  DRAKE_DEMAND(MM);
-  DRAKE_DEMAND(qq);
-  DRAKE_DEMAND(a);
+  DRAKE_DEMAND(MM != nullptr);
+  DRAKE_DEMAND(qq != nullptr);
+  DRAKE_DEMAND(a != nullptr);
 
   // Look for early exit.
   if (qq->rows() == 0)
@@ -1620,9 +1620,9 @@ void ConstraintSolver<T>::ConstructBaseDiscretizedTimeLcp(
     MlcpToLcpData* mlcp_to_lcp_data,
     MatrixX<T>* MM,
     VectorX<T>* qq) {
-  DRAKE_DEMAND(MM);
-  DRAKE_DEMAND(qq);
-  DRAKE_DEMAND(mlcp_to_lcp_data);
+  DRAKE_DEMAND(MM != nullptr);
+  DRAKE_DEMAND(qq != nullptr);
+  DRAKE_DEMAND(mlcp_to_lcp_data != nullptr);
 
   // Get number of contacts and limits.
   const int num_contacts = problem_data.mu.size();
@@ -1704,7 +1704,7 @@ void ConstraintSolver<T>::ComputeInverseInertiaTimesGT(
     std::function<VectorX<T>(const VectorX<T>&)> G_transpose_mult,
     int m,
     MatrixX<T>* iM_GT) {
-  DRAKE_DEMAND(iM_GT);
+  DRAKE_DEMAND(iM_GT != nullptr);
   DRAKE_DEMAND(iM_GT->cols() == m);
 
   VectorX<T> basis(m);  // Basis vector.
@@ -1774,8 +1774,8 @@ void ConstraintSolver<T>::FormSustainedConstraintLinearSystem(
     const ConstraintAccelProblemData<T>& problem_data,
     const VectorX<T>& trunc_neg_invA_a,
     MatrixX<T>* MM, VectorX<T>* qq) {
-  DRAKE_DEMAND(MM);
-  DRAKE_DEMAND(qq);
+  DRAKE_DEMAND(MM != nullptr);
+  DRAKE_DEMAND(qq != nullptr);
 
   // Get numbers of types of contacts.
   const int num_sliding = problem_data.sliding_contacts.size();
@@ -1862,8 +1862,8 @@ void ConstraintSolver<T>::FormSustainedConstraintLcp(
     const ConstraintAccelProblemData<T>& problem_data,
     const VectorX<T>& trunc_neg_invA_a,
     MatrixX<T>* MM, VectorX<T>* qq) {
-  DRAKE_DEMAND(MM);
-  DRAKE_DEMAND(qq);
+  DRAKE_DEMAND(MM != nullptr);
+  DRAKE_DEMAND(qq != nullptr);
 
   // Get numbers of types of contacts.
   const int num_sliding = problem_data.sliding_contacts.size();
@@ -2069,8 +2069,8 @@ void ConstraintSolver<T>::FormImpactingConstraintLcp(
     const ConstraintVelProblemData<T>& problem_data,
     const VectorX<T>& trunc_neg_invA_a,
     MatrixX<T>* MM, VectorX<T>* qq) {
-  DRAKE_DEMAND(MM);
-  DRAKE_DEMAND(qq);
+  DRAKE_DEMAND(MM != nullptr);
+  DRAKE_DEMAND(qq != nullptr);
 
   // Get numbers of contacts.
   const int num_contacts = problem_data.mu.size();

@@ -1,5 +1,7 @@
 #include "drake/geometry/proximity/distance_to_point_callback.h"
 
+#include "drake/common/default_scalars.h"
+
 namespace drake {
 namespace geometry {
 namespace internal {
@@ -8,8 +10,7 @@ namespace point_distance {
 template <typename T>
 void SphereDistanceInSphereFrame(const fcl::Sphered& sphere,
                                  const Vector3<T>& p_SQ, Vector3<T>* p_SN,
-                                 T* distance, Vector3<T>* grad_S,
-                                 bool* is_grad_W_unique) {
+                                 T* distance, Vector3<T>* grad_S) {
   const double radius = sphere.radius;
   const T dist_SQ = p_SQ.norm();
   // The gradient is always in the direction from the center of the sphere to
@@ -23,9 +24,9 @@ void SphereDistanceInSphereFrame(const fcl::Sphered& sphere,
   const double tolerance = DistanceToPointRelativeTolerance(radius);
   // Unit vector in x-direction of S's frame.
   const Vector3<T> Sx = Vector3<T>::UnitX();
-  *is_grad_W_unique = (dist_SQ > tolerance);
+  const bool non_zero_displacement = (dist_SQ > tolerance);
   // Gradient vector expressed in S's frame.
-  *grad_S = *is_grad_W_unique ? p_SQ / dist_SQ : Sx;
+  *grad_S = non_zero_displacement ? p_SQ / dist_SQ : Sx;
 
   // p_SN is the position of a witness point N in the geometry frame S.
   *p_SN = T(radius) * (*grad_S);
@@ -40,12 +41,10 @@ template <typename T>
 void ComputeDistanceToPrimitive(const fcl::Sphered& sphere,
                                 const math::RigidTransform<T>& X_WG,
                                 const Vector3<T>& p_WQ, Vector3<T>* p_GN,
-                                T* distance, Vector3<T>* grad_W,
-                                bool* is_grad_W_unique) {
+                                T* distance, Vector3<T>* grad_W) {
   const Vector3<T> p_GQ_G = X_WG.inverse() * p_WQ;
   Vector3<T> grad_G;
-  SphereDistanceInSphereFrame(sphere, p_GQ_G, p_GN, distance, &grad_G,
-                              is_grad_W_unique);
+  SphereDistanceInSphereFrame(sphere, p_GQ_G, p_GN, distance, &grad_G);
 
   // Gradient vector expressed in World frame.
   *grad_W = X_WG.rotation() * grad_G;
@@ -55,8 +54,7 @@ template <typename T>
 void ComputeDistanceToPrimitive(const fcl::Halfspaced& halfspace,
                                 const math::RigidTransform<T>& X_WG,
                                 const Vector3<T>& p_WQ, Vector3<T>* p_GN,
-                                T* distance, Vector3<T>* grad_W,
-                                bool* is_grad_W_unique) {
+                                T* distance, Vector3<T>* grad_W) {
   // FCL stores the halfspace as {x | nᵀ * x > d}, with n being a unit length
   // normal vector. Both n and x are expressed in the halfspace frame.
   // In Drake, the halfspace is *always* defined as n_G = (0, 0, 1), d = 0.
@@ -69,15 +67,13 @@ void ComputeDistanceToPrimitive(const fcl::Halfspaced& halfspace,
   *distance = p_GQ(2);
   *p_GN << p_GQ(0), p_GQ(1), 0;
   *grad_W = X_WG.rotation() * n_G;
-  *is_grad_W_unique = true;
 }
 
 template <typename T>
 void ComputeDistanceToPrimitive(const fcl::Capsuled& capsule,
                                 const math::RigidTransform<T>& X_WG,
                                 const Vector3<T>& p_WQ, Vector3<T>* p_GN,
-                                T* distance, Vector3<T>* grad_W,
-                                bool* is_grad_W_unique) {
+                                T* distance, Vector3<T>* grad_W) {
   const double radius = capsule.radius;
   const double half_length = capsule.lz / 2;
 
@@ -113,8 +109,7 @@ void ComputeDistanceToPrimitive(const fcl::Capsuled& capsule,
     // Position vector of the nearest point N expressed in S's frame.
     Vector3<T> grad_S;
     Vector3<T> p_SN;
-    SphereDistanceInSphereFrame(sphere_S, p_SQ, &p_SN, distance, &grad_S,
-                                is_grad_W_unique);
+    SphereDistanceInSphereFrame(sphere_S, p_SQ, &p_SN, distance, &grad_S);
     *grad_W = X_WG.rotation() * grad_S;  // grad_S = grad_G because R_GS = I.
     *p_GN = p_GS + p_SN;                 // p_SN = p_SN_G because R_GS = I.
   } else {
@@ -150,8 +145,7 @@ void ComputeDistanceToPrimitive(const fcl::Capsuled& capsule,
     const fcl::Sphered sphere_S(radius);
     Vector3<T> p_GM;
     Vector3<T> grad_G;
-    SphereDistanceInSphereFrame(sphere_S, p_GR, &p_GM, distance, &grad_G,
-                                is_grad_W_unique);
+    SphereDistanceInSphereFrame(sphere_S, p_GR, &p_GM, distance, &grad_G);
     *p_GN << p_GM.x(), p_GM.y(), p_GQ.z();
     *grad_W = X_WG.rotation() * grad_G;
   }
@@ -160,7 +154,7 @@ void ComputeDistanceToPrimitive(const fcl::Capsuled& capsule,
 #define INSTANTIATE_DISTANCE_TO_PRIMITIVE(Shape, S)                         \
 template void ComputeDistanceToPrimitive<S>(                                \
     const fcl::Shape&, const math::RigidTransform<S>&, const Vector3<S>&,   \
-    Vector3<S>*, S*, Vector3<S>*, bool*)
+    Vector3<S>*, S*, Vector3<S>*)
 
 // INSTANTIATE_DISTANCE_TO_PRIMITIVE(Sphered, double);
 // INSTANTIATE_DISTANCE_TO_PRIMITIVE(Sphered, AutoDiffXd);
@@ -170,58 +164,6 @@ template void ComputeDistanceToPrimitive<S>(                                \
 // INSTANTIATE_DISTANCE_TO_PRIMITIVE(Capsuled, AutoDiffXd);
 
 #undef INSTANTIATE_DISTANCE_TO_PRIMITIVE
-
-template <typename T>
-SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(
-    const fcl::Sphered& sphere) {
-  T distance{};
-  Vector3<T> p_GN_G, grad_W;
-  bool is_grad_W_unique{};
-  ComputeDistanceToPrimitive(sphere, X_WG_, p_WQ_, &p_GN_G, &distance, &grad_W,
-                             &is_grad_W_unique);
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  return SignedDistanceToPoint<T>{geometry_id_, p_GN_G, distance, grad_W,
-                                  is_grad_W_unique};
-#pragma GCC diagnostic pop
-}
-
-template <typename T>
-SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(
-    const fcl::Halfspaced& halfspace) {
-  T distance{};
-  Vector3<T> p_GN_G, grad_W;
-  bool is_grad_W_unique{};
-  ComputeDistanceToPrimitive(halfspace, X_WG_, p_WQ_, &p_GN_G, &distance,
-                             &grad_W, &is_grad_W_unique);
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  return SignedDistanceToPoint<T>{geometry_id_, p_GN_G, distance, grad_W,
-                                  is_grad_W_unique};
-#pragma GCC diagnostic pop
-}
-
-template <typename T>
-SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(
-    const fcl::Capsuled& capsule) {
-  // TODO(SeanCurtis-TRI): This would be better if `SignedDistanceToPoint`
-  //  could be default constructed in an uninitialized state and then
-  //  pointers to its contents could be passed directly to ComputeDistance...
-  //  This would eliminate the inevitable copy in the constructor.
-  T distance{};
-  Vector3<T> p_GN_G, grad_W;
-  bool is_grad_W_unique{};
-  ComputeDistanceToPrimitive(capsule, X_WG_, p_WQ_, &p_GN_G, &distance, &grad_W,
-                             &is_grad_W_unique);
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  return SignedDistanceToPoint<T>{geometry_id_, p_GN_G, distance, grad_W,
-                                  is_grad_W_unique};
-#pragma GCC diagnostic pop
-}
 
 template <typename T>
 SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(const fcl::Boxd& box) {
@@ -235,15 +177,25 @@ SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(const fcl::Boxd& box) {
   bool is_Q_on_edge_or_vertex{};
   std::tie(p_GN_G, grad_G, is_Q_on_edge_or_vertex) =
       ComputeDistanceToBox(h, p_GQ_G);
-  const bool is_grad_W_unique = !is_Q_on_edge_or_vertex;
   const Vector3<T> grad_W = X_WG_.rotation() * grad_G;
   const Vector3<T> p_WN = X_WG_ * p_GN_G;
   T distance = grad_W.dot(p_WQ_ - p_WN);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  return SignedDistanceToPoint<T>{geometry_id_, p_GN_G, distance, grad_W,
-                                  is_grad_W_unique};
-#pragma GCC diagnostic pop
+  return SignedDistanceToPoint<T>{geometry_id_, p_GN_G, distance, grad_W};
+}
+
+template <typename T>
+SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(
+    const fcl::Capsuled& capsule) {
+  // TODO(SeanCurtis-TRI): This would be better if `SignedDistanceToPoint`
+  //  could be default constructed in an uninitialized state and then
+  //  pointers to its contents could be passed directly to ComputeDistance...
+  //  This would eliminate the inevitable copy in the constructor.
+  T distance{};
+  Vector3<T> p_GN_G, grad_W;
+  ComputeDistanceToPrimitive(capsule, X_WG_, p_WQ_, &p_GN_G, &distance,
+                             &grad_W);
+
+  return SignedDistanceToPoint<T>{geometry_id_, p_GN_G, distance, grad_W};
 }
 
 template <typename T>
@@ -299,10 +251,9 @@ SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(
     const T r = sqrt(xyz(0) * xyz(0) + xyz(1) * xyz(1));
     return Vector2<T>(r, xyz(2));
   };
-  // We compute the the basis vector Br in G's frame. Although a 3D vector, it
-  // is stored implicitly in a 2D vector, because v_GBr(2) must be zero. If
-  // Q is within a tolerance from the center line, v_GBr = <1, 0, 0> by
-  // convention.
+  // We compute the basis vector Br in G's frame. Although a 3D vector, it is
+  // stored implicitly in a 2D vector, because v_GBr(2) must be zero. If Q is
+  // within a tolerance from the center line, v_GBr = <1, 0, 0> by convention.
   const T r_Q = sqrt(p_GQ(0) * p_GQ(0) + p_GQ(1) * p_GQ(1));
   const bool near_center_line =
       (r_Q < DistanceToPointRelativeTolerance(cylinder.radius));
@@ -336,15 +287,90 @@ SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(
   const Vector3<T> grad_W = R_WG * grad_G;
   const Vector3<T> p_WN = X_WG_ * p_GN;
   T distance = grad_W.dot(p_WQ_ - p_WN);
-  // TODO(hongkai.dai): grad_W is not unique when Q is on the top or
-  // bottom rims of the cylinder, or when it is inside the box and on the
-  // central axis, with the nearest feature being the barrel of the cylinder.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  return SignedDistanceToPoint<T>{geometry_id_, p_GN, distance, grad_W,
-                                  true /* is_grad_W_unique */};
-#pragma GCC diagnostic pop
+  return SignedDistanceToPoint<T>{geometry_id_, p_GN, distance, grad_W};
 }
+
+template <typename T>
+SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(
+    const fcl::Ellipsoidd& ellipsoid) {
+  if constexpr (std::is_same_v<T, double>) {
+    // TODO(SeanCurtis-TRI): Replace this short-term hack with something that
+    //  provides higher precision. Can an iterative method provide derivatives?
+    //  See: https://www.geometrictools.com/Documentation/DistancePointEllipseEllipsoid.pdf
+
+    // For now, we'll simply use FCL's sphere-ellipsoid algorithm to compute
+    // the signed distance for a zero-radius sphere. (Note: this uses the
+    // generic GJK-EPA algorithm pair).
+    const fcl::Sphered sphere_Q(0.0);
+
+    fcl::DistanceRequestd request;
+    request.enable_nearest_points = true;
+    request.enable_signed_distance = true;
+    request.distance_tolerance = 1e-6;
+    request.gjk_solver_type = fcl::GJKSolverType::GST_LIBCCD;
+
+    // By passing in poses X_WG and X_WQ, the result will likewise be in the
+    // world frame.
+    fcl::DistanceResultd result_W;
+
+    fcl::distance(&ellipsoid, X_WG_.GetAsIsometry3(),
+                  &sphere_Q, math::RigidTransformd(p_WQ_).GetAsIsometry3(),
+                  request, result_W);
+
+    const Vector3d& p_WN = result_W.nearest_points[0];
+    const Vector3d p_GN = X_WG_.inverse() * p_WN;
+    const Vector3d& radii = ellipsoid.radii;
+    // The gradient is always perpendicular to the ellipsoid at the witness
+    // point on the ellipsoid surface. Therefore, for the implicit equation of
+    // the ellipsoid:
+    //    f(x, y, z) = x² / a² + y² / b² + z² / c² - 1 = 0
+    // Its gradient is normal to the surface.
+    //    ∇f = <2x / a², 2y / b², 2z / c²>
+    //    n = ∇f / |∇f|
+    // We are assured that all radii are strictly greater than zero (see the
+    // constructor for geometry::Ellipsoid), so we don't risk a divide by zero
+    // and it likewise guarantees that this gradient vector will always be
+    // normalizable and unique; the point on the surface of the ellipsoid can
+    // *never* be the zero vector. Because we're normalizing, we omit the scale
+    // factor of 2 -- we'll just be dividing it right back out.
+    // This gives us a good normal, regardless of how close to the surface the
+    // query point Q is.
+    const Vector3d grad_G = Vector3d(p_GN.x() / (radii.x() * radii.x()),
+                                     p_GN.y() / (radii.y() * radii.y()),
+                                     p_GN.z() / (radii.z() * radii.z()))
+                                .normalized();
+
+    const Vector3d grad_W = X_WG_.rotation() * grad_G;
+    return SignedDistanceToPoint<T>(geometry_id_, p_GN, result_W.min_distance,
+                                    grad_W);
+  } else {
+    // ScalarSupport<AutoDiffXd> should preclude ever calling this with
+    // T = AutoDiffXd.
+    DRAKE_UNREACHABLE();
+  }
+}
+
+template <typename T>
+SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(
+    const fcl::Halfspaced& halfspace) {
+  T distance{};
+  Vector3<T> p_GN_G, grad_W;
+  ComputeDistanceToPrimitive(halfspace, X_WG_, p_WQ_, &p_GN_G, &distance,
+                             &grad_W);
+
+  return SignedDistanceToPoint<T>{geometry_id_, p_GN_G, distance, grad_W};
+}
+
+template <typename T>
+SignedDistanceToPoint<T> DistanceToPoint<T>::operator()(
+    const fcl::Sphered& sphere) {
+  T distance{};
+  Vector3<T> p_GN_G, grad_W;
+  ComputeDistanceToPrimitive(sphere, X_WG_, p_WQ_, &p_GN_G, &distance, &grad_W);
+
+  return SignedDistanceToPoint<T>{geometry_id_, p_GN_G, distance, grad_W};
+}
+
 
 template <typename T>
 template <int dim, typename U>
@@ -457,11 +483,12 @@ DistanceToPoint<T>::ComputeDistanceToBox(const Vector<double, dim>& h,
 
 bool ScalarSupport<double>::is_supported(fcl::NODE_TYPE node_type) {
   switch (node_type) {
-    case fcl::GEOM_SPHERE:
     case fcl::GEOM_BOX:
-    case fcl::GEOM_CYLINDER:
-    case fcl::GEOM_HALFSPACE:
     case fcl::GEOM_CAPSULE:
+    case fcl::GEOM_CYLINDER:
+    case fcl::GEOM_ELLIPSOID:
+    case fcl::GEOM_HALFSPACE:
+    case fcl::GEOM_SPHERE:
       return true;
     default:
       return false;
@@ -506,25 +533,29 @@ bool Callback(fcl::CollisionObjectd* object_A_ptr,
 
     SignedDistanceToPoint<T> distance;
     switch (collision_geometry->getNodeType()) {
-      case fcl::GEOM_SPHERE:
-        distance = distance_to_point(
-            *static_cast<const fcl::Sphered*>(collision_geometry));
-        break;
       case fcl::GEOM_BOX:
         distance = distance_to_point(
             *static_cast<const fcl::Boxd*>(collision_geometry));
+        break;
+      case fcl::GEOM_CAPSULE:
+        distance = distance_to_point(
+            *static_cast<const fcl::Capsuled*>(collision_geometry));
         break;
       case fcl::GEOM_CYLINDER:
         distance = distance_to_point(
             *static_cast<const fcl::Cylinderd*>(collision_geometry));
         break;
+      case fcl::GEOM_ELLIPSOID:
+        distance = distance_to_point(
+            *static_cast<const fcl::Ellipsoidd*>(collision_geometry));
+        break;
       case fcl::GEOM_HALFSPACE:
         distance = distance_to_point(
             *static_cast<const fcl::Halfspaced*>(collision_geometry));
         break;
-      case fcl::GEOM_CAPSULE:
+      case fcl::GEOM_SPHERE:
         distance = distance_to_point(
-            *static_cast<const fcl::Capsuled*>(collision_geometry));
+            *static_cast<const fcl::Sphered*>(collision_geometry));
         break;
       default:
         // Returning false tells fcl to continue to other objects.
@@ -539,10 +570,9 @@ bool Callback(fcl::CollisionObjectd* object_A_ptr,
   return false;  // Returning false tells fcl to continue to other objects.
 }
 
-template bool Callback<double>(fcl::CollisionObjectd*, fcl::CollisionObjectd*,
-                               void*, double&);
-template bool Callback<AutoDiffXd>(fcl::CollisionObjectd*,
-                                   fcl::CollisionObjectd*, void*, double&);
+DRAKE_DEFINE_FUNCTION_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_NONSYMBOLIC_SCALARS((
+    &Callback<T>
+))
 
 }  // namespace point_distance
 }  // namespace internal

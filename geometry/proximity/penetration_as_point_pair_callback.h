@@ -5,7 +5,7 @@
 
 #include <fcl/fcl.h>
 
-#include "drake/geometry/proximity/collision_filter_legacy.h"
+#include "drake/geometry/proximity/collision_filter.h"
 #include "drake/geometry/query_results/penetration_as_point_pair.h"
 #include "drake/math/rigid_transform.h"
 
@@ -25,15 +25,15 @@ namespace penetration_as_point_pair {
 template <typename T>
 struct CallbackData {
   CallbackData(
-      const CollisionFilterLegacy* collision_filter_in,
+      const CollisionFilter* collision_filter_in,
       const std::unordered_map<GeometryId, math::RigidTransform<T>>* X_WGs_in,
       std::vector<PenetrationAsPointPair<T>>* point_pairs_in)
       : collision_filter(*collision_filter_in),
         X_WGs(*X_WGs_in),
         point_pairs(*point_pairs_in) {
-    DRAKE_DEMAND(collision_filter_in);
-    DRAKE_DEMAND(X_WGs_in);
-    DRAKE_DEMAND(point_pairs_in);
+    DRAKE_DEMAND(collision_filter_in != nullptr);
+    DRAKE_DEMAND(X_WGs_in != nullptr);
+    DRAKE_DEMAND(point_pairs_in != nullptr);
     request.num_max_contacts = 1;
     request.enable_contact = true;
     // NOTE: As of 5/1/2018 the GJK implementation of Libccd appears to be
@@ -46,7 +46,7 @@ struct CallbackData {
   }
 
   /* The collision filter system.  */
-  const CollisionFilterLegacy& collision_filter;
+  const CollisionFilter& collision_filter;
 
   /* The parameters for the fcl object-object collision function.  */
   fcl::CollisionRequestd request;

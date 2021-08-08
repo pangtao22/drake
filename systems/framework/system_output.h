@@ -52,7 +52,7 @@ class SystemOutput {
 
   /** Returns the last-saved value of output port `index` as a `BasicVector<T>`,
   although the actual concrete type is preserved from the actual output port.
-  @throws std::bad_cast if the port is not vector-valued. */
+  @throws std::exception if the port is not vector-valued. */
   const BasicVector<T>* get_vector_data(int index) const {
     DRAKE_ASSERT(0 <= index && index < num_ports());
     return &port_values_[index]->template get_value<BasicVector<T>>();
@@ -73,7 +73,7 @@ class SystemOutput {
   System. The object's concrete type is preserved from the output port. Most
   users should just call `System<T>::CalcOutputs()` to get all the output
   port values at once.
-  @throws std::bad_cast if the port is not vector-valued. */
+  @throws std::exception if the port is not vector-valued. */
   BasicVector<T>* GetMutableVectorData(int index) {
     DRAKE_ASSERT(0 <= index && index < num_ports());
     return &port_values_[index]->template get_mutable_value<BasicVector<T>>();
@@ -91,9 +91,11 @@ class SystemOutput {
   }
 
   // Gets the id of the subsystem that created this output.
+  // See @ref system_compatibility.
   internal::SystemId get_system_id() const { return system_id_; }
 
   // Records the id of the subsystem that created this output.
+  // See @ref system_compatibility.
   void set_system_id(internal::SystemId id) { system_id_ = id; }
 
   std::vector<copyable_unique_ptr<AbstractValue>> port_values_;

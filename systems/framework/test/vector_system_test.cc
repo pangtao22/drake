@@ -148,7 +148,8 @@ TEST_F(VectorSystemTest, TopologyFailFast) {
     TestVectorSystem dut;
     DRAKE_EXPECT_NO_THROW(dut.CreateDefaultContext());
     dut.DeclareAbstractOutputPort(
-        []() { return AbstractValue::Make<int>(0); },  // Dummies.
+        kUseDefaultName,
+        []() { return AbstractValue::Make<int>(); },  // Dummies.
         [](const ContextBase&, AbstractValue*) {});
     EXPECT_THROW(dut.CreateDefaultContext(), std::exception);
   }
@@ -368,7 +369,7 @@ TEST_F(VectorSystemTest, NoFeedthroughContinuousTimeSystemTest) {
 // be precise about when it evaluates its inputs.)
 TEST_F(VectorSystemTest, ImplicitlyNoFeedthroughTest) {
   static_assert(
-      std::is_base_of<VectorSystem<double>, Integrator<double>>::value,
+      std::is_base_of_v<VectorSystem<double>, Integrator<double>>,
       "This test assumes that Integrator is implemented in terms of "
       "VectorSystem; if that changes, copy its old implementation here "
       "so that this test is unchanged.");
@@ -481,7 +482,8 @@ class DirectScalarTypeConversionSystem : public VectorSystem<T> {
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(DirectScalarTypeConversionSystem);
 
   DirectScalarTypeConversionSystem()
-      : VectorSystem<T>(MakeConverter(), 0, 0) {
+      : VectorSystem<T>(
+            SystemTypeTag<DirectScalarTypeConversionSystem>(), 0, 0) {
     // This will fail at compile-time if T is ever symbolic::Expression.
     const T neg_one = test::copysign_int_to_non_symbolic_scalar(-1, T{1.0});
     DRAKE_DEMAND(neg_one == T{-1.0});
@@ -490,16 +492,20 @@ class DirectScalarTypeConversionSystem : public VectorSystem<T> {
   explicit DirectScalarTypeConversionSystem(
       const DirectScalarTypeConversionSystem<double>&, int dummy = 0)
       : DirectScalarTypeConversionSystem<T>() {}
-
- private:
-  static SystemScalarConverter MakeConverter() {
-    // Only support double => AutoDiffXd.
-    SystemScalarConverter result;
-    result.AddIfSupported<
-      systems::DirectScalarTypeConversionSystem, AutoDiffXd, double>();
-    return result;
-  }
 };
+
+}  // namespace
+
+// Only support double => AutoDiffXd.
+namespace scalar_conversion {
+template <> struct Traits<DirectScalarTypeConversionSystem> {
+  template <typename T, typename U>
+  using supported = typename std::bool_constant<
+    std::is_same_v<U, double> && !std::is_same_v<T, symbolic::Expression>>;
+};
+}  // namespace scalar_conversion
+
+namespace {
 
 TEST_F(VectorSystemTest, DirectToAutoDiffXdTest) {
   DirectScalarTypeConversionSystem<double> dut;
@@ -527,12 +533,12 @@ TEST_F(VectorSystemTest, MissingMethodsContinuousTimeSystemTest) {
   std::unique_ptr<ContinuousState<double>> derivatives =
       dut.AllocateTimeDerivatives();
   DRAKE_EXPECT_THROWS_MESSAGE(
-      dut.CalcTimeDerivatives(*context, derivatives.get()), std::exception,
+      dut.CalcTimeDerivatives(*context, derivatives.get()),
       ".*TimeDerivatives.*derivatives->size.. == 0.*failed.*");
 
   const auto& output = dut.get_output_port();
   DRAKE_EXPECT_THROWS_MESSAGE(
-      output.Eval(*context), std::exception,
+      output.Eval(*context),
       ".*Output.*'output->size.. == 0.*failed.*");
 }
 
@@ -555,12 +561,11 @@ TEST_F(VectorSystemTest, MissingMethodsDiscreteTimeSystemTest) {
   auto discrete_updates = dut.AllocateDiscreteVariables();
   DRAKE_EXPECT_THROWS_MESSAGE(
       dut.CalcDiscreteVariableUpdates(*context, discrete_updates.get()),
-      std::exception,
       ".*DiscreteVariableUpdates.*next_state->size.. == 0.*failed.*");
 
   const auto& output = dut.get_output_port();
   DRAKE_EXPECT_THROWS_MESSAGE(
-      output.Eval(*context), std::exception,
+      output.Eval(*context),
       ".*Output.*'output->size.. == 0.*failed.*");
 }
 

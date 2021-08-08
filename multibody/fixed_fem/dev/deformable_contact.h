@@ -6,13 +6,14 @@
 #include <Eigen/Dense>
 
 #include "drake/common/eigen_types.h"
+#include "drake/geometry/proximity/bvh.h"
+#include "drake/geometry/proximity/deformable_volume_mesh.h"
 #include "drake/geometry/proximity/surface_mesh.h"
-#include "drake/geometry/proximity/volume_mesh.h"
 #include "drake/math/rigid_transform.h"
 
 namespace drake {
 namespace multibody {
-namespace fixed_fem {
+namespace fem {
 
 // TODO(SeanCurtis-TRI) The application of the template parameter T is *not*
 //  well reasoned. Currently, we're assuming that *all* quantities can and
@@ -87,10 +88,12 @@ class DeformableContactSurface {
 
  If there is no contact, the result will be empty.
 
- @param tet_mesh_D   The tetrahedral mesh, with vertex positions measured and
-                     expressed in the *deformable* mesh's frame D.
+ @param tet_mesh_D   The deformable tetrahedral mesh, with vertex positions
+                     measured and expressed in the *deformable* mesh's frame D.
  @param tri_mesh_R   The triangle mesh, with vertex positions measured and
                      expressed in the *rigid* mesh's frame R.
+ @param bvh_R        The bounding volume hierarchy for the triangle mesh,
+                     measured and expressed in the *rigid* mesh's frame R.
  @param X_DR         The pose of the triangle mesh in the volume mesh's frame.
  @returns The collection of contact data associated with an implicit contact
           surface formed by the intersection of the volume and surface meshes.
@@ -98,9 +101,11 @@ class DeformableContactSurface {
           "empty".  */
 template <typename T>
 DeformableContactSurface<T> ComputeTetMeshTriMeshContact(
-    const geometry::VolumeMesh<T>& tet_mesh_D,
+    const geometry::internal::DeformableVolumeMesh<T>& tet_mesh_D,
     const geometry::SurfaceMesh<double>& tri_mesh_R,
+    const geometry::internal::Bvh<geometry::internal::Obb,
+                                  geometry::SurfaceMesh<double>>& bvh_R,
     const math::RigidTransform<T>& X_DR);
-}  // namespace fixed_fem
+}  // namespace fem
 }  // namespace multibody
 }  // namespace drake

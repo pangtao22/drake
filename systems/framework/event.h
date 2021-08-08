@@ -443,13 +443,6 @@ class Event {
   virtual ~Event() {}
   #endif
 
-  /** @name Does not allow move or assignment; copy constructor is private. */
-  ///@{
-  void operator=(const Event&) = delete;
-  Event(Event&&) = delete;
-  void operator=(Event&&) = delete;
-  ///@}
-
   // TODO(eric.cousineau): Deprecate and remove this alias.
   using TriggerType = systems::TriggerType;
 
@@ -485,7 +478,7 @@ class Event {
    * can be nullptr, which means this event does not have any associated
    * data.
    */
-  EventData* get_mutable_event_data() { return event_data_.get(); }
+  EventData* get_mutable_event_data() { return event_data_.get_mutable(); }
 
   // Note: Users should not be calling this.
   #if !defined(DRAKE_DOXYGEN_CXX)
@@ -503,7 +496,7 @@ class Event {
    * Adds a clone of `this` event to the event collection `events`, with
    * the given trigger type. If `this` event has an unknown trigger type, then
    * any trigger type is acceptable. Otherwise the given trigger type must
-   * match match the trigger type stored in `this` event.
+   * match the trigger type stored in `this` event.
    * @pre `trigger_type` must match the current trigger type unless that is
    *      unknown.
    * @pre `events` must not be null.
@@ -527,10 +520,7 @@ class Event {
   }
 
  protected:
-  Event(const Event& other) : trigger_type_(other.trigger_type_) {
-    if (other.event_data_ != nullptr)
-      set_event_data(other.event_data_->Clone());
-  }
+  DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(Event);
 
   // Note: Users should not be calling this.
   #if !defined(DRAKE_DOXYGEN_CXX)
@@ -554,7 +544,7 @@ class Event {
 
  private:
   TriggerType trigger_type_;
-  std::unique_ptr<EventData> event_data_{nullptr};
+  copyable_unique_ptr<EventData> event_data_{nullptr};
 };
 
 /**
@@ -607,9 +597,7 @@ struct PeriodicEventDataComparator {
 template <typename T>
 class PublishEvent final : public Event<T> {
  public:
-  void operator=(const PublishEvent&) = delete;
-  PublishEvent(PublishEvent&&) = delete;
-  void operator=(PublishEvent&&) = delete;
+  DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(PublishEvent);
   bool is_discrete_update() const override { return false; }
 
   /** @name Publish Callbacks
@@ -682,13 +670,11 @@ class PublishEvent final : public Event<T> {
   }
 
  private:
-  PublishEvent(const PublishEvent&) = default;
-
   void DoAddToComposite(TriggerType trigger_type,
                         CompositeEventCollection<T>* events) const final {
-    auto event = std::unique_ptr<PublishEvent<T>>(this->DoClone());
-    event->set_trigger_type(trigger_type);
-    events->add_publish_event(std::move(event));
+    PublishEvent event(*this);
+    event.set_trigger_type(trigger_type);
+    events->AddPublishEvent(std::move(event));
   }
 
   // Clones PublishEvent-specific data.
@@ -713,9 +699,7 @@ class PublishEvent final : public Event<T> {
 template <typename T>
 class DiscreteUpdateEvent final : public Event<T> {
  public:
-  void operator=(const DiscreteUpdateEvent&) = delete;
-  DiscreteUpdateEvent(DiscreteUpdateEvent&&) = delete;
-  void operator=(DiscreteUpdateEvent&&) = delete;
+  DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(DiscreteUpdateEvent);
   bool is_discrete_update() const override { return true; }
 
   /** @name Discrete Update Callbacks
@@ -794,13 +778,11 @@ class DiscreteUpdateEvent final : public Event<T> {
   }
 
  private:
-  DiscreteUpdateEvent(const DiscreteUpdateEvent&) = default;
-
   void DoAddToComposite(TriggerType trigger_type,
                         CompositeEventCollection<T>* events) const final {
-    auto event = std::unique_ptr<DiscreteUpdateEvent<T>>(this->DoClone());
-    event->set_trigger_type(trigger_type);
-    events->add_discrete_update_event(std::move(event));
+    DiscreteUpdateEvent<T> event(*this);
+    event.set_trigger_type(trigger_type);
+    events->AddDiscreteUpdateEvent(std::move(event));
   }
 
   // Clones DiscreteUpdateEvent-specific data.
@@ -825,9 +807,7 @@ class DiscreteUpdateEvent final : public Event<T> {
 template <typename T>
 class UnrestrictedUpdateEvent final : public Event<T> {
  public:
-  void operator=(const UnrestrictedUpdateEvent&) = delete;
-  UnrestrictedUpdateEvent(UnrestrictedUpdateEvent&&) = delete;
-  void operator=(UnrestrictedUpdateEvent&&) = delete;
+  DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(UnrestrictedUpdateEvent);
   bool is_discrete_update() const override { return false; }
 
   /** @name Unrestricted Update Callbacks
@@ -906,13 +886,11 @@ class UnrestrictedUpdateEvent final : public Event<T> {
   }
 
  private:
-  UnrestrictedUpdateEvent(const UnrestrictedUpdateEvent&) = default;
-
   void DoAddToComposite(TriggerType trigger_type,
                         CompositeEventCollection<T>* events) const final {
-    auto event = std::unique_ptr<UnrestrictedUpdateEvent<T>>(this->DoClone());
-    event->set_trigger_type(trigger_type);
-    events->add_unrestricted_update_event(std::move(event));
+    UnrestrictedUpdateEvent<T> event(*this);
+    event.set_trigger_type(trigger_type);
+    events->AddUnrestrictedUpdateEvent(std::move(event));
   }
 
   // Clones event data specific to UnrestrictedUpdateEvent.

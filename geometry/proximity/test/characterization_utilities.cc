@@ -12,7 +12,6 @@
 #include "drake/geometry/proximity/proximity_utilities.h"
 #include "drake/geometry/proximity_engine.h"
 #include "drake/geometry/utilities.h"
-#include "drake/math/orthonormal_basis.h"
 #include "drake/math/rotation_matrix.h"
 
 namespace drake {
@@ -423,7 +422,8 @@ RigidTransform<T> AlignPlanes(const Vector3<T>& P, const Vector3<T>& m,
     if (cos_theta < -kAlmostOne) {
       /* We need a normal perpendicular to nhat. Extract it from a valid
        basis. */
-      const Matrix3<T> basis = math::ComputeBasisFromAxis(2, nhat);
+      const math::RotationMatrix<T> basis =
+          math::RotationMatrix<T>::MakeFromOneVector(nhat, 2);
       const Vector3<T> rhat = basis.col(0);
       R = math::RotationMatrix<T>(AngleAxis<T>{M_PI, rhat});
     } else {
@@ -443,18 +443,10 @@ RigidTransform<T> AlignPlanes(const Vector3<T>& P, const Vector3<T>& m,
   return RigidTransform<T>{R, p_QP_A};
 }
 
-template RigidTransform<double> AlignPlanes<double>(const Vector3<double>&,
-                                                    const Vector3<double>&,
-                                                    const Vector3<double>&,
-                                                    const Vector3<double>&);
-template RigidTransform<AutoDiffXd> AlignPlanes<AutoDiffXd>(
-    const Vector3<AutoDiffXd>&, const Vector3<AutoDiffXd>&,
-    const Vector3<AutoDiffXd>&, const Vector3<AutoDiffXd>&);
-
 template <typename T>
 void CharacterizeResultTest<T>::RunCallback(
     const QueryInstance& query, fcl::CollisionObjectd* obj_A,
-    fcl::CollisionObjectd* obj_B, const CollisionFilterLegacy* collision_filter,
+    fcl::CollisionObjectd* obj_B, const CollisionFilter* collision_filter,
     const std::unordered_map<GeometryId, RigidTransform<T>>* X_WGs)
     const {
   callback_->ClearResults();
@@ -469,7 +461,6 @@ void CharacterizeResultTest<T>::RunCallback(
     case kThrows:
       DRAKE_ASSERT_THROWS_MESSAGE(
           callback_->Invoke(obj_A, obj_B, collision_filter, X_WGs),
-          std::exception,
           ".+ queries between shapes .+ and .+ are not supported.+");
       break;
   }
@@ -627,7 +618,7 @@ GeometryId CharacterizeResultTest<T>::EncodeData(fcl::CollisionObjectd* obj) {
   const GeometryId id = GeometryId::get_new_id();
   const EncodedData data(id, true);
   data.write_to(obj);
-  collision_filter_.AddGeometry(data.encoding());
+  collision_filter_.AddGeometry(data.id());
   return id;
 }
 
@@ -724,6 +715,10 @@ template <typename T>
 Sphere CharacterizeResultTest<T>::sphere(bool) {
   return Sphere(kDistance * 100);
 }
+
+DRAKE_DEFINE_FUNCTION_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_NONSYMBOLIC_SCALARS((
+    &AlignPlanes<T>
+))
 
 }  // namespace internal
 }  // namespace geometry

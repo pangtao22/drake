@@ -26,23 +26,23 @@ namespace internal {
 template <typename T, bool use_copy>
 struct ValueTraitsImpl {};
 template <typename T>
-using ValueTraits = ValueTraitsImpl<T, std::is_copy_constructible<T>::value>;
+using ValueTraits = ValueTraitsImpl<T, std::is_copy_constructible_v<T>>;
 
 // SFINAE type for whether Value<T>(Arg1, Args...) should be a forwarding ctor.
 // In our ctor overload that copies into the storage, choose_copy == true.
 template <bool choose_copy, typename T, typename Arg1, typename... Args>
 using ValueForwardingCtorEnabled = typename std::enable_if_t<
   // There must be such a constructor.
-  std::is_constructible<T, Arg1, Args...>::value &&
+  std::is_constructible_v<T, Arg1, Args...> &&
   // Disable this ctor when given T directly; in that case, we
   // should call our Value(const T&) ctor above, not try to copy-
   // construct a T(const T&).
-  !std::is_same<T, Arg1>::value &&
-  !std::is_same<T&, Arg1>::value &&
+  !std::is_same_v<T, Arg1> &&
+  !std::is_same_v<T&, Arg1> &&
   // Only allow real ctors, not POD "constructor"s.
-  !std::is_fundamental<T>::value &&
+  !std::is_fundamental_v<T> &&
   // Disambiguate our copy implementation from our clone implementation.
-  (choose_copy == std::is_copy_constructible<T>::value)>;
+  (choose_copy == std::is_copy_constructible_v<T>)>;
 
 template <typename T>
 using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
@@ -69,6 +69,15 @@ class AbstractValue {
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(AbstractValue)
 
   virtual ~AbstractValue();
+
+  /// Constructs an AbstractValue using T's default constructor, if available.
+  /// This is only available for T's that support default construction.
+#if !defined(DRAKE_DOXYGEN_CXX)
+  template <typename T,
+            typename = typename std::enable_if_t<
+                std::is_default_constructible_v<T>>>
+#endif
+  static std::unique_ptr<AbstractValue> Make();
 
   /// Returns an AbstractValue containing the given @p value.
   template <typename T>
@@ -104,6 +113,14 @@ class AbstractValue {
   /// returns nullptr.
   template <typename T>
   const T* maybe_get_value() const;
+
+  /// Returns the mutable value wrapped in this AbstractValue, if T matches the
+  /// originally declared type of this AbstractValue.
+  /// @tparam T The originally declared type of this AbstractValue, e.g., from
+  /// AbstractValue::Make<T>() or Value<T>::Value().  If T does not match,
+  /// returns nullptr.
+  template <typename T>
+  T* maybe_get_mutable_value();
 
   /// Returns a copy of this AbstractValue.
   virtual std::unique_ptr<AbstractValue> Clone() const = 0;
@@ -185,10 +202,9 @@ class Value : public AbstractValue {
   /// Constructs a Value<T> using T's default constructor, if available.
   /// This is only available for T's that support default construction.
 #if !defined(DRAKE_DOXYGEN_CXX)
-  // T1 is template boilerplate; do not specify it at call sites.
   template <typename T1 = T,
             typename = typename std::enable_if_t<
-                std::is_default_constructible<T1>::value>>
+                std::is_default_constructible_v<T1>>>
 #endif
   Value();
 
@@ -620,7 +636,7 @@ struct ValueTraitsImpl<T, false> {
   //   template DoBar(const AbstractValue& foo) { ... }
   //   template <class Foo> DoBar(const Foo& foo) { DoBar(Value<Foo>{foo}); }
   // and accidentally called DoBar<AbstractValue>, or similar mistakes.
-  static_assert(!std::is_same<T, std::remove_cv<AbstractValue>::type>::value,
+  static_assert(!std::is_same_v<T, std::remove_cv_t<AbstractValue>>,
                 "T in Value<T> cannot be AbstractValue.");
 
   using Storage = typename drake::copyable_unique_ptr<T>;
@@ -641,6 +657,11 @@ struct ValueTraitsImpl<T, false> {
 
 }  // namespace internal
 
+template <typename T, typename>
+std::unique_ptr<AbstractValue> AbstractValue::Make() {
+  return std::unique_ptr<AbstractValue>(new Value<T>());
+}
+
 template <typename T>
 std::unique_ptr<AbstractValue> AbstractValue::Make(const T& value) {
   return std::unique_ptr<AbstractValue>(new Value<T>(value));
@@ -651,6 +672,13 @@ const T* AbstractValue::maybe_get_value() const {
   if (!is_maybe_matched<T>()) { return nullptr; }
   auto& self = static_cast<const Value<T>&>(*this);
   return &self.get_value();
+}
+
+template <typename T>
+T* AbstractValue::maybe_get_mutable_value() {
+  if (!is_maybe_matched<T>()) { return nullptr; }
+  auto& self = static_cast<Value<T>&>(*this);
+  return &self.get_mutable_value();
 }
 
 // In Debug mode, returns true iff `this` is-a `Value<T>`.  In Release mode, a

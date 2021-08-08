@@ -153,6 +153,15 @@ PYBIND11_MODULE(symbolic, m) {
   internal::BindSymbolicMathOverloads<Variable>(&var_cls);
   DefCopyAndDeepCopy(&var_cls);
 
+  // Bind the free function TaylorExpand.
+  m.def(
+      "TaylorExpand",
+      [](const symbolic::Expression& f, const symbolic::Environment::map& a,
+          int order) {
+        return symbolic::TaylorExpand(f, symbolic::Environment(a), order);
+      },
+      py::arg("f"), py::arg("a"), py::arg("order"), doc.TaylorExpand.doc);
+
   // Bind the free functions for MakeVectorXXXVariable
   m  // BR
       .def(
@@ -539,6 +548,7 @@ PYBIND11_MODULE(symbolic, m) {
 
   // TODO(m-chaturvedi) Add Pybind11 documentation for operator overloads, etc.
   py::class_<Monomial>(m, "Monomial", doc.Monomial.doc)
+      .def(py::init<>(), doc.Monomial.ctor.doc_0args)
       .def(py::init<const Variable&>(), doc.Monomial.ctor.doc_1args_var)
       .def(py::init<const Variable&, int>(),
           doc.Monomial.ctor.doc_2args_var_exponent)
@@ -553,6 +563,8 @@ PYBIND11_MODULE(symbolic, m) {
           doc.Monomial.total_degree.doc)
       .def(py::self * py::self)
       .def(py::self *= py::self)
+      .def(py::self * double{})
+      .def(double{} * py::self)
       .def(py::self == py::self)
       .def(py::self != py::self)
       .def("__hash__",

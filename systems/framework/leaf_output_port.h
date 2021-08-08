@@ -13,6 +13,7 @@
 #include "drake/systems/framework/cache_entry.h"
 #include "drake/systems/framework/framework_common.h"
 #include "drake/systems/framework/output_port.h"
+#include "drake/systems/framework/value_producer.h"
 
 namespace drake {
 namespace systems {
@@ -33,13 +34,19 @@ class LeafOutputPort final : public OutputPort<T> {
 
   ~LeafOutputPort() final = default;
 
-  // TODO(sherm1) These callbacks should not be specific to this class. Move
-  // elsewhere, e.g. framework_common.h so they can be shared with cache entry.
+  // TODO(jwnimmer-tri) It's likely that nixing these output-specific callback
+  // function types in favor of more ValueProducer sugar would lead to clearer
+  // code and the ability to further reduce the computational overhead of the
+  // systems framework. For the moment, though, they are heaviliy used and
+  // deprecating them without a specific plan for follow-up improvements is
+  // a lot of churn for little gain. When we next revisit this question, we
+  // should look into replacing their use of Context<T> with ContextBase, and
+  // use of BasicVector<T> with drake::VectorX<T>.
 
   /** Signature of a function suitable for allocating an object that can hold
   a value of a particular output port. The result is returned as an
   AbstractValue even if this is a vector-valued port. */
-  using AllocCallback = std::function<std::unique_ptr<AbstractValue>()>;
+  using AllocCallback = ValueProducer::AllocateCallback;
 
   /** Signature of a function suitable for calculating a value of a particular
   output port, given a place to put the value. */
@@ -73,11 +80,12 @@ class LeafOutputPort final : public OutputPort<T> {
   // object as the `system_interface` parameter.
   LeafOutputPort(const System<T>* system,
                  internal::SystemMessageInterface* system_interface,
+                 internal::SystemId system_id,
                  std::string name, OutputPortIndex index,
                  DependencyTicket ticket, PortDataType data_type, int size,
                  CacheEntry* cache_entry)
-      : OutputPort<T>(system, system_interface, std::move(name), index, ticket,
-                      data_type, size),
+      : OutputPort<T>(system, system_interface, system_id, std::move(name),
+                      index, ticket, data_type, size),
         cache_entry_(cache_entry) {
     DRAKE_DEMAND(cache_entry != nullptr);
   }

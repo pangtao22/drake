@@ -113,7 +113,7 @@ TEST_F(SDPwithOverlappingVariables1, TestSdpaFreeFormatConstructor) {
        Eigen::Triplet<double>(5, 5, 1)},
       dut.num_X_rows(), dut.num_X_rows());
 
-  Eigen::Matrix<double, 6, 1> g_expected;
+  Vector6d g_expected;
   g_expected << 0, 0, 0, 0.5, 1, 2;
   EXPECT_TRUE(CompareMatrices(dut.g(), g_expected));
   EXPECT_EQ(dut.B_triplets().size(), 0);
@@ -846,6 +846,7 @@ TEST_F(LinearProgramBoundingBox1, RemoveFreeVariableByNullspaceApproach) {
   double pobj{0};
   double dobj{0};
   const int ret = csdp::easy_sdp(
+      nullptr,
       dut.num_X_rows(), rhs_hat.rows(), C_csdp, rhs_csdp, constraints_csdp,
       -dut.constant_min_cost_term() + dut.g().dot(y_hat), &X_csdp, &y, &Z,
       &pobj, &dobj);

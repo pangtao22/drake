@@ -19,7 +19,9 @@ class PhysicalModelTest : public ::testing::Test {
  protected:
   void SetUp() override {
     // TODO(xuchenhan-tri): Add a test with more than one physical model.
-    dummy_model_ = &plant_.AddPhysicalModel(std::make_unique<DummyModel>());
+    auto dummy_model = std::make_unique<DummyModel<double>>();
+    dummy_model_ = dummy_model.get();
+    plant_.AddPhysicalModel(std::move(dummy_model));
     // An artificial scenario where the state is added in multiple passes.
     dummy_model_->AppendDiscreteState(dummy_state1());
     dummy_model_->AppendDiscreteState(dummy_state2());
@@ -34,8 +36,8 @@ class PhysicalModelTest : public ::testing::Test {
     return VectorXd::Ones(kState2Dofs) * kState2Value;
   }
 
-  MultibodyPlant<double> plant_{kDt};    // A discrete MbP.
-  DummyModel* dummy_model_{nullptr};  // The PhysicalModel under test.
+  MultibodyPlant<double> plant_{kDt};         // A discrete MbP.
+  DummyModel<double>* dummy_model_{nullptr};  // The PhysicalModel under test.
 };
 
 // Tests that the state and output ports are properly set up.
@@ -58,7 +60,7 @@ TEST_F(PhysicalModelTest, DiscreteStateAndOutputPorts) {
 // Tests that adding new state after Finalize is not allowed.
 TEST_F(PhysicalModelTest, PostFinalizeStateAdditionNotAllowed) {
   DRAKE_EXPECT_THROWS_MESSAGE(
-      dummy_model_->AppendDiscreteState(dummy_state1()), std::exception,
+      dummy_model_->AppendDiscreteState(dummy_state1()),
       "Calls to 'AppendDiscreteState\\(\\)' after system resources have been "
       "declared are not allowed.");
 }

@@ -47,13 +47,13 @@ TimeVaryingAffineSystem<T>::TimeVaryingAffineSystem(
   }
 
   if (num_inputs_ > 0)
-    this->DeclareInputPort(kVectorValued, num_inputs_);
+    this->DeclareInputPort(kUseDefaultName, kVectorValued, num_inputs_);
   if (num_outputs_ > 0) {
     // N.B. Subclasses that override CalcOutputY may want to fine-tune the
     // output port's prerequisites; see AffineSystem's ctor for an example.
     // By default, the output port will depend on everything (time, input,
     // state, accuracy, etc.).
-    this->DeclareVectorOutputPort(BasicVector<T>(num_outputs_),
+    this->DeclareVectorOutputPort(kUseDefaultName, num_outputs_,
                                   &TimeVaryingAffineSystem::CalcOutputY);
   }
 }
@@ -88,6 +88,20 @@ void TimeVaryingAffineSystem<T>::configure_random_state(
   if (num_states_ == 0) return;
   Sqrt_Sigma_x0_ = Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd>(covariance)
                         .operatorSqrt();
+}
+
+template <typename T>
+template <typename U>
+void TimeVaryingAffineSystem<T>::ConfigureDefaultAndRandomStateFrom(
+    const TimeVaryingAffineSystem<U>& other) {
+  // Convert default state from U -> double -> T.
+  VectorX<T> x0(other.num_states());
+  const VectorX<U>& other_x0 = other.get_default_state();
+  for (int i = 0; i < other.num_states(); i++) {
+    x0[i] = ExtractDoubleOrThrow(other_x0[i]);
+  }
+  this->configure_default_state(x0);
+  this->configure_random_state(other.get_random_state_covariance());
 }
 
 // This is the default implementation for this virtual method.
@@ -174,7 +188,7 @@ void TimeVaryingAffineSystem<T>::DoCalcDiscreteVariableUpdates(
     DRAKE_DEMAND(Bt.rows() == num_states_ && Bt.cols() == num_inputs_);
     xn += Bt * u;
   }
-  updates->get_mutable_vector().SetFromVector(xn);
+  updates->set_value(xn);
 }
 
 template <typename T>
@@ -382,9 +396,12 @@ void AffineSystem<T>::DoCalcDiscreteVariableUpdates(
 
     xnext += B_ * u;
   }
-  updates->get_mutable_vector().SetFromVector(xnext);
+  updates->set_value(xnext);
 }
 
+DRAKE_DEFINE_FUNCTION_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_SCALARS((
+    &TimeVaryingAffineSystem<T>::template ConfigureDefaultAndRandomStateFrom<U>
+))
 
 }  // namespace systems
 }  // namespace drake

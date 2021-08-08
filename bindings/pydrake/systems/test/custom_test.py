@@ -6,6 +6,7 @@ import warnings
 import numpy as np
 
 from pydrake.autodiffutils import AutoDiffXd
+from pydrake.common.test_utilities.deprecation import catch_drake_warnings
 from pydrake.common.value import AbstractValue
 from pydrake.symbolic import Expression
 from pydrake.systems.analysis import (
@@ -17,6 +18,7 @@ from pydrake.systems.framework import (
     BasicVector, BasicVector_,
     CacheIndex,
     Context,
+    ContinuousStateIndex,
     DependencyTicket,
     Diagram,
     DiagramBuilder,
@@ -58,8 +60,8 @@ class CustomAdder(LeafSystem):
         LeafSystem.__init__(self)
         for i in range(num_inputs):
             self.DeclareVectorInputPort(
-                "input{}".format(i), BasicVector(size))
-        self.DeclareVectorOutputPort("sum", BasicVector(size), self._calc_sum)
+                "input{}".format(i), size)
+        self.DeclareVectorOutputPort("sum", size, self._calc_sum)
 
     def _calc_sum(self, context, sum_data):
         # @note This will NOT work if the scalar type is AutoDiff or symbolic,
@@ -208,6 +210,7 @@ class TestCustom(unittest.TestCase):
         dut.DeclareAbstractState(AbstractValue.Make(1))
         dut.DeclareDiscreteState(1)
         dut.DeclareVectorInputPort("u0", BasicVector(1))
+        self.assertEqual(dut.DeclareVectorInputPort("u1", 2).size(), 2)
         dut.DeclareNumericParameter(BasicVector(1))
         for func, arg in [
                 (dut.abstract_parameter_ticket, AbstractParameterIndex(0)),
@@ -274,13 +277,19 @@ class TestCustom(unittest.TestCase):
                 self.DeclareDiscreteState(1)
                 # Ensure that we have inputs / outputs to call direct
                 # feedthrough.
-                self.DeclareInputPort(PortDataType.kVectorValued, 1)
+                self.DeclareInputPort(
+                    kUseDefaultName, PortDataType.kVectorValued, 1)
                 self.DeclareVectorInputPort(
                     name="test_input", model_vector=BasicVector(1),
                     random_type=None)
                 self.DeclareVectorOutputPort(
                     "noop", BasicVector(1), noop,
                     prerequisites_of_calc=set([self.nothing_ticket()]))
+                self.DeclareVectorOutputPort("noop2",
+                                             1,
+                                             noop,
+                                             prerequisites_of_calc=set(
+                                                 [self.nothing_ticket()]))
                 self.witness = self.MakeWitnessFunction(
                     "witness", WitnessFunctionDirection.kCrossesZero,
                     self._witness)
@@ -410,6 +419,52 @@ class TestCustom(unittest.TestCase):
         self.assertTrue(system.called_guard)
         self.assertTrue(system.called_reset)
         self.assertTrue(system.called_system_reset)
+
+    def test_deprecated_leaf_system_port_declarations(self):
+        """Checks that the bindings without a name= argument still work."""
+        dut = LeafSystem()
+
+        # Input port.
+        with catch_drake_warnings(expected_count=1):
+            input_port = dut.DeclareInputPort(
+                type=PortDataType.kVectorValued, size=1)
+
+        # Vector output port.
+        def _vector_calc(context, output):
+            output.get_mutable_value()[:] = context.get_time()
+        with catch_drake_warnings(expected_count=1):
+            vector_output_port = dut.DeclareVectorOutputPort(
+                BasicVector(1), _vector_calc)
+
+        # Abstract output port.
+        def _tuple_calc(context, output):
+            output.set_value(("time", context.get_time()))
+        with catch_drake_warnings(expected_count=1):
+            abstract_output_port = dut.DeclareAbstractOutputPort(
+                lambda: AbstractValue.Make(("string", 0.0)),
+                _tuple_calc)
+
+        # Check that the return values were sane.
+        context = dut.CreateDefaultContext()
+        input_port.get_index()
+        vector_output_port.Eval(context)
+        abstract_output_port.Eval(context)
+
+    def test_state_output_port_declarations(self):
+        """Checks that DeclareStateOutputPort is bound."""
+        dut = LeafSystem()
+
+        xc_index = dut.DeclareContinuousState(2)
+        xc_port = dut.DeclareStateOutputPort(name="xc", state_index=xc_index)
+        self.assertEqual(xc_port.size(), 2)
+
+        xd_index = dut.DeclareDiscreteState(3)
+        xd_port = dut.DeclareStateOutputPort(name="xd", state_index=xd_index)
+        self.assertEqual(xd_port.size(), 3)
+
+        xa_index = dut.DeclareAbstractState(AbstractValue.Make(1))
+        xa_port = dut.DeclareStateOutputPort(name="xa", state_index=xa_index)
+        self.assertEqual(xa_port.get_name(), "xa")
 
     def test_vector_system_overrides(self):
         dt = 0.5

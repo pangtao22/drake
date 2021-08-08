@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -410,10 +411,10 @@ int AddSecondOrderConeConstraints(
     const std::vector<std::vector<int>>& second_order_cone_new_variable_indices,
     GRBmodel* model, int* num_gurobi_linear_constraints) {
   static_assert(
-      std::is_same<C, LorentzConeConstraint>::value ||
-          std::is_same<C, RotatedLorentzConeConstraint>::value,
+      std::is_same_v<C, LorentzConeConstraint> ||
+          std::is_same_v<C, RotatedLorentzConeConstraint>,
       "Expects either LorentzConeConstraint or RotatedLorentzConeConstraint");
-  bool is_rotated_cone = std::is_same<C, RotatedLorentzConeConstraint>::value;
+  bool is_rotated_cone = std::is_same_v<C, RotatedLorentzConeConstraint>;
 
   DRAKE_ASSERT(second_order_cone_constraints.size() ==
                second_order_cone_new_variable_indices.size());
@@ -728,10 +729,10 @@ void AddSecondOrderConeVariables(
     std::vector<char>* gurobi_var_type, std::vector<double>* xlow,
     std::vector<double>* xupp) {
   static_assert(
-      std::is_same<C, LorentzConeConstraint>::value ||
-          std::is_same<C, RotatedLorentzConeConstraint>::value,
+      std::is_same_v<C, LorentzConeConstraint> ||
+          std::is_same_v<C, RotatedLorentzConeConstraint>,
       "Expects LorentzConeConstraint and RotatedLorentzConeConstraint.");
-  bool is_rotated_cone = std::is_same<C, RotatedLorentzConeConstraint>::value;
+  bool is_rotated_cone = std::is_same_v<C, RotatedLorentzConeConstraint>;
 
   int num_new_second_order_cone_var = 0;
   second_order_cone_variable_indices->resize(second_order_cones.size());
@@ -766,6 +767,48 @@ void AddSecondOrderConeVariables(
     if (is_rotated_cone) {
       xlow->at((*second_order_cone_variable_indices)[i][1]) = 0;
     }
+  }
+}
+
+template <typename T>
+void SetOptionOrThrow(GRBenv* model_env, const std::string& option,
+                      const T& val) {
+  static_assert(std::is_same_v<T, int> || std::is_same_v<T, double> ||
+                    std::is_same_v<T, std::string>,
+                "Option values must be int, double, or string");
+  int error = 0;
+  if constexpr (std::is_same_v<T, int>) {
+    error = GRBsetintparam(model_env, option.c_str(), val);
+  } else if constexpr (std::is_same_v<T, double>) {
+    error = GRBsetdblparam(model_env, option.c_str(), val);
+  } else if constexpr (std::is_same_v<T, std::string>) {
+    error = GRBsetstrparam(model_env, option.c_str(), val.c_str());
+  }
+  if (error) {
+    const std::string gurobi_version =
+        fmt::format("{}.{}", GRB_VERSION_MAJOR, GRB_VERSION_MINOR);
+    if (error == GRB_ERROR_UNKNOWN_PARAMETER) {
+      throw std::runtime_error(fmt::format(
+          "GurobiSolver(): '{}' is an unknown parameter in Gurobi, check "
+          "https://www.gurobi.com/documentation/{}/refman/parameters.html for "
+          "allowable parameters",
+          option, gurobi_version));
+    } else if (error == GRB_ERROR_VALUE_OUT_OF_RANGE) {
+      throw std::runtime_error(fmt::format(
+          "GurobiSolver(): '{}' is outside the parameter {}'s valid range", val,
+          option));
+    }
+    // The error message for Setting a Gurobi option should be either
+    // GRB_ERROR_UNKNOWN_PARAMETER or GRB_ERROR_VALUE_OF_OF_RANGE. But just in
+    // case I missed something, I added this throw to capture any other possible
+    // error message. This is untested because I don't know how to trigger an
+    // unknown error.
+    throw std::runtime_error(
+        fmt::format("GurobiSolver(): error code {}, cannot set option '{}' to "
+                    "value '{}', check "
+                    "https://www.gurobi.com/documentation/{}/refman/"
+                    "parameters.html for all allowable options and values.",
+                    error, option, val, gurobi_version));
   }
 }
 }  // anonymous namespace
@@ -889,7 +932,7 @@ void GurobiSolver::DoSolve(
       xupp[idx] = std::min(upper_bound(k), xupp[idx]);
     }
   }
-  // bb_con_dual_indices[constraint] returns the the pair (lower_dual_indices,
+  // bb_con_dual_indices[constraint] returns the pair (lower_dual_indices,
   // upper_dual_indices), where lower_dual_indices are the indices of the dual
   // variables associated with the lower bound side (x >= lower) of the bounding
   // box constraint; upper_dual_indices are the indices of the dual variables
@@ -993,29 +1036,57 @@ void GurobiSolver::DoSolve(
   // Note that it is not necessary to free this environment; rather,
   // we just have to call GRBfreemodel(model).
   GRBenv* model_env = GRBgetenv(model);
-  DRAKE_DEMAND(model_env);
+  DRAKE_DEMAND(model_env != nullptr);
 
-  // Corresponds to no console or file logging (this is the default, which
-  // can be overridden by parameters set in the MathematicalProgram).
+  // Handle common solver options before gurobi-specific options stored in
+  // merged_options, so that gurobi-specific options can overwrite common solver
+  // options.
+  // Gurobi creates a new log file every time we set "LogFile" parameter through
+  // GRBsetstrparam(). So in order to avoid creating log files repeatedly, we
+  // store the log file name in @p log_file variable, and only call
+  // GRBsetstrparam(model_env, "LogFile", log_file) for once.
+  std::string log_file = merged_options.get_print_file_name();
   if (!error) {
-    error = GRBsetintparam(model_env, GRB_INT_PAR_OUTPUTFLAG, 0);
+    SetOptionOrThrow(model_env, "LogToConsole",
+                     static_cast<int>(merged_options.get_print_to_console()));
   }
 
   for (const auto& it : merged_options.GetOptionsDouble(id())) {
     if (!error) {
-      error = GRBsetdblparam(model_env, it.first.c_str(), it.second);
+      SetOptionOrThrow(model_env, it.first, it.second);
     }
   }
+  bool compute_iis = false;
   for (const auto& it : merged_options.GetOptionsInt(id())) {
     if (!error) {
-      error = GRBsetintparam(model_env, it.first.c_str(), it.second);
+      if (it.first == "GRBcomputeIIS") {
+        compute_iis = static_cast<bool>(it.second);
+        if (!(it.second == 0 || it.second == 1)) {
+          throw std::runtime_error(fmt::format(
+              "GurobiSolver(): option GRBcomputeIIS should be either "
+              "0 or 1, but is incorrectly set to {}",
+              it.second));
+        }
+      } else {
+        SetOptionOrThrow(model_env, it.first, it.second);
+      }
     }
   }
+  std::optional<std::string> grb_write;
   for (const auto& it : merged_options.GetOptionsStr(id())) {
     if (!error) {
-      error = GRBsetstrparam(model_env, it.first.c_str(), it.second.c_str());
+      if (it.first == "GRBwrite") {
+        if (it.second != "") {
+          grb_write = it.second;
+        }
+      } else if (it.first == "LogFile") {
+        log_file = it.second;
+      } else {
+        SetOptionOrThrow(model_env, it.first, it.second);
+      }
     }
   }
+  SetOptionOrThrow(model_env, "LogFile", log_file);
 
   for (int i = 0; i < static_cast<int>(prog.num_vars()); ++i) {
     if (!error && !std::isnan(initial_guess(i))) {
@@ -1053,6 +1124,32 @@ void GurobiSolver::DoSolve(
 
   if (!error) {
     error = GRBoptimize(model);
+  }
+
+  if (!error) {
+    if (compute_iis) {
+      int optimstatus = 0;
+      GRBgetintattr(model, GRB_INT_ATTR_STATUS, &optimstatus);
+      if (optimstatus == GRB_INF_OR_UNBD || optimstatus == GRB_INFEASIBLE) {
+        // Only compute IIS when the problem is infeasible.
+        error = GRBcomputeIIS(model);
+      }
+    }
+  }
+  if (!error) {
+    if (grb_write.has_value()) {
+      error = GRBwrite(model, grb_write.value().c_str());
+      if (error) {
+        const std::string gurobi_version =
+            fmt::format("{}.{}", GRB_VERSION_MAJOR, GRB_VERSION_MINOR);
+        throw std::runtime_error(
+            fmt::format("GurobiSolver(): setting GRBwrite to {}, this is not "
+                        "supported. Check "
+                        "https://www.gurobi.com/documentation/{}/refman/"
+                        "py_model_write.html for more details.",
+                        grb_write.value(), gurobi_version));
+      }
+    }
   }
 
   SolutionResult solution_result = SolutionResult::kUnknownError;

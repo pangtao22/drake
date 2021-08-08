@@ -2,6 +2,7 @@
 
 #include <limits>
 
+#include "drake/common/drake_deprecated.h"
 #include "drake/common/eigen_types.h"
 
 namespace drake {
@@ -19,9 +20,10 @@ namespace math {
 ///                     in frame W. The vector need not be a unit vector: this
 ///                     routine will normalize it.
 /// @retval R_WL        The computed basis.
-/// @throws std::logic_error if the norm of @p axis_W is within 1e-10 to zero or
+/// @throws std::exception if the norm of @p axis_W is within 1e-10 to zero or
 ///         @p axis_index does not lie in the range [0,2].
 template <class T>
+DRAKE_DEPRECATED("2021-10-01", "Use RotationMatrix::MakeFromOneVector().")
 Matrix3<T> ComputeBasisFromAxis(int axis_index, const Vector3<T>& axis_W) {
   // Verify that the correct axis is given.
   if (axis_index < 0 || axis_index > 2)

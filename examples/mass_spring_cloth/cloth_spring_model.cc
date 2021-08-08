@@ -21,8 +21,7 @@ ClothSpringModel<T>::ClothSpringModel(int nx, int ny, T h, double dt)
     // Discrete system.
     // Adding 3*N positions and 3*N velocities.
     this->DeclareDiscreteState(initial_state);
-    this->DeclareVectorOutputPort("particle_positions",
-                                  systems::BasicVector<T>(3 * num_particles_),
+    this->DeclareVectorOutputPort("particle_positions", 3 * num_particles_,
                                   &ClothSpringModel::CopyDiscreteStateOut);
     this->DeclarePeriodicDiscreteUpdateEvent(
         dt_, 0., &ClothSpringModel::UpdateDiscreteState);
@@ -32,7 +31,7 @@ ClothSpringModel<T>::ClothSpringModel(int nx, int ny, T h, double dt)
     this->DeclareContinuousState(initial_state, 3 * num_particles_,
                                  3 * num_particles_, 0);
     // A 3*N dimensional output vector for positions.
-    this->DeclareVectorOutputPort(systems::BasicVector<T>(3 * num_particles_),
+    this->DeclareVectorOutputPort(systems::kUseDefaultName, 3 * num_particles_,
                                   &ClothSpringModel::CopyContinuousStateOut);
   }
   param_index_ = this->DeclareNumericParameter(ClothSpringModelParams<T>());
@@ -240,7 +239,7 @@ void ClothSpringModel<T>::UpdateDiscreteState(
 
   // Write v_hat + dv into the velocity at the next time step.
   Eigen::VectorBlock<VectorX<T>> next_state_values =
-      next_states->get_mutable_vector().get_mutable_value();
+      next_states->get_mutable_value();
   auto next_q = next_state_values.head(3 * num_particles_);
   auto next_v = next_state_values.tail(3 * num_particles_);
   next_v = v_hat + dv;

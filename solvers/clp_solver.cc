@@ -293,6 +293,14 @@ void ParseModelExceptLinearConstraints(
         it.value();
   }
 }
+
+int ChooseLogLevel(const SolverOptions& options) {
+  if (options.get_print_to_console()) {
+    // Documented as "factorizations plus a bit more" in ClpModel.hpp.
+    return 3;
+  }
+  return 0;
+}
 }  // namespace
 
 bool ClpSolver::is_available() { return true; }
@@ -301,10 +309,10 @@ void ClpSolver::DoSolve(const MathematicalProgram& prog,
                         const Eigen::VectorXd& initial_guess,
                         const SolverOptions& merged_options,
                         MathematicalProgramResult* result) const {
-  // TODO(hongkai.dai): use initial guess and merged options.
+  // TODO(hongkai.dai): use initial guess and more of the merged options.
   unused(initial_guess);
-  unused(merged_options);
   ClpSimplex model;
+  model.setLogLevel(ChooseLogLevel(merged_options));
   Eigen::VectorXd xlow(prog.num_vars());
   Eigen::VectorXd xupp(prog.num_vars());
   Eigen::VectorXd objective_coeff = Eigen::VectorXd::Zero(prog.num_vars());

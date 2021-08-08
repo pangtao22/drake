@@ -255,12 +255,12 @@ class Expression {
    * sample a value and use the value to substitute all occurrences of the
    * variable in this expression.
    *
-   * @throws std::runtime_error if there exists a non-random variable in this
-   *                            expression whose assignment is not provided by
-   *                            @p env.
-   * @throws std::runtime_error if an unassigned random variable is detected
-   *                            while @p random_generator is `nullptr`.
-   * @throws std::runtime_error if NaN is detected during evaluation.
+   * @throws std::exception if there exists a non-random variable in this
+   *                        expression whose assignment is not provided by
+   *                        @p env.
+   * @throws std::exception if an unassigned random variable is detected
+   *                        while @p random_generator is `nullptr`.
+   * @throws std::exception if NaN is detected during evaluation.
    */
   double Evaluate(const Environment& env = Environment{},
                   RandomGenerator* random_generator = nullptr) const;
@@ -277,7 +277,7 @@ class Expression {
    * env. Internally, this method promotes @p env into a substitution
    * (Variable → Expression) and call Evaluate::Substitute with it.
    *
-   * @throws std::runtime_error if NaN is detected during evaluation.
+   * @throws std::exception if NaN is detected during evaluation.
    */
   [[nodiscard]] Expression EvaluatePartial(const Environment& env) const;
 
@@ -299,13 +299,13 @@ class Expression {
    * 2y)`. It also simplifies "division by constant" cases. See
    * "drake/common/test/symbolic_expansion_test.cc" to find the examples.
    *
-   * @throws std::runtime_error if NaN is detected during expansion.
+   * @throws std::exception if NaN is detected during expansion.
    */
   [[nodiscard]] Expression Expand() const;
 
   /** Returns a copy of this expression replacing all occurrences of @p var
    * with @p e.
-   * @throws std::runtime_error if NaN is detected during substitution.
+   * @throws std::exception if NaN is detected during substitution.
    */
   [[nodiscard]] Expression Substitute(const Variable& var,
                                       const Expression& e) const;
@@ -314,13 +314,13 @@ class Expression {
    * variables in @p s with corresponding expressions in @p s. Note that the
    * substitutions occur simultaneously. For example, (x / y).Substitute({{x,
    * y}, {y, x}}) gets (y / x).
-   * @throws std::runtime_error if NaN is detected during substitution.
+   * @throws std::exception if NaN is detected during substitution.
    */
   [[nodiscard]] Expression Substitute(const Substitution& s) const;
 
   /** Differentiates this symbolic expression with respect to the variable @p
    * var.
-   * @throws std::runtime_error if it is not differentiable.
+   * @throws std::exception if it is not differentiable.
    */
   [[nodiscard]] Expression Differentiate(const Variable& x) const;
 
@@ -483,81 +483,69 @@ class Expression {
   // and not exposed to the user of drake/common/symbolic_expression.h
   // header. These functions are declared in
   // drake/common/symbolic_expression_cell.h header.
-  friend std::shared_ptr<const ExpressionConstant> to_constant(
-      const Expression& e);
-  friend std::shared_ptr<const ExpressionVar> to_variable(const Expression& e);
-  friend std::shared_ptr<const UnaryExpressionCell> to_unary(
-      const Expression& e);
-  friend std::shared_ptr<const BinaryExpressionCell> to_binary(
-      const Expression& e);
-  friend std::shared_ptr<const ExpressionAdd> to_addition(const Expression& e);
-  friend std::shared_ptr<const ExpressionMul> to_multiplication(
-      const Expression& e);
-  friend std::shared_ptr<const ExpressionDiv> to_division(const Expression& e);
-  friend std::shared_ptr<const ExpressionLog> to_log(const Expression& e);
-  friend std::shared_ptr<const ExpressionAbs> to_abs(const Expression& e);
-  friend std::shared_ptr<const ExpressionExp> to_exp(const Expression& e);
-  friend std::shared_ptr<const ExpressionSqrt> to_sqrt(const Expression& e);
-  friend std::shared_ptr<const ExpressionPow> to_pow(const Expression& e);
-  friend std::shared_ptr<const ExpressionSin> to_sin(const Expression& e);
-  friend std::shared_ptr<const ExpressionCos> to_cos(const Expression& e);
-  friend std::shared_ptr<const ExpressionTan> to_tan(const Expression& e);
-  friend std::shared_ptr<const ExpressionAsin> to_asin(const Expression& e);
-  friend std::shared_ptr<const ExpressionAcos> to_acos(const Expression& e);
-  friend std::shared_ptr<const ExpressionAtan> to_atan(const Expression& e);
-  friend std::shared_ptr<const ExpressionAtan2> to_atan2(const Expression& e);
-  friend std::shared_ptr<const ExpressionSinh> to_sinh(const Expression& e);
-  friend std::shared_ptr<const ExpressionCosh> to_cosh(const Expression& e);
-  friend std::shared_ptr<const ExpressionTanh> to_tanh(const Expression& e);
-  friend std::shared_ptr<const ExpressionMin> to_min(const Expression& e);
-  friend std::shared_ptr<const ExpressionMax> to_max(const Expression& e);
-  friend std::shared_ptr<const ExpressionCeiling> to_ceil(const Expression& e);
-  friend std::shared_ptr<const ExpressionFloor> to_floor(const Expression& e);
-  friend std::shared_ptr<const ExpressionIfThenElse> to_if_then_else(
-      const Expression& e);
-  friend std::shared_ptr<const ExpressionUninterpretedFunction>
+  friend const ExpressionConstant& to_constant(const Expression& e);
+  friend const ExpressionVar& to_variable(const Expression& e);
+  friend const UnaryExpressionCell& to_unary(const Expression& e);
+  friend const BinaryExpressionCell& to_binary(const Expression& e);
+  friend const ExpressionAdd& to_addition(const Expression& e);
+  friend const ExpressionMul& to_multiplication(const Expression& e);
+  friend const ExpressionDiv& to_division(const Expression& e);
+  friend const ExpressionLog& to_log(const Expression& e);
+  friend const ExpressionAbs& to_abs(const Expression& e);
+  friend const ExpressionExp& to_exp(const Expression& e);
+  friend const ExpressionSqrt& to_sqrt(const Expression& e);
+  friend const ExpressionPow& to_pow(const Expression& e);
+  friend const ExpressionSin& to_sin(const Expression& e);
+  friend const ExpressionCos& to_cos(const Expression& e);
+  friend const ExpressionTan& to_tan(const Expression& e);
+  friend const ExpressionAsin& to_asin(const Expression& e);
+  friend const ExpressionAcos& to_acos(const Expression& e);
+  friend const ExpressionAtan& to_atan(const Expression& e);
+  friend const ExpressionAtan2& to_atan2(const Expression& e);
+  friend const ExpressionSinh& to_sinh(const Expression& e);
+  friend const ExpressionCosh& to_cosh(const Expression& e);
+  friend const ExpressionTanh& to_tanh(const Expression& e);
+  friend const ExpressionMin& to_min(const Expression& e);
+  friend const ExpressionMax& to_max(const Expression& e);
+  friend const ExpressionCeiling& to_ceil(const Expression& e);
+  friend const ExpressionFloor& to_floor(const Expression& e);
+  friend const ExpressionIfThenElse& to_if_then_else(const Expression& e);
+  friend const ExpressionUninterpretedFunction&
   to_uninterpreted_function(const Expression& e);
 
   // Cast functions which takes a pointer to a non-const Expression.
-  friend std::shared_ptr<ExpressionConstant> to_constant(Expression* e);
-  friend std::shared_ptr<ExpressionVar> to_variable(Expression* e);
-  friend std::shared_ptr<UnaryExpressionCell> to_unary(Expression* e);
-  friend std::shared_ptr<BinaryExpressionCell> to_binary(Expression* e);
-  friend std::shared_ptr<ExpressionAdd> to_addition(Expression* e);
-  friend std::shared_ptr<ExpressionMul> to_multiplication(Expression* e);
-  friend std::shared_ptr<ExpressionDiv> to_division(Expression* e);
-  friend std::shared_ptr<ExpressionLog> to_log(Expression* e);
-  friend std::shared_ptr<ExpressionAbs> to_abs(Expression* e);
-  friend std::shared_ptr<ExpressionExp> to_exp(Expression* e);
-  friend std::shared_ptr<ExpressionSqrt> to_sqrt(Expression* e);
-  friend std::shared_ptr<ExpressionPow> to_pow(Expression* e);
-  friend std::shared_ptr<ExpressionSin> to_sin(Expression* e);
-  friend std::shared_ptr<ExpressionCos> to_cos(Expression* e);
-  friend std::shared_ptr<ExpressionTan> to_tan(Expression* e);
-  friend std::shared_ptr<ExpressionAsin> to_asin(Expression* e);
-  friend std::shared_ptr<ExpressionAcos> to_acos(Expression* e);
-  friend std::shared_ptr<ExpressionAtan> to_atan(Expression* e);
-  friend std::shared_ptr<ExpressionAtan2> to_atan2(Expression* e);
-  friend std::shared_ptr<ExpressionSinh> to_sinh(Expression* e);
-  friend std::shared_ptr<ExpressionCosh> to_cosh(Expression* e);
-  friend std::shared_ptr<ExpressionTanh> to_tanh(Expression* e);
-  friend std::shared_ptr<ExpressionMin> to_min(Expression* e);
-  friend std::shared_ptr<ExpressionMax> to_max(Expression* e);
-  friend std::shared_ptr<ExpressionCeiling> to_ceil(Expression* e);
-  friend std::shared_ptr<ExpressionFloor> to_floor(Expression* e);
-  friend std::shared_ptr<ExpressionIfThenElse> to_if_then_else(Expression* e);
-  friend std::shared_ptr<ExpressionUninterpretedFunction>
+  friend ExpressionConstant& to_constant(Expression* e);
+  friend ExpressionVar& to_variable(Expression* e);
+  friend UnaryExpressionCell& to_unary(Expression* e);
+  friend BinaryExpressionCell& to_binary(Expression* e);
+  friend ExpressionAdd& to_addition(Expression* e);
+  friend ExpressionMul& to_multiplication(Expression* e);
+  friend ExpressionDiv& to_division(Expression* e);
+  friend ExpressionLog& to_log(Expression* e);
+  friend ExpressionAbs& to_abs(Expression* e);
+  friend ExpressionExp& to_exp(Expression* e);
+  friend ExpressionSqrt& to_sqrt(Expression* e);
+  friend ExpressionPow& to_pow(Expression* e);
+  friend ExpressionSin& to_sin(Expression* e);
+  friend ExpressionCos& to_cos(Expression* e);
+  friend ExpressionTan& to_tan(Expression* e);
+  friend ExpressionAsin& to_asin(Expression* e);
+  friend ExpressionAcos& to_acos(Expression* e);
+  friend ExpressionAtan& to_atan(Expression* e);
+  friend ExpressionAtan2& to_atan2(Expression* e);
+  friend ExpressionSinh& to_sinh(Expression* e);
+  friend ExpressionCosh& to_cosh(Expression* e);
+  friend ExpressionTanh& to_tanh(Expression* e);
+  friend ExpressionMin& to_min(Expression* e);
+  friend ExpressionMax& to_max(Expression* e);
+  friend ExpressionCeiling& to_ceil(Expression* e);
+  friend ExpressionFloor& to_floor(Expression* e);
+  friend ExpressionIfThenElse& to_if_then_else(Expression* e);
+  friend ExpressionUninterpretedFunction&
   to_uninterpreted_function(Expression* e);
 
   friend class ExpressionAddFactory;
   friend class ExpressionMulFactory;
-
-  // The following classes call the private method `set_expand()` and need to be
-  // friends of this class.
-  friend class ExpressionAdd;
-  friend class ExpressionMul;
-  friend class ExpressionDiv;
-  friend class ExpressionPow;
 
  private:
   // This is a helper function used to handle `Expression(double)` constructor.
@@ -567,13 +555,22 @@ class Expression {
 
   void HashAppend(DelegatingHasher* hasher) const;
 
+  // Returns a const reference to the owned cell.
+  const ExpressionCell& cell() const {
+    DRAKE_ASSERT(ptr_ != nullptr);
+    return *ptr_;
+  }
+
+  // Returns a mutable reference to the owned cell. This function may only be
+  // called when this object is the sole owner of the cell.
+  ExpressionCell& mutable_cell();
+
   // Note: We use "non-const" ExpressionCell type. This allows us to perform
   // destructive updates on the pointed cell if the cell is not shared with
-  // other Expressions (that is, ptr_.use_count() == 1).
+  // other Expressions (that is, ptr_.use_count() == 1). However, because that
+  // pattern needs careful attention, our library code should never access
+  // ptr_ directly, it should always use cell() or mutable_cell().
   std::shared_ptr<ExpressionCell> ptr_;
-
-  /** Sets this symbolic expression as already expanded. */
-  Expression& set_expanded();
 };
 
 Expression operator+(Expression lhs, const Expression& rhs);
@@ -830,7 +827,7 @@ class uniform_real_distribution<drake::symbolic::Expression> {
   /// Constructs a new distribution object with a minimum value @p a and a
   /// maximum value @p b.
   ///
-  /// @throw std::runtime_error if a and b are constant expressions but a > b.
+  /// @throws std::exception if a and b are constant expressions but a > b.
   explicit uniform_real_distribution(RealType a, RealType b = 1.0)
       : a_{std::move(a)},
         b_{std::move(b)},
@@ -966,7 +963,7 @@ class normal_distribution<drake::symbolic::Expression> {
 
   /// Constructs a new distribution object with @p mean and @p stddev.
   ///
-  /// @throw std::runtime_error if stddev is a non-positive constant expression.
+  /// @throws std::exception if stddev is a non-positive constant expression.
   explicit normal_distribution(RealType mean, RealType stddev = 1.0)
       : mean_{std::move(mean)},
         stddev_{std::move(stddev)},
@@ -1072,7 +1069,7 @@ class exponential_distribution<drake::symbolic::Expression> {
 
   /// Constructs a new distribution object with @p lambda.
   ///
-  /// @throw std::runtime_error if lambda is a non-positive constant expression.
+  /// @throws std::exception if lambda is a non-positive constant expression.
   explicit exponential_distribution(RealType lambda)
       : lambda_{std::move(lambda)},
         random_variables_{std::make_shared<std::vector<Variable>>()} {
@@ -1226,78 +1223,78 @@ namespace symbolic {
 
 // Matrix<Expression> * Matrix<double> => Matrix<Expression>
 template <typename MatrixL, typename MatrixR>
-typename std::enable_if<
-    std::is_base_of<Eigen::MatrixBase<MatrixL>, MatrixL>::value &&
-        std::is_base_of<Eigen::MatrixBase<MatrixR>, MatrixR>::value &&
-        std::is_same<typename MatrixL::Scalar, Expression>::value &&
-        std::is_same<typename MatrixR::Scalar, double>::value,
+typename std::enable_if_t<
+    std::is_base_of_v<Eigen::MatrixBase<MatrixL>, MatrixL> &&
+        std::is_base_of_v<Eigen::MatrixBase<MatrixR>, MatrixR> &&
+        std::is_same_v<typename MatrixL::Scalar, Expression> &&
+        std::is_same_v<typename MatrixR::Scalar, double>,
     Eigen::Matrix<Expression, MatrixL::RowsAtCompileTime,
-                  MatrixR::ColsAtCompileTime>>::type
+                  MatrixR::ColsAtCompileTime>>
 operator*(const MatrixL& lhs, const MatrixR& rhs) {
   return lhs.template cast<Expression>() * rhs.template cast<Expression>();
 }
 
 // Matrix<double> * Matrix<Expression> => Matrix<Expression>
 template <typename MatrixL, typename MatrixR>
-typename std::enable_if<
-    std::is_base_of<Eigen::MatrixBase<MatrixL>, MatrixL>::value &&
-        std::is_base_of<Eigen::MatrixBase<MatrixR>, MatrixR>::value &&
-        std::is_same<typename MatrixL::Scalar, double>::value &&
-        std::is_same<typename MatrixR::Scalar, Expression>::value,
+typename std::enable_if_t<
+    std::is_base_of_v<Eigen::MatrixBase<MatrixL>, MatrixL> &&
+        std::is_base_of_v<Eigen::MatrixBase<MatrixR>, MatrixR> &&
+        std::is_same_v<typename MatrixL::Scalar, double> &&
+        std::is_same_v<typename MatrixR::Scalar, Expression>,
     Eigen::Matrix<Expression, MatrixL::RowsAtCompileTime,
-                  MatrixR::ColsAtCompileTime>>::type
+                  MatrixR::ColsAtCompileTime>>
 operator*(const MatrixL& lhs, const MatrixR& rhs) {
   return lhs.template cast<Expression>() * rhs.template cast<Expression>();
 }
 
 // Matrix<Expression> * Matrix<Variable> => Matrix<Expression>
 template <typename MatrixL, typename MatrixR>
-typename std::enable_if<
-    std::is_base_of<Eigen::MatrixBase<MatrixL>, MatrixL>::value &&
-        std::is_base_of<Eigen::MatrixBase<MatrixR>, MatrixR>::value &&
-        std::is_same<typename MatrixL::Scalar, Expression>::value &&
-        std::is_same<typename MatrixR::Scalar, Variable>::value,
+typename std::enable_if_t<
+    std::is_base_of_v<Eigen::MatrixBase<MatrixL>, MatrixL> &&
+        std::is_base_of_v<Eigen::MatrixBase<MatrixR>, MatrixR> &&
+        std::is_same_v<typename MatrixL::Scalar, Expression> &&
+        std::is_same_v<typename MatrixR::Scalar, Variable>,
     Eigen::Matrix<Expression, MatrixL::RowsAtCompileTime,
-                  MatrixR::ColsAtCompileTime>>::type
+                  MatrixR::ColsAtCompileTime>>
 operator*(const MatrixL& lhs, const MatrixR& rhs) {
   return lhs * rhs.template cast<Expression>();
 }
 
 // Matrix<Variable> * Matrix<Expression> => Matrix<Expression>
 template <typename MatrixL, typename MatrixR>
-typename std::enable_if<
-    std::is_base_of<Eigen::MatrixBase<MatrixL>, MatrixL>::value &&
-        std::is_base_of<Eigen::MatrixBase<MatrixR>, MatrixR>::value &&
-        std::is_same<typename MatrixL::Scalar, Variable>::value &&
-        std::is_same<typename MatrixR::Scalar, Expression>::value,
+typename std::enable_if_t<
+    std::is_base_of_v<Eigen::MatrixBase<MatrixL>, MatrixL> &&
+        std::is_base_of_v<Eigen::MatrixBase<MatrixR>, MatrixR> &&
+        std::is_same_v<typename MatrixL::Scalar, Variable> &&
+        std::is_same_v<typename MatrixR::Scalar, Expression>,
     Eigen::Matrix<Expression, MatrixL::RowsAtCompileTime,
-                  MatrixR::ColsAtCompileTime>>::type
+                  MatrixR::ColsAtCompileTime>>
 operator*(const MatrixL& lhs, const MatrixR& rhs) {
   return lhs.template cast<Expression>() * rhs;
 }
 
 // Matrix<Variable> * Matrix<double> => Matrix<Expression>
 template <typename MatrixL, typename MatrixR>
-typename std::enable_if<
-    std::is_base_of<Eigen::MatrixBase<MatrixL>, MatrixL>::value &&
-        std::is_base_of<Eigen::MatrixBase<MatrixR>, MatrixR>::value &&
-        std::is_same<typename MatrixL::Scalar, Variable>::value &&
-        std::is_same<typename MatrixR::Scalar, double>::value,
+typename std::enable_if_t<
+    std::is_base_of_v<Eigen::MatrixBase<MatrixL>, MatrixL> &&
+        std::is_base_of_v<Eigen::MatrixBase<MatrixR>, MatrixR> &&
+        std::is_same_v<typename MatrixL::Scalar, Variable> &&
+        std::is_same_v<typename MatrixR::Scalar, double>,
     Eigen::Matrix<Expression, MatrixL::RowsAtCompileTime,
-                  MatrixR::ColsAtCompileTime>>::type
+                  MatrixR::ColsAtCompileTime>>
 operator*(const MatrixL& lhs, const MatrixR& rhs) {
   return lhs.template cast<Expression>() * rhs.template cast<Expression>();
 }
 
 // Matrix<double> * Matrix<Variable> => Matrix<Expression>
 template <typename MatrixL, typename MatrixR>
-typename std::enable_if<
-    std::is_base_of<Eigen::MatrixBase<MatrixL>, MatrixL>::value &&
-        std::is_base_of<Eigen::MatrixBase<MatrixR>, MatrixR>::value &&
-        std::is_same<typename MatrixL::Scalar, double>::value &&
-        std::is_same<typename MatrixR::Scalar, Variable>::value,
+typename std::enable_if_t<
+    std::is_base_of_v<Eigen::MatrixBase<MatrixL>, MatrixL> &&
+        std::is_base_of_v<Eigen::MatrixBase<MatrixR>, MatrixR> &&
+        std::is_same_v<typename MatrixL::Scalar, double> &&
+        std::is_same_v<typename MatrixR::Scalar, Variable>,
     Eigen::Matrix<Expression, MatrixL::RowsAtCompileTime,
-                  MatrixR::ColsAtCompileTime>>::type
+                  MatrixR::ColsAtCompileTime>>
 operator*(const MatrixL& lhs, const MatrixR& rhs) {
   return lhs.template cast<Expression>() * rhs.template cast<Expression>();
 }
@@ -1324,13 +1321,13 @@ auto operator*(
 /// substitute all occurrences of the random variable in @p m.
 ///
 /// @returns a matrix of double whose size is the size of @p m.
-/// @throws std::runtime_error if NaN is detected during evaluation.
-/// @throws std::runtime_error if @p m includes unassigned random variables but
-///                               @p random_generator is `nullptr`.
+/// @throws std::exception if NaN is detected during evaluation.
+/// @throws std::exception if @p m includes unassigned random variables but
+///                           @p random_generator is `nullptr`.
 /// @pydrake_mkdoc_identifier{expression}
 template <typename Derived>
 std::enable_if_t<
-    std::is_same<typename Derived::Scalar, Expression>::value,
+    std::is_same_v<typename Derived::Scalar, Expression>,
     Eigen::Matrix<double, Derived::RowsAtCompileTime,
                   Derived::ColsAtCompileTime, 0, Derived::MaxRowsAtCompileTime,
                   Derived::MaxColsAtCompileTime>>
@@ -1355,9 +1352,9 @@ Evaluate(const Eigen::MatrixBase<Derived>& m,
 
 /** Evaluates @p m using a given environment (by default, an empty environment).
  *
- * @throws std::runtime_error if there exists a variable in @p m whose value is
- *                            not provided by @p env.
- * @throws std::runtime_error if NaN is detected during evaluation.
+ * @throws std::exception if there exists a variable in @p m whose value is
+ *                        not provided by @p env.
+ * @throws std::exception if NaN is detected during evaluation.
  */
 Eigen::SparseMatrix<double> Evaluate(
     const Eigen::Ref<const Eigen::SparseMatrix<Expression>>& m,
@@ -1366,13 +1363,13 @@ Eigen::SparseMatrix<double> Evaluate(
 /// Substitutes a symbolic matrix @p m using a given substitution @p subst.
 ///
 /// @returns a matrix of symbolic expressions whose size is the size of @p m.
-/// @throws std::runtime_error if NaN is detected during substitution.
+/// @throws std::exception if NaN is detected during substitution.
 template <typename Derived>
 Eigen::Matrix<Expression, Derived::RowsAtCompileTime,
               Derived::ColsAtCompileTime, 0, Derived::MaxRowsAtCompileTime,
               Derived::MaxColsAtCompileTime>
 Substitute(const Eigen::MatrixBase<Derived>& m, const Substitution& subst) {
-  static_assert(std::is_same<typename Derived::Scalar, Expression>::value,
+  static_assert(std::is_same_v<typename Derived::Scalar, Expression>,
                 "Substitute only accepts a symbolic matrix.");
   // Note that the return type is written out explicitly to help gcc 5 (on
   // ubuntu).
@@ -1383,14 +1380,14 @@ Substitute(const Eigen::MatrixBase<Derived>& m, const Substitution& subst) {
 /// Substitutes @p var with @p e in a symbolic matrix @p m.
 ///
 /// @returns a matrix of symbolic expressions whose size is the size of @p m.
-/// @throws std::runtime_error if NaN is detected during substitution.
+/// @throws std::exception if NaN is detected during substitution.
 template <typename Derived>
 Eigen::Matrix<Expression, Derived::RowsAtCompileTime,
               Derived::ColsAtCompileTime, 0, Derived::MaxRowsAtCompileTime,
               Derived::MaxColsAtCompileTime>
 Substitute(const Eigen::MatrixBase<Derived>& m, const Variable& var,
            const Expression& e) {
-  static_assert(std::is_same<typename Derived::Scalar, Expression>::value,
+  static_assert(std::is_same_v<typename Derived::Scalar, Expression>,
                 "Substitute only accepts a symbolic matrix.");
   // Note that the return type is written out explicitly to help gcc 5 (on
   // ubuntu).
@@ -1398,7 +1395,7 @@ Substitute(const Eigen::MatrixBase<Derived>& m, const Variable& var,
 }
 
 /// Constructs a vector of variables from the vector of variable expressions.
-/// @throws std::logic_error if there is an expression in @p vec which is not a
+/// @throws std::exception if there is an expression in @p vec which is not a
 /// variable.
 VectorX<Variable> GetVariableVector(
     const Eigen::Ref<const VectorX<Expression>>& expressions);
@@ -1442,12 +1439,12 @@ Variables GetDistinctVariables(const Eigen::Ref<const MatrixX<Expression>>& v);
 /// equal. That is, it returns true if and only if `m1(i, j)` is structurally
 /// equal to `m2(i, j)` for all `i`, `j`.
 template <typename DerivedA, typename DerivedB>
-typename std::enable_if<
-    std::is_base_of<Eigen::MatrixBase<DerivedA>, DerivedA>::value &&
-        std::is_base_of<Eigen::MatrixBase<DerivedB>, DerivedB>::value &&
-        std::is_same<typename DerivedA::Scalar, Expression>::value &&
-        std::is_same<typename DerivedB::Scalar, Expression>::value,
-    bool>::type
+typename std::enable_if_t<
+    std::is_base_of_v<Eigen::MatrixBase<DerivedA>, DerivedA> &&
+        std::is_base_of_v<Eigen::MatrixBase<DerivedB>, DerivedB> &&
+        std::is_same_v<typename DerivedA::Scalar, Expression> &&
+        std::is_same_v<typename DerivedB::Scalar, Expression>,
+    bool>
 CheckStructuralEquality(const DerivedA& m1, const DerivedB& m2) {
   EIGEN_STATIC_ASSERT_SAME_MATRIX_SIZE(DerivedA, DerivedB);
   DRAKE_DEMAND(m1.rows() == m2.rows() && m1.cols() == m2.cols());
@@ -1481,15 +1478,32 @@ struct dummy_value<symbolic::Expression> {
 /// expression with an empty environment.
 double ExtractDoubleOrThrow(const symbolic::Expression& e);
 
+/// Returns @p matrix as an Eigen::Matrix<double, ...> with the same size
+/// allocation as @p matrix.  Calls ExtractDoubleOrThrow on each element of the
+/// matrix, and therefore throws if any one of the extractions fail.
+template <typename Derived>
+typename std::enable_if_t<
+    std::is_same_v<typename Derived::Scalar, symbolic::Expression>,
+    Eigen::Matrix<double, Derived::RowsAtCompileTime,
+                  Derived::ColsAtCompileTime, Derived::Options,
+                  Derived::MaxRowsAtCompileTime, Derived::MaxColsAtCompileTime>>
+ExtractDoubleOrThrow(const Eigen::MatrixBase<Derived>& matrix) {
+  return matrix
+      .unaryExpr([](const typename Derived::Scalar& value) {
+        return ExtractDoubleOrThrow(value);
+      })
+      .eval();
+}
+
 /*
  * Determine if two EigenBase<> types are matrices (non-column-vectors) of
  * Expressions and doubles, to then form an implicit formulas.
  */
 template <typename DerivedV, typename DerivedB>
 struct is_eigen_nonvector_expression_double_pair
-    : std::integral_constant<
-          bool, is_eigen_nonvector_of<DerivedV, symbolic::Expression>::value &&
-                    is_eigen_nonvector_of<DerivedB, double>::value> {};
+    : std::bool_constant<
+          is_eigen_nonvector_of<DerivedV, symbolic::Expression>::value &&
+              is_eigen_nonvector_of<DerivedB, double>::value> {};
 
 /*
  * Determine if two EigenBase<> types are vectors of Expressions and doubles
@@ -1497,8 +1511,8 @@ struct is_eigen_nonvector_expression_double_pair
  */
 template <typename DerivedV, typename DerivedB>
 struct is_eigen_vector_expression_double_pair
-    : std::integral_constant<
-          bool, is_eigen_vector_of<DerivedV, symbolic::Expression>::value &&
-                    is_eigen_vector_of<DerivedB, double>::value> {};
+    : std::bool_constant<
+          is_eigen_vector_of<DerivedV, symbolic::Expression>::value &&
+              is_eigen_vector_of<DerivedB, double>::value> {};
 
 }  // namespace drake

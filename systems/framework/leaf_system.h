@@ -14,9 +14,11 @@
 #include "drake/common/default_scalars.h"
 #include "drake/common/drake_assert.h"
 #include "drake/common/drake_copyable.h"
+#include "drake/common/drake_deprecated.h"
 #include "drake/common/eigen_types.h"
 #include "drake/common/unused.h"
 #include "drake/common/value.h"
+#include "drake/systems/framework/abstract_value_cloner.h"
 #include "drake/systems/framework/abstract_values.h"
 #include "drake/systems/framework/basic_vector.h"
 #include "drake/systems/framework/continuous_state.h"
@@ -28,6 +30,7 @@
 #include "drake/systems/framework/system_constraint.h"
 #include "drake/systems/framework/system_output.h"
 #include "drake/systems/framework/system_scalar_converter.h"
+#include "drake/systems/framework/value_producer.h"
 
 namespace drake {
 namespace systems {
@@ -218,7 +221,7 @@ class LeafSystem : public System<T> {
   template <template <typename> class U = BasicVector>
   const U<T>& GetNumericParameter(const Context<T>& context, int index) const {
     this->ValidateContext(context);
-    static_assert(std::is_base_of<BasicVector<T>, U<T>>::value,
+    static_assert(std::is_base_of_v<BasicVector<T>, U<T>>,
                   "U must be a subclass of BasicVector.");
     const auto& leaf_context =
         dynamic_cast<const systems::LeafContext<T>&>(context);
@@ -234,7 +237,7 @@ class LeafSystem : public System<T> {
   template <template <typename> class U = BasicVector>
   U<T>& GetMutableNumericParameter(Context<T>* context, int index) const {
     this->ValidateContext(context);
-    static_assert(std::is_base_of<BasicVector<T>, U<T>>::value,
+    static_assert(std::is_base_of_v<BasicVector<T>, U<T>>,
                   "U must be a subclass of BasicVector.");
     auto* leaf_context = dynamic_cast<systems::LeafContext<T>*>(context);
     DRAKE_ASSERT(leaf_context != nullptr);
@@ -294,7 +297,7 @@ class LeafSystem : public System<T> {
   void DeclarePeriodicPublishEvent(
       double period_sec, double offset_sec,
       EventStatus (MySystem::*publish)(const Context<T>&) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     DRAKE_DEMAND(publish != nullptr);
 
@@ -320,7 +323,7 @@ class LeafSystem : public System<T> {
   void DeclarePeriodicPublishEvent(double period_sec, double offset_sec,
                                    void (MySystem::*publish)(const Context<T>&)
                                        const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     DRAKE_DEMAND(publish != nullptr);
 
@@ -361,7 +364,7 @@ class LeafSystem : public System<T> {
       double period_sec, double offset_sec,
       EventStatus (MySystem::*update)(const Context<T>&, DiscreteValues<T>*)
           const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     DRAKE_DEMAND(update != nullptr);
 
@@ -390,7 +393,7 @@ class LeafSystem : public System<T> {
   void DeclarePeriodicDiscreteUpdateEvent(
       double period_sec, double offset_sec,
       void (MySystem::*update)(const Context<T>&, DiscreteValues<T>*) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     DRAKE_DEMAND(update != nullptr);
 
@@ -430,7 +433,7 @@ class LeafSystem : public System<T> {
   void DeclarePeriodicUnrestrictedUpdateEvent(
       double period_sec, double offset_sec,
       EventStatus (MySystem::*update)(const Context<T>&, State<T>*) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     DRAKE_DEMAND(update != nullptr);
 
@@ -457,7 +460,7 @@ class LeafSystem : public System<T> {
   void DeclarePeriodicUnrestrictedUpdateEvent(
       double period_sec, double offset_sec,
       void (MySystem::*update)(const Context<T>&, State<T>*) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     DRAKE_DEMAND(update != nullptr);
 
@@ -601,7 +604,7 @@ class LeafSystem : public System<T> {
   template <class MySystem>
   void DeclarePerStepPublishEvent(
       EventStatus (MySystem::*publish)(const Context<T>&) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     DRAKE_DEMAND(publish != nullptr);
 
@@ -638,7 +641,7 @@ class LeafSystem : public System<T> {
   template <class MySystem>
   void DeclarePerStepDiscreteUpdateEvent(EventStatus (MySystem::*update)(
       const Context<T>&, DiscreteValues<T>*) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     DRAKE_DEMAND(update != nullptr);
 
@@ -676,7 +679,7 @@ class LeafSystem : public System<T> {
   template <class MySystem>
   void DeclarePerStepUnrestrictedUpdateEvent(
       EventStatus (MySystem::*update)(const Context<T>&, State<T>*) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     DRAKE_DEMAND(update != nullptr);
 
@@ -764,7 +767,7 @@ class LeafSystem : public System<T> {
   template <class MySystem>
   void DeclareInitializationPublishEvent(
       EventStatus(MySystem::*publish)(const Context<T>&) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     auto this_ptr = dynamic_cast<const MySystem*>(this);
     DRAKE_DEMAND(this_ptr != nullptr);
@@ -802,7 +805,7 @@ class LeafSystem : public System<T> {
   void DeclareInitializationDiscreteUpdateEvent(
       EventStatus(MySystem::*update)
           (const Context<T>&, DiscreteValues<T>*) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     auto this_ptr = dynamic_cast<const MySystem*>(this);
     DRAKE_DEMAND(this_ptr != nullptr);
@@ -842,7 +845,7 @@ class LeafSystem : public System<T> {
   void DeclareInitializationUnrestrictedUpdateEvent(
       EventStatus(MySystem::*update)
           (const Context<T>&, State<T>*) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     auto this_ptr = dynamic_cast<const MySystem*>(this);
     DRAKE_DEMAND(this_ptr != nullptr);
@@ -936,14 +939,14 @@ class LeafSystem : public System<T> {
   template <class MySystem>
   void DeclareForcedPublishEvent(
     EventStatus (MySystem::*publish)(const Context<T>&) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     auto this_ptr = dynamic_cast<const MySystem*>(this);
     DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(publish != nullptr);
 
     // Instantiate the event.
-    auto forced = std::make_unique<PublishEvent<T>>(
+    PublishEvent<T> forced(
         TriggerType::kForced,
         [this_ptr, publish](const Context<T>& context, const PublishEvent<T>&) {
           // TODO(sherm1) Forward the return status.
@@ -951,7 +954,7 @@ class LeafSystem : public System<T> {
         });
 
     // Add the event to the collection of forced publish events.
-    this->get_mutable_forced_publish_events().add_event(std::move(forced));
+    this->get_mutable_forced_publish_events().AddEvent(std::move(forced));
   }
 
   /** Declares a function that is called whenever a user directly calls
@@ -974,14 +977,14 @@ class LeafSystem : public System<T> {
   template <class MySystem>
   void DeclareForcedDiscreteUpdateEvent(EventStatus
       (MySystem::*update)(const Context<T>&, DiscreteValues<T>*) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     auto this_ptr = dynamic_cast<const MySystem*>(this);
     DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(update != nullptr);
 
     // Instantiate the event.
-    auto forced = std::make_unique<DiscreteUpdateEvent<T>>(
+    DiscreteUpdateEvent<T> forced(
         TriggerType::kForced,
         [this_ptr, update](const Context<T>& context,
                            const DiscreteUpdateEvent<T>&,
@@ -992,7 +995,7 @@ class LeafSystem : public System<T> {
         });
 
     // Add the event to the collection of forced discrete update events.
-    this->get_mutable_forced_discrete_update_events().add_event(
+    this->get_mutable_forced_discrete_update_events().AddEvent(
         std::move(forced));
   }
 
@@ -1016,14 +1019,14 @@ class LeafSystem : public System<T> {
   template <class MySystem>
   void DeclareForcedUnrestrictedUpdateEvent(
       EventStatus (MySystem::*update)(const Context<T>&, State<T>*) const) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
     auto this_ptr = dynamic_cast<const MySystem*>(this);
     DRAKE_DEMAND(this_ptr != nullptr);
     DRAKE_DEMAND(update != nullptr);
 
     // Instantiate the event.
-    auto forced = std::make_unique<UnrestrictedUpdateEvent<T>>(
+    UnrestrictedUpdateEvent<T> forced(
         TriggerType::kForced,
         [this_ptr, update](const Context<T>& context,
                            const UnrestrictedUpdateEvent<T>&, State<T>* state) {
@@ -1032,7 +1035,7 @@ class LeafSystem : public System<T> {
         });
 
     // Add the event to the collection of forced unrestricted update events.
-    this->get_mutable_forced_unrestricted_update_events().add_event(
+    this->get_mutable_forced_unrestricted_update_events().AddEvent(
         std::move(forced));
   }
   //@}
@@ -1052,18 +1055,22 @@ class LeafSystem : public System<T> {
 
   /** Declares that this System should reserve continuous state with
   @p num_state_variables state variables, which have no second-order
-  structure. */
-  void DeclareContinuousState(int num_state_variables);
+  structure.
+  @return index of the declared state (currently always zero). */
+  ContinuousStateIndex DeclareContinuousState(int num_state_variables);
 
   /** Declares that this System should reserve continuous state with @p num_q
   generalized positions, @p num_v generalized velocities, and @p num_z
-  miscellaneous state variables. */
-  void DeclareContinuousState(int num_q, int num_v, int num_z);
+  miscellaneous state variables.
+  @return index of the declared state (currently always zero). */
+  ContinuousStateIndex DeclareContinuousState(int num_q, int num_v, int num_z);
 
   /** Declares that this System should reserve continuous state with
   @p model_vector.size() miscellaneous state variables, stored in a
-  vector cloned from @p model_vector. */
-  void DeclareContinuousState(const BasicVector<T>& model_vector);
+  vector cloned from @p model_vector.
+  @return index of the declared state (currently always zero). */
+  ContinuousStateIndex DeclareContinuousState(
+      const BasicVector<T>& model_vector);
 
   /** Declares that this System should reserve continuous state with @p num_q
   generalized positions, @p num_v generalized velocities, and @p num_z
@@ -1071,9 +1078,10 @@ class LeafSystem : public System<T> {
   @p model_vector. Aborts if @p model_vector has the wrong size. If the
   @p model_vector declares any VectorBase::GetElementBounds()
   constraints, they will be re-declared as inequality constraints on this
-  system (see DeclareInequalityConstraint()). */
-  void DeclareContinuousState(const BasicVector<T>& model_vector, int num_q,
-                              int num_v, int num_z);
+  system (see DeclareInequalityConstraint()).
+  @return index of the declared state (currently always zero). */
+  ContinuousStateIndex DeclareContinuousState(
+      const BasicVector<T>& model_vector, int num_q, int num_v, int num_z);
   //@}
 
   /** @name            Declare discrete state variables
@@ -1149,7 +1157,7 @@ class LeafSystem : public System<T> {
 
   You should normally provide a meaningful name for any input port you
   create. Names must be unique for this system (passing in a duplicate
-  name will throw std::logic_error). However, if you specify
+  name will throw std::exception). However, if you specify
   kUseDefaultName as the name, then a default name of e.g. "u2", where 2
   is the input port number will be provided. An empty name is not
   permitted. */
@@ -1165,10 +1173,22 @@ class LeafSystem : public System<T> {
   re-declared as inequality constraints on this system (see
   DeclareInequalityConstraint()).
 
-  @see System::DeclareInputPort() for more information. */
+  @see System::DeclareInputPort() for more information.
+  @pydrake_mkdoc_identifier{3args_model_vector} */
   InputPort<T>& DeclareVectorInputPort(
       std::variant<std::string, UseDefaultName> name,
       const BasicVector<T>& model_vector,
+      std::optional<RandomDistribution> random_type = std::nullopt);
+
+  /** Declares a vector-valued input port with type BasicVector and size @p
+  size.  If the port is intended to model a random noise or disturbance input,
+  @p random_type can (optionally) be used to label it as such.
+
+  @see System::DeclareInputPort() for more information.
+  @pydrake_mkdoc_identifier{3args_size} */
+  InputPort<T>& DeclareVectorInputPort(
+      std::variant<std::string, UseDefaultName> name,
+      int size,
       std::optional<RandomDistribution> random_type = std::nullopt);
 
   /** Declares an abstract-valued input port using the given @p model_value.
@@ -1184,23 +1204,17 @@ class LeafSystem : public System<T> {
   //@}
 
   // =========================================================================
-  /** @name          To-be-deprecated input port declarations
+  /** @name             Deprecated input port declarations
   Methods in this section leave out the name parameter and are the same
-  as invoking the corresponding method with `kUseDefaultName` as the name.
-  We intend to make specifying the name required and will deprecate these
-  soon. Don't use them. */
+  as invoking the corresponding method with `kUseDefaultName` as the name. */
   //@{
 
-  /** See the nearly identical signature with an additional (first) argument
-  specifying the port name.  This version will be deprecated as discussed
-  in #9447. */
+  DRAKE_DEPRECATED("2021-10-01", "Pass a port name as the first argument.")
   InputPort<T>& DeclareVectorInputPort(
       const BasicVector<T>& model_vector,
       std::optional<RandomDistribution> random_type = std::nullopt);
 
-  /** See the nearly identical signature with an additional (first) argument
-  specifying the port name.  This version will be deprecated as discussed
-  in #9447. */
+  DRAKE_DEPRECATED("2021-10-01", "Pass a port name as the first argument.")
   InputPort<T>& DeclareAbstractInputPort(
       const AbstractValue& model_value);
   //@}
@@ -1313,7 +1327,8 @@ class LeafSystem : public System<T> {
                                   BasicVectorSubtype*) const;
   @endcode
   where `MySystem` is a class derived from `LeafSystem<T>`. Template
-  arguments will be deduced and do not need to be specified. */
+  arguments will be deduced and do not need to be specified.
+  @exclude_from_pydrake_mkdoc{Not bound in pydrake.} */
   template <class MySystem, typename BasicVectorSubtype>
   LeafOutputPort<T>& DeclareVectorOutputPort(
       std::variant<std::string, UseDefaultName> name,
@@ -1321,9 +1336,9 @@ class LeafSystem : public System<T> {
       void (MySystem::*calc)(const Context<T>&, BasicVectorSubtype*) const,
       std::set<DependencyTicket> prerequisites_of_calc = {
           all_sources_ticket()}) {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived System.");
-    static_assert(std::is_base_of<BasicVector<T>, BasicVectorSubtype>::value,
+    static_assert(std::is_base_of_v<BasicVector<T>, BasicVectorSubtype>,
                   "Expected vector type derived from BasicVector.");
     // We need to obtain a `this` pointer of the right derived type to capture
     // in the calculator functor, so that it will be able to invoke the given
@@ -1335,7 +1350,7 @@ class LeafSystem : public System<T> {
     auto& port = CreateVectorLeafOutputPort(
         NextOutputPortName(std::move(name)), model_vector.size(),
         // Allocator function just clones the given model vector.
-        MakeAllocCallback<BasicVector<T>>(model_vector),
+        MakeAllocateCallback<BasicVector<T>>(model_vector),
         // Calculator function downcasts to specific vector type and invokes
         // the given member function.
         [this_ptr, calc](const Context<T>& context, BasicVector<T>* result) {
@@ -1351,6 +1366,28 @@ class LeafSystem : public System<T> {
           return port.template Eval<BasicVector<T>>(context);
         });
     return port;
+  }
+
+  /** Declares a vector-valued output port with type BasicVector and size @p
+  size, using the drake::dummy_value<T>, which is NaN when T = double. @p calc
+  is a calculator function that is a class member function (method) with
+  signature:
+  @code
+  void MySystem::CalcOutputVector(const Context<T>&,
+                                  BasicVector<T>*) const;
+  @endcode
+  where `MySystem` is a class derived from `LeafSystem<T>`. Template
+  arguments will be deduced and do not need to be specified.
+  @exclude_from_pydrake_mkdoc{Not bound in pydrake.} */
+  template <class MySystem>
+  LeafOutputPort<T>& DeclareVectorOutputPort(
+      std::variant<std::string, UseDefaultName> name, int size,
+      void (MySystem::*calc)(const Context<T>&, BasicVector<T>*) const,
+      std::set<DependencyTicket> prerequisites_of_calc = {
+          all_sources_ticket()}) {
+    return DeclareVectorOutputPort(std::move(name), BasicVector<T>(size),
+                                   std::move(calc),
+                                   std::move(prerequisites_of_calc));
   }
 
   /** Declares a vector-valued output port by specifying _only_ a calculator
@@ -1371,7 +1408,8 @@ class LeafSystem : public System<T> {
   constructor again. If you want the constructor invoked again at each
   allocation (not common), use one of the other signatures to explicitly
   provide a method for the allocator to call; that method can then invoke
-  the `BasicVectorSubtype` default constructor. */
+  the `BasicVectorSubtype` default constructor.
+  @exclude_from_pydrake_mkdoc{Not bound in pydrake.} */
   template <class MySystem, typename BasicVectorSubtype>
   LeafOutputPort<T>& DeclareVectorOutputPort(
       std::variant<std::string, UseDefaultName> name,
@@ -1379,7 +1417,7 @@ class LeafSystem : public System<T> {
       std::set<DependencyTicket> prerequisites_of_calc = {
           all_sources_ticket()}) {
     static_assert(
-        std::is_default_constructible<BasicVectorSubtype>::value,
+        std::is_default_constructible_v<BasicVectorSubtype>,
         "LeafSystem::DeclareVectorOutputPort(calc): the one-argument form of "
         "this method requires that the output type has a default constructor");
     // Invokes the previous method.
@@ -1394,13 +1432,32 @@ class LeafSystem : public System<T> {
   the port will be model_vector.Clone(). Note that this takes the calculator
   function in its most generic form; if you have a member function available
   use one of the other signatures.
-  @see LeafOutputPort::CalcVectorCallback */
+  @see LeafOutputPort::CalcVectorCallback
+  @pydrake_mkdoc_identifier{4args_model_vector} */
   LeafOutputPort<T>& DeclareVectorOutputPort(
       std::variant<std::string, UseDefaultName> name,
       const BasicVector<T>& model_vector,
       typename LeafOutputPort<T>::CalcVectorCallback vector_calc_function,
       std::set<DependencyTicket> prerequisites_of_calc = {
           all_sources_ticket()});
+
+  /** (Advanced) Declares a vector-valued output port with type BasicVector<T>
+  and size @p size, using the drake::dummy_value<T>, which is NaN when T =
+  double.  @p vector_calc_function is a function for calculating the port's
+  value at runtime. Note that this takes the calculator function in its most
+  generic form; if you have a member function available use one of the other
+  signatures.
+  @see LeafOutputPort::CalcVectorCallback
+  @pydrake_mkdoc_identifier{4args_size} */
+  LeafOutputPort<T>& DeclareVectorOutputPort(
+      std::variant<std::string, UseDefaultName> name, int size,
+      typename LeafOutputPort<T>::CalcVectorCallback vector_calc_function,
+      std::set<DependencyTicket> prerequisites_of_calc = {
+          all_sources_ticket()}) {
+    return DeclareVectorOutputPort(std::move(name), BasicVector<T>(size),
+                                   std::move(vector_calc_function),
+                                   std::move(prerequisites_of_calc));
+  }
 
   /** Declares an abstract-valued output port by specifying a model value of
   concrete type `OutputType` and a calculator function that is a class
@@ -1419,15 +1476,9 @@ class LeafSystem : public System<T> {
       void (MySystem::*calc)(const Context<T>&, OutputType*) const,
       std::set<DependencyTicket> prerequisites_of_calc = {
           all_sources_ticket()}) {
-    auto this_ptr = dynamic_cast<const MySystem*>(this);
-    DRAKE_DEMAND(this_ptr != nullptr);
-
     auto& port = CreateAbstractLeafOutputPort(
-        NextOutputPortName(std::move(name)), MakeAllocCallback(model_value),
-        [this_ptr, calc](const Context<T>& context, AbstractValue* result) {
-          OutputType& typed_result = result->get_mutable_value<OutputType>();
-          (this_ptr->*calc)(context, &typed_result);
-        },
+        NextOutputPortName(std::move(name)),
+        ValueProducer(this, model_value, calc),
         std::move(prerequisites_of_calc));
     return port;
   }
@@ -1458,7 +1509,7 @@ class LeafSystem : public System<T> {
       std::set<DependencyTicket> prerequisites_of_calc = {
           all_sources_ticket()}) {
     static_assert(
-        std::is_default_constructible<OutputType>::value,
+        std::is_default_constructible_v<OutputType>,
         "LeafSystem::DeclareAbstractOutputPort(calc): the one-argument form of "
         "this method requires that the output type has a default constructor");
     // Note that value initialization {} is required here.
@@ -1467,18 +1518,15 @@ class LeafSystem : public System<T> {
                                      std::move(prerequisites_of_calc));
   }
 
-  /** Declares an abstract-valued output port by specifying member functions to
-  use both for the allocator and calculator. The signatures are:
-  @code
-  OutputType MySystem::MakeOutputValue() const;
-  void MySystem::CalcOutputValue(const Context<T>&, OutputType*) const;
-  @endcode
-  where `MySystem` is a class derived from `LeafSystem<T>` and `OutputType`
-  may be any concrete type such that `Value<OutputType>` is permitted.
-  See alternate signature if your allocator method needs a Context.
-  Template arguments will be deduced and do not need to be specified.
-  @see drake::Value */
+  // Declares an output port by specifying an allocator function pointer that
+  // returns by-value, and a calc function pointer.
   template <class MySystem, typename OutputType>
+  DRAKE_DEPRECATED("2021-11-01",
+      "This overload for DeclareAbstractOutputPort is rarely the best choice;"
+      " it is unusual for a boutique allocation to return an abstract type by"
+      " value rather than provide a model_value. If the default constructor"
+      " or a model value cannot be used, use the overload that accepts an"
+      " AllocCallback alloc_function instead.")
   LeafOutputPort<T>& DeclareAbstractOutputPort(
       std::variant<std::string, UseDefaultName> name,
       OutputType (MySystem::*make)() const,
@@ -1487,14 +1535,12 @@ class LeafSystem : public System<T> {
           all_sources_ticket()}) {
     auto this_ptr = dynamic_cast<const MySystem*>(this);
     DRAKE_DEMAND(this_ptr != nullptr);
-
+    ValueProducer::AllocateCallback allocate = [this_ptr, make]() {
+      return AbstractValue::Make<OutputType>((this_ptr->*make)());
+    };
     auto& port = CreateAbstractLeafOutputPort(
         NextOutputPortName(std::move(name)),
-        [this_ptr, make]() { return AbstractValue::Make((this_ptr->*make)()); },
-        [this_ptr, calc](const Context<T>& context, AbstractValue* result) {
-          OutputType& typed_result = result->get_mutable_value<OutputType>();
-          (this_ptr->*calc)(context, &typed_result);
-        },
+        ValueProducer(this_ptr, std::move(allocate), calc),
         std::move(prerequisites_of_calc));
     return port;
   }
@@ -1509,20 +1555,39 @@ class LeafSystem : public System<T> {
       typename LeafOutputPort<T>::CalcCallback calc_function,
       std::set<DependencyTicket> prerequisites_of_calc = {
           all_sources_ticket()});
+
+  /** Declares a vector-valued output port whose value is the continuous state
+  of this system.
+  @param state_index must be ContinuousStateIndex(0) for now, since LeafSystem
+  only supports a single continuous state group at the moment.
+  @pydrake_mkdoc_identifier{continuous} */
+  LeafOutputPort<T>& DeclareStateOutputPort(
+      std::variant<std::string, UseDefaultName> name,
+      ContinuousStateIndex state_index);
+
+  /** Declares a vector-valued output port whose value is the given discrete
+  state group of this system.
+  @pydrake_mkdoc_identifier{discrete} */
+  LeafOutputPort<T>& DeclareStateOutputPort(
+      std::variant<std::string, UseDefaultName> name,
+      DiscreteStateIndex state_index);
+
+  /** Declares an abstract-valued output port whose value is the given abstract
+  state of this system.
+  @pydrake_mkdoc_identifier{abstract} */
+  LeafOutputPort<T>& DeclareStateOutputPort(
+      std::variant<std::string, UseDefaultName> name,
+      AbstractStateIndex state_index);
   //@}
 
   // =========================================================================
-  /** @name          To-be-deprecated output port declarations
+  /** @name             Deprecated output port declarations
   Methods in this section leave out the name parameter and are the same
-  as invoking the corresponding method with `kUseDefaultName` as the name.
-  We intend to make specifying the name required and will deprecate these
-  soon. Don't use them. */
+  as invoking the corresponding method with `kUseDefaultName` as the name. */
   //@{
 
-  /** See the nearly identical signature with an additional (first) argument
-  specifying the port name.  This version will be deprecated as discussed
-  in #9447. */
   template <class MySystem, typename BasicVectorSubtype>
+  DRAKE_DEPRECATED("2021-10-01", "Pass a port name as the first argument.")
   LeafOutputPort<T>& DeclareVectorOutputPort(
       const BasicVectorSubtype& model_vector,
       void (MySystem::*calc)(const Context<T>&, BasicVectorSubtype*) const,
@@ -1532,10 +1597,8 @@ class LeafSystem : public System<T> {
                                    std::move(prerequisites_of_calc));
   }
 
-  /** See the nearly identical signature with an additional (first) argument
-  specifying the port name.  This version will be deprecated as discussed
-  in #9447. */
   template <class MySystem, typename BasicVectorSubtype>
+  DRAKE_DEPRECATED("2021-10-01", "Pass a port name as the first argument.")
   LeafOutputPort<T>& DeclareVectorOutputPort(
       void (MySystem::*calc)(const Context<T>&, BasicVectorSubtype*) const,
       std::set<DependencyTicket> prerequisites_of_calc = {
@@ -1544,22 +1607,16 @@ class LeafSystem : public System<T> {
                                    std::move(prerequisites_of_calc));
   }
 
-  /** See the nearly identical signature with an additional (first) argument
-  specifying the port name.  This version will be deprecated as discussed
-  in #9447. */
+  DRAKE_DEPRECATED("2021-10-01", "Pass a port name as the first argument.")
   LeafOutputPort<T>& DeclareVectorOutputPort(
       const BasicVector<T>& model_vector,
       typename LeafOutputPort<T>::CalcVectorCallback vector_calc_function,
       std::set<DependencyTicket> prerequisites_of_calc = {
           all_sources_ticket()});
 
-  /** See the nearly identical signature with an additional (first) argument
-  specifying the port name.  This version will be deprecated as discussed
-  in #9447. Note that the deprecated method is not available for
-  `OutputType` std::string as that would create an ambiguity. In that
-  case the name is required. */
   template <class MySystem, typename OutputType>
-  std::enable_if_t<!std::is_same<OutputType, std::string>::value,
+  DRAKE_DEPRECATED("2021-10-01", "Pass a port name as the first argument.")
+  std::enable_if_t<!std::is_same_v<OutputType, std::string>,
                    LeafOutputPort<T>&>
   DeclareAbstractOutputPort(const OutputType& model_value,
                             void (MySystem::*calc)(const Context<T>&,
@@ -1570,10 +1627,8 @@ class LeafSystem : public System<T> {
                                      std::move(prerequisites_of_calc));
   }
 
-  /** See the nearly identical signature with an additional (first) argument
-  specifying the port name.  This version will be deprecated as discussed
-  in #9447. */
   template <class MySystem, typename OutputType>
+  DRAKE_DEPRECATED("2021-10-01", "Pass a port name as the first argument.")
   LeafOutputPort<T>& DeclareAbstractOutputPort(
       void (MySystem::*calc)(const Context<T>&, OutputType*) const,
       std::set<DependencyTicket> prerequisites_of_calc = {
@@ -1582,22 +1637,21 @@ class LeafSystem : public System<T> {
         kUseDefaultName, calc, std::move(prerequisites_of_calc));
   }
 
-  /** See the nearly identical signature with an additional (first) argument
-  specifying the port name.  This version will be deprecated as discussed
-  in #9447. */
   template <class MySystem, typename OutputType>
+  DRAKE_DEPRECATED("2021-10-01", "Pass a port name as the first argument.")
   LeafOutputPort<T>& DeclareAbstractOutputPort(
       OutputType (MySystem::*make)() const,
       void (MySystem::*calc)(const Context<T>&, OutputType*) const,
       std::set<DependencyTicket> prerequisites_of_calc = {
           all_sources_ticket()}) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     return DeclareAbstractOutputPort(kUseDefaultName, make, calc,
                                      std::move(prerequisites_of_calc));
+#pragma GCC diagnostic pop
   }
 
-  /** See the nearly identical signature with an additional (first) argument
-  specifying the port name.  This version will be deprecated as discussed
-  in #9447. */
+  DRAKE_DEPRECATED("2021-10-01", "Pass a port name as the first argument.")
   LeafOutputPort<T>& DeclareAbstractOutputPort(
       typename LeafOutputPort<T>::AllocCallback alloc_function,
       typename LeafOutputPort<T>::CalcCallback calc_function,
@@ -1666,12 +1720,12 @@ class LeafSystem : public System<T> {
       T (MySystem::*calc)(const Context<T>&) const,
       void (MySystem::*publish_callback)(
           const Context<T>&, const PublishEvent<T>&) const) const {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived system.");
     auto fn = [this, publish_callback](
         const Context<T>& context, const PublishEvent<T>& publish_event) {
       auto system_ptr = dynamic_cast<const MySystem*>(this);
-      DRAKE_DEMAND(system_ptr);
+      DRAKE_DEMAND(system_ptr != nullptr);
       return (system_ptr->*publish_callback)(context, publish_event);
     };
     PublishEvent<T> publish_event(fn);
@@ -1694,12 +1748,12 @@ class LeafSystem : public System<T> {
       T (MySystem::*calc)(const Context<T>&) const,
       void (MySystem::*du_callback)(const Context<T>&,
           const DiscreteUpdateEvent<T>&, DiscreteValues<T>*) const) const {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived system.");
     auto fn = [this, du_callback](const Context<T>& context,
         const DiscreteUpdateEvent<T>& du_event, DiscreteValues<T>* values) {
       auto system_ptr = dynamic_cast<const MySystem*>(this);
-      DRAKE_DEMAND(system_ptr);
+      DRAKE_DEMAND(system_ptr != nullptr);
       return (system_ptr->*du_callback)(context, du_event, values);
     };
     DiscreteUpdateEvent<T> du_event(fn);
@@ -1722,12 +1776,12 @@ class LeafSystem : public System<T> {
       T (MySystem::*calc)(const Context<T>&) const,
       void (MySystem::*uu_callback)(const Context<T>&,
           const UnrestrictedUpdateEvent<T>&, State<T>*) const) const {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived system.");
     auto fn = [this, uu_callback](const Context<T>& context,
         const UnrestrictedUpdateEvent<T>& uu_event, State<T>* state) {
       auto system_ptr = dynamic_cast<const MySystem*>(this);
-      DRAKE_DEMAND(system_ptr);
+      DRAKE_DEMAND(system_ptr != nullptr);
       return (system_ptr->*uu_callback)(context, uu_event, state);
     };
     UnrestrictedUpdateEvent<T> uu_event(fn);
@@ -1753,7 +1807,7 @@ class LeafSystem : public System<T> {
       const WitnessFunctionDirection& direction_type,
       T (MySystem::*calc)(const Context<T>&) const,
       const Event<T>& e) const {
-    static_assert(std::is_base_of<LeafSystem<T>, MySystem>::value,
+    static_assert(std::is_base_of_v<LeafSystem<T>, MySystem>,
                   "Expected to be invoked from a LeafSystem-derived system.");
     return std::make_unique<WitnessFunction<T>>(
         this, this, description, direction_type, calc, e.Clone());
@@ -2032,8 +2086,7 @@ class LeafSystem : public System<T> {
   // returns a reference to it.
   LeafOutputPort<T>& CreateAbstractLeafOutputPort(
       std::string name,
-      typename LeafOutputPort<T>::AllocCallback allocator,
-      typename LeafOutputPort<T>::CalcCallback calculator,
+      ValueProducer producer,
       std::set<DependencyTicket> calc_prerequisites);
 
   // Creates a new cached LeafOutputPort in this LeafSystem and returns a
@@ -2041,26 +2094,15 @@ class LeafSystem : public System<T> {
   // port size for vector ports. Prerequisites list must not be empty.
   LeafOutputPort<T>& CreateCachedLeafOutputPort(
       std::string name, const std::optional<int>& fixed_size,
-      typename CacheEntry::AllocCallback allocator,
-      typename CacheEntry::CalcCallback calculator,
+      ValueProducer value_producer,
       std::set<DependencyTicket> calc_prerequisites);
 
   // Creates an abstract output port allocator function from an arbitrary type
   // model value.
   template <typename OutputType>
-  static typename LeafOutputPort<T>::AllocCallback MakeAllocCallback(
+  static ValueProducer::AllocateCallback MakeAllocateCallback(
       const OutputType& model_value) {
-    // The given model value may have *either* a copy constructor or a Clone()
-    // method, since it just has to be suitable for containing in an
-    // AbstractValue. We need to create a functor that is copy constructible,
-    // so need to wrap the model value to give it a copy constructor. Drake's
-    // copyable_unique_ptr does just that, so is suitable for capture by the
-    // allocator functor here.
-    copyable_unique_ptr<AbstractValue> owned_model(
-        new Value<OutputType>(model_value));
-    return [model = std::move(owned_model)]() {
-      return model->Clone();
-    };
+    return internal::AbstractValueCloner(model_value);
   }
 
   // If @p model_vector's GetElementBounds provides any constraints,

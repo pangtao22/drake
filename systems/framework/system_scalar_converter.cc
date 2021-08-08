@@ -1,6 +1,12 @@
 #include "drake/systems/framework/system_scalar_converter.h"
 
+#include <stdexcept>
+
+#include <fmt/format.h>
+
+#include "drake/common/default_scalars.h"
 #include "drake/common/hash.h"
+#include "drake/common/nice_type_name.h"
 
 using std::pair;
 using std::type_index;
@@ -31,6 +37,11 @@ void SystemScalarConverter::Insert(
   DRAKE_ASSERT(insert_result.second);
 }
 
+template <typename T, typename U>
+void SystemScalarConverter::Remove() {
+  funcs_.erase(Key(typeid(T), typeid(U)));
+}
+
 const SystemScalarConverter::ErasedConverterFunc* SystemScalarConverter::Find(
     const std::type_info& t_info, const std::type_info& u_info) const {
   const auto& key = Key{t_info, u_info};
@@ -55,6 +66,24 @@ void SystemScalarConverter::RemoveUnlessAlsoSupportedBy(
     }
   }
 }
+
+namespace system_scalar_converter_internal {
+
+void ThrowConversionMismatch(
+    const type_info& s_t_info, const type_info& s_u_info,
+    const type_info& other_info) {
+  throw std::runtime_error(fmt::format(
+      "SystemScalarConverter was configured to convert a {} into a {}"
+      " but was called with a {} at runtime",
+      NiceTypeName::Get(s_u_info), NiceTypeName::Get(s_t_info),
+      NiceTypeName::Get(other_info)));
+}
+
+}  // namespace system_scalar_converter_internal
+
+DRAKE_DEFINE_FUNCTION_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_SCALARS((
+    &SystemScalarConverter::Remove<T, U>
+))
 
 }  // namespace systems
 }  // namespace drake

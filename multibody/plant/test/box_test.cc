@@ -55,7 +55,6 @@ class SlidingBoxTest : public ::testing::Test {
     // Create a context for this system:
     std::unique_ptr<Context<double>> diagram_context =
         diagram->CreateDefaultContext();
-    diagram_context->EnableCaching();
     diagram->SetDefaultContext(diagram_context.get());
     Context<double>& plant_context =
         diagram->GetMutableSubsystemContext(plant, diagram_context.get());
@@ -104,7 +103,7 @@ class SlidingBoxTest : public ::testing::Test {
       // contact point C.
       const Vector3<double> f_Bc_W(-applied_force_, 0.0, mass_ * g_);
       EXPECT_TRUE(CompareMatrices(point_pair_contact_info.contact_force(),
-                                  f_Bc_W * direction, kTolerance_,
+                                  f_Bc_W * direction, kTolerance,
                                   MatrixCompareType::relative));
 
       // Upper limit on the x displacement computed using the maximum possible
@@ -123,14 +122,14 @@ class SlidingBoxTest : public ::testing::Test {
           -Vector3<double>::UnitZ() * direction;
       EXPECT_TRUE(CompareMatrices(
           point_pair_contact_info.point_pair().nhat_BA_W, expected_normal,
-          kTolerance_, MatrixCompareType::relative));
+          kTolerance, MatrixCompareType::relative));
 
       // If we are in stiction, the slip speed should be smaller than the
       // specified stiction tolerance.
       EXPECT_LT(point_pair_contact_info.slip_speed(), stiction_tolerance_);
 
       // There should not be motion in the normal direction.
-      EXPECT_NEAR(point_pair_contact_info.separation_speed(), 0.0, kTolerance_);
+      EXPECT_NEAR(point_pair_contact_info.separation_speed(), 0.0, kTolerance);
     };
 
     // Verify contact results at the end of the simulation.
@@ -149,7 +148,6 @@ class SlidingBoxTest : public ::testing::Test {
         diagram2->GetSubsystemByName("plant"));
     std::unique_ptr<Context<double>> diagram_context2 =
         diagram2->CreateDefaultContext();
-    diagram_context2->EnableCaching();
     Context<double>& plant_context2 =
         diagram2->GetMutableSubsystemContext(plant2, diagram_context2.get());
     plant2.get_actuation_input_port().FixValue(&plant_context2, applied_force_);
@@ -203,7 +201,7 @@ class SlidingBoxTest : public ::testing::Test {
   // (a modified Stribeck model), we simulate for a long enough time to reach
   // a "steady state". Therefore the precision of the results in these tests
   // is dominated for "how well we reached steady state".
-  const double kTolerance_{1.0e-12};
+  const double kTolerance{1.0e-12};
 };
 
 TEST_F(SlidingBoxTest, ContinuousModel) {

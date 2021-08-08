@@ -36,7 +36,7 @@ class SoftMesh {
            std::unique_ptr<VolumeMeshFieldLinear<double, double>> pressure)
       : mesh_(std::move(mesh)),
         pressure_(std::move(pressure)),
-        bvh_(std::make_unique<Bvh<VolumeMesh<double>>>(*mesh_)) {
+        bvh_(std::make_unique<Bvh<Obb, VolumeMesh<double>>>(*mesh_)) {
     DRAKE_ASSERT(mesh_.get() == &pressure_->mesh());
   }
 
@@ -53,7 +53,7 @@ class SoftMesh {
     DRAKE_DEMAND(pressure_ != nullptr);
     return *pressure_;
   }
-  const Bvh<VolumeMesh<double>>& bvh() const {
+  const Bvh<Obb, VolumeMesh<double>>& bvh() const {
     DRAKE_DEMAND(bvh_ != nullptr);
     return *bvh_;
   }
@@ -61,7 +61,7 @@ class SoftMesh {
  private:
   std::unique_ptr<VolumeMesh<double>> mesh_;
   std::unique_ptr<VolumeMeshFieldLinear<double, double>> pressure_;
-  std::unique_ptr<Bvh<VolumeMesh<double>>> bvh_;
+  std::unique_ptr<Bvh<Obb, VolumeMesh<double>>> bvh_;
 };
 
 /* Defines a soft half space. The half space is defined such that the half
@@ -151,7 +151,7 @@ class SoftGeometry {
 
   /* Returns a reference to the bounding volume hierarchy -- calling this will
    throw if is_half_space() returns `true`.  */
-  const Bvh<VolumeMesh<double>>& bvh() const {
+  const Bvh<Obb, VolumeMesh<double>>& bvh() const {
     if (is_half_space()) {
       throw std::runtime_error(
           "SoftGeometry::bvh() cannot be invoked for soft half space");
@@ -184,7 +184,7 @@ class RigidMesh {
 
   explicit RigidMesh(std::unique_ptr<SurfaceMesh<double>> mesh)
       : mesh_(std::move(mesh)),
-        bvh_(std::make_unique<Bvh<SurfaceMesh<double>>>(
+        bvh_(std::make_unique<Bvh<Obb, SurfaceMesh<double>>>(
             *mesh_)) {}
 
   DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(RigidMesh)
@@ -193,14 +193,14 @@ class RigidMesh {
     DRAKE_DEMAND(mesh_ != nullptr);
     return *mesh_;
   }
-  const Bvh<SurfaceMesh<double>>& bvh() const {
+  const Bvh<Obb, SurfaceMesh<double>>& bvh() const {
     DRAKE_DEMAND(bvh_ != nullptr);
     return *bvh_;
   }
 
  private:
   copyable_unique_ptr<SurfaceMesh<double>> mesh_;
-  copyable_unique_ptr<Bvh<SurfaceMesh<double>>> bvh_;
+  copyable_unique_ptr<Bvh<Obb, SurfaceMesh<double>>> bvh_;
 };
 
 /* The base representation of rigid geometries. Generally, a rigid geometry
@@ -235,7 +235,7 @@ class RigidGeometry {
 
   /* Returns a reference to the bounding volume hierarchy -- calling this will
    throw unless is_half_space() returns false.  */
-  const Bvh<SurfaceMesh<double>>& bvh() const {
+  const Bvh<Obb, SurfaceMesh<double>>& bvh() const {
     if (is_half_space()) {
       throw std::runtime_error(
           "RigidGeometry::bvh() cannot be invoked for rigid half space");
@@ -309,8 +309,8 @@ class Geometries final : public ShapeReifier {
    @param id            The unique identifier for the geometry.
    @param properties    The proximity properties which will determine if a
                         hydroelastic representation is requested.
-   @throws std::logic_error if the shape is a supported type but the properties
-                            are malformed.
+   @throws std::exception if the shape is a supported type but the properties
+                          are malformed.
    @pre There is no previous representation associated with id.  */
   void MaybeAddGeometry(const Shape& shape, GeometryId id,
                         const ProximityProperties& properties);

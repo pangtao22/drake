@@ -221,7 +221,7 @@ DrakeVisualizer<T>::DrakeVisualizer(lcm::DrakeLcmInterface* lcm,
   }
   if (params_.role == Role::kUnassigned) {
     throw std::runtime_error(
-        "DrakeVisualizer cannot be be used for geometries with the "
+        "DrakeVisualizer cannot be used for geometries with the "
         "Role::kUnassigned value. Please choose proximity, perception, or "
         "illustration");
   }
@@ -237,7 +237,6 @@ DrakeVisualizer<T>::DrakeVisualizer(lcm::DrakeLcmInterface* lcm,
   // This cache entry depends on *nothing*.
   dynamic_data_cache_index_ =
       this->DeclareCacheEntry("dynamic_frames",
-                              vector<internal::DynamicFrameData>(),
                               &DrakeVisualizer<T>::CalcDynamicFrameData,
                               {this->nothing_ticket()})
           .cache_index();
@@ -420,7 +419,7 @@ void DrakeVisualizer<T>::PopulateDynamicFrameData(
   vector<internal::DynamicFrameData>& dynamic_frames = *frame_data;
   dynamic_frames.clear();
 
-  for (const FrameId& frame_id : inspector.all_frame_ids()) {
+  for (const FrameId& frame_id : inspector.GetAllFrameIds()) {
     // We'll handle the world frame special.
     if (frame_id == inspector.world_frame_id()) continue;
     const int count =

@@ -495,7 +495,7 @@ symbolic::Formula ExtractLinearComplementarityConstraints(
 // Extracts generic constraints in @p prog into a symbolic formula. This is a
 // helper function used in DrealSolver::Solve.
 //
-// @throws std::logic_error if there is a generic-constraint which does not
+// @throws std::exception if there is a generic-constraint which does not
 // provide symbolic evaluation.
 symbolic::Formula ExtractGenericConstraints(const MathematicalProgram& prog) {
   return ExtractConstraints(prog.generic_constraints());
@@ -559,7 +559,7 @@ void DrealSolver::DoSolve(
   // 3. Call dReal to check the delta-satisfiability of the problem.
 
   // TODO(soonho): Support other dReal options. For now, we only support
-  // "--preicision" and "--local-optimization".
+  // "--precision" and "--local-optimization".
 
   const double precision{GetOptionWithDefaultValue(
       merged_options, "precision", 0.001 /* default */)};

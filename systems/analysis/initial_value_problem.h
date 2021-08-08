@@ -117,7 +117,7 @@ class InitialValueProblem {
   /// @pre An initial time @p default_values.t0 is given.
   /// @pre An initial state vector @p default_values.x0 is given.
   /// @pre A parameter vector @p default_values.k is given.
-  /// @throws std::logic_error if preconditions are not met.
+  /// @throws std::exception if preconditions are not met.
   InitialValueProblem(const OdeFunction& ode_function,
                       const OdeContext& default_values);
 
@@ -136,7 +136,7 @@ class InitialValueProblem {
   /// @pre If given, the dimension of the parameter vector @p values.k
   ///      must match that of the parameter vector in the default specified
   ///      values given on construction.
-  /// @throws std::logic_error if preconditions are not met.
+  /// @throws std::exception if preconditions are not met.
   VectorX<T> Solve(const T& tf, const OdeContext& values = {}) const;
 
   /// Solves and yields an approximation of the IVP solution x(t; 𝐤) for
@@ -165,7 +165,7 @@ class InitialValueProblem {
   /// @pre If given, the dimension of the parameter vector @p values.k
   ///      must match that of the parameter vector in the default specified
   ///      values given on construction.
-  /// @throws std::logic_error if any of the preconditions is not met.
+  /// @throws std::exception if any of the preconditions is not met.
   std::unique_ptr<DenseOutput<T>> DenseSolve(
       const T& tf, const OdeContext& values = {}) const;
 
@@ -195,13 +195,13 @@ class InitialValueProblem {
 
   /// Gets a reference to the internal integrator instance.
   const IntegratorBase<T>& get_integrator() const {
-    DRAKE_DEMAND(integrator_.get());
+    DRAKE_DEMAND(integrator_ != nullptr);
     return *integrator_.get();
   }
 
   /// Gets a mutable reference to the internal integrator instance.
   IntegratorBase<T>& get_mutable_integrator() {
-    DRAKE_DEMAND(integrator_.get());
+    DRAKE_DEMAND(integrator_ != nullptr);
     return *integrator_.get();
   }
 
@@ -214,10 +214,10 @@ class InitialValueProblem {
   // @param tf The IVP will be solved for this time.
   // @param values IVP initial conditions and parameters.
   // @returns Sanitized values.
-  // @throws std::logic_error If preconditions specified for
-  //                          InitialValueProblem::Solve() and
-  //                          InitialValueProblem::DenseSolve()
-  //                          do not hold.
+  // @throws std::exception If preconditions specified for
+  //                        InitialValueProblem::Solve() and
+  //                        InitialValueProblem::DenseSolve()
+  //                        do not hold.
   OdeContext SanitizeValuesOrThrow(const T& tf, const OdeContext& values) const;
 
   // IVP values specified by default.

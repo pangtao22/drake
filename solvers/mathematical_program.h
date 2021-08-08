@@ -22,6 +22,7 @@
 #include "drake/common/autodiff.h"
 #include "drake/common/drake_assert.h"
 #include "drake/common/drake_copyable.h"
+#include "drake/common/drake_deprecated.h"
 #include "drake/common/eigen_types.h"
 #include "drake/common/polynomial.h"
 #include "drake/common/symbolic.h"
@@ -71,7 +72,7 @@ namespace internal {
  * Return un-initialized new variable names.
  */
 template <int Size>
-typename std::enable_if<Size >= 0, typename NewVariableNames<Size>::type>::type
+typename std::enable_if_t<Size >= 0, typename NewVariableNames<Size>::type>
 CreateNewVariableNames(int) {
   typename NewVariableNames<Size>::type names;
   return names;
@@ -81,8 +82,8 @@ CreateNewVariableNames(int) {
  * Return un-initialized new variable names.
  */
 template <int Size>
-typename std::enable_if<Size == Eigen::Dynamic,
-                        typename NewVariableNames<Size>::type>::type
+typename std::enable_if_t<Size == Eigen::Dynamic,
+                          typename NewVariableNames<Size>::type>
 CreateNewVariableNames(int size) {
   typename NewVariableNames<Eigen::Dynamic>::type names(size);
   return names;
@@ -168,6 +169,18 @@ class MathematicalProgram {
    * @retval new_prog. The newly constructed mathematical program.
    */
   std::unique_ptr<MathematicalProgram> Clone() const;
+
+  /**
+   * Returns string representation of this program, listing the decision
+   * variables, costs, and constraints.
+   *
+   * Note that by default, we do not require variables to have unique names.
+   * Providing useful variable names and calling Evaluator::set_description() to
+   * describe the costs and constraints can dramatically improve the readability
+   * of the output.  See the tutorial `debug_mathematical_program.ipynb`
+   * for more information.
+   */
+  std::string to_string() const;
 
   /**
    * Adds continuous variables, appending them to an internal vector of any
@@ -396,7 +409,7 @@ class MathematicalProgram {
    * @pre `decision_variables` should not intersect with the existing variables
    * or indeterminates in the optimization program.
    * @pre Each entry in `decision_variables` should not be a dummy variable.
-   * @throws std::runtime_error if the preconditions are not satisfied.
+   * @throws std::exception if the preconditions are not satisfied.
    */
   void AddDecisionVariables(
       const Eigen::Ref<const VectorXDecisionVariable>& decision_variables);
@@ -530,7 +543,7 @@ class MathematicalProgram {
    *   p = Q₍₀,₀₎x⁴ + 2Q₍₁,₀₎ x³ + (2Q₍₂,₀₎ + Q₍₁,₁₎)x² + 2Q₍₂,₁₎x + Q₍₂,₂₎
    * and Q.
    *
-   * @throws std::runtime_error if @p degree is not a positive even integer.
+   * @throws std::exception if @p degree is not a positive even integer.
    * @see MonomialBasis.
    */
   std::pair<symbolic::Polynomial, MatrixXDecisionVariable> NewSosPolynomial(
@@ -870,6 +883,8 @@ class MathematicalProgram {
 
   /**
    * Adds a generic cost to the optimization program.
+   *
+   * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   Binding<Cost> AddCost(const Binding<Cost>& binding);
 
@@ -877,6 +892,8 @@ class MathematicalProgram {
    * Adds a cost type to the optimization program.
    * @param obj The added objective.
    * @param vars The decision variables on which the cost depend.
+   *
+   * @pydrake_mkdoc_identifier{2args_obj_vars}
    */
   template <typename C>
   auto AddCost(const std::shared_ptr<C>& obj,
@@ -890,6 +907,8 @@ class MathematicalProgram {
    * Adds a generic cost to the optimization program.
    * @param obj The added objective.
    * @param vars The decision variables on which the cost depend.
+   *
+   * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   template <typename C>
   auto AddCost(const std::shared_ptr<C>& obj, const VariableRefList& vars) {
@@ -909,10 +928,12 @@ class MathematicalProgram {
   /**
    * Adds a cost to the optimization program on a list of variables.
    * @tparam F it should define functions numInputs, numOutputs and eval. Check
+   *
+   * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   template <typename F>
-  typename std::enable_if<internal::is_cost_functor_candidate<F>::value,
-                          Binding<Cost>>::type
+  typename std::enable_if_t<internal::is_cost_functor_candidate<F>::value,
+                            Binding<Cost>>
   AddCost(F&& f, const VariableRefList& vars) {
     return AddCost(f, ConcatenateVariableRefList(vars));
   }
@@ -921,10 +942,12 @@ class MathematicalProgram {
    * Adds a cost to the optimization program on an Eigen::Vector containing
    * decision variables.
    * @tparam F Type that defines functions numInputs, numOutputs and eval.
+   *
+   * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   template <typename F>
-  typename std::enable_if<internal::is_cost_functor_candidate<F>::value,
-                          Binding<Cost>>::type
+  typename std::enable_if_t<internal::is_cost_functor_candidate<F>::value,
+                            Binding<Cost>>
   AddCost(F&& f, const Eigen::Ref<const VectorXDecisionVariable>& vars) {
     auto c = MakeFunctionCost(std::forward<F>(f));
     return AddCost(c, vars);
@@ -934,10 +957,12 @@ class MathematicalProgram {
    * Statically assert if a user inadvertently passes a
    * binding-compatible Constraint.
    * @tparam F The type to check.
+   *
+   * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   template <typename F, typename Vars>
-  typename std::enable_if<internal::assert_if_is_constraint<F>::value,
-                          Binding<Cost>>::type
+  typename std::enable_if_t<internal::assert_if_is_constraint<F>::value,
+                            Binding<Cost>>
   AddCost(F&&, Vars&&) {
     throw std::runtime_error("This will assert at compile-time.");
   }
@@ -946,6 +971,8 @@ class MathematicalProgram {
    * Adds a cost term of the form c'*x.
    * Applied to a subset of the variables and pushes onto
    * the linear cost data structure.
+   *
+   * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   Binding<LinearCost> AddCost(const Binding<LinearCost>& binding);
 
@@ -994,6 +1021,8 @@ class MathematicalProgram {
    * Adds a cost term of the form 0.5*x'*Q*x + b'x.
    * Applied to subset of the variables and pushes onto
    * the quadratic cost data structure.
+   *
+   * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   Binding<QuadraticCost> AddCost(const Binding<QuadraticCost>& binding);
 
@@ -1006,50 +1035,12 @@ class MathematicalProgram {
    * is_convex=nullopt (the default), then Drake will determine if `e` is a
    * convex quadratic cost or not. To improve the computation speed, the user
    * can set is_convex if the user knows whether the cost is convex or not.
-   * @throws std::runtime error if the expression is not quadratic.
+   * @throws std::exception if the expression is not quadratic.
    * @return The newly added cost together with the bound variables.
    */
   Binding<QuadraticCost> AddQuadraticCost(
       const symbolic::Expression& e,
       std::optional<bool> is_convex = std::nullopt);
-
-  /**
-   * Adds a cost term of the form (x-x_desired)'*Q*(x-x_desired).
-   */
-  Binding<QuadraticCost> AddQuadraticErrorCost(
-      const Eigen::Ref<const Eigen::MatrixXd>& Q,
-      const Eigen::Ref<const Eigen::VectorXd>& x_desired,
-      const VariableRefList& vars) {
-    return AddQuadraticErrorCost(Q, x_desired,
-                                 ConcatenateVariableRefList(vars));
-  }
-
-  /**
-   * Adds a cost term of the form (x-x_desired)'*Q*(x-x_desired).
-   */
-  Binding<QuadraticCost> AddQuadraticErrorCost(
-      const Eigen::Ref<const Eigen::MatrixXd>& Q,
-      const Eigen::Ref<const Eigen::VectorXd>& x_desired,
-      const Eigen::Ref<const VectorXDecisionVariable>& vars);
-
-  /**
-   * Adds a cost term of the form | Ax - b |^2.
-   */
-  Binding<QuadraticCost> AddL2NormCost(
-      const Eigen::Ref<const Eigen::MatrixXd>& A,
-      const Eigen::Ref<const Eigen::VectorXd>& b, const VariableRefList& vars) {
-    return AddL2NormCost(A, b, ConcatenateVariableRefList(vars));
-  }
-
-  /**
-   * Adds a cost term of the form | Ax - b |^2.
-   */
-  Binding<QuadraticCost> AddL2NormCost(
-      const Eigen::Ref<const Eigen::MatrixXd>& A,
-      const Eigen::Ref<const Eigen::VectorXd>& b,
-      const Eigen::Ref<const VectorXDecisionVariable>& vars) {
-    return AddCost(MakeL2NormCost(A, b), vars);
-  }
 
   /**
    * Adds a cost term of the form 0.5*x'*Q*x + b'x.
@@ -1097,6 +1088,71 @@ class MathematicalProgram {
       std::optional<bool> is_convex = std::nullopt);
 
   /**
+   * Adds a cost term of the form (x-x_desired)'*Q*(x-x_desired).
+   */
+  Binding<QuadraticCost> AddQuadraticErrorCost(
+      const Eigen::Ref<const Eigen::MatrixXd>& Q,
+      const Eigen::Ref<const Eigen::VectorXd>& x_desired,
+      const VariableRefList& vars) {
+    return AddQuadraticErrorCost(Q, x_desired,
+                                 ConcatenateVariableRefList(vars));
+  }
+
+  /**
+   * Adds a cost term of the form (x-x_desired)'*Q*(x-x_desired).
+   */
+  Binding<QuadraticCost> AddQuadraticErrorCost(
+      const Eigen::Ref<const Eigen::MatrixXd>& Q,
+      const Eigen::Ref<const Eigen::VectorXd>& x_desired,
+      const Eigen::Ref<const VectorXDecisionVariable>& vars);
+
+  /**
+   * Adds a cost term of the form | Ax - b |^2.
+   */
+  DRAKE_DEPRECATED("2021-09-01", "Please use Add2NormSquaredCost instead")
+  Binding<QuadraticCost> AddL2NormCost(
+      const Eigen::Ref<const Eigen::MatrixXd>& A,
+      const Eigen::Ref<const Eigen::VectorXd>& b, const VariableRefList& vars) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    return AddL2NormCost(A, b, ConcatenateVariableRefList(vars));
+#pragma GCC diagnostic pop
+  }
+
+  /**
+   * Adds a cost term of the form | Ax - b |^2.
+   */
+  DRAKE_DEPRECATED("2021-09-01", "Please use Add2NormSquaredCost instead")
+  Binding<QuadraticCost> AddL2NormCost(
+      const Eigen::Ref<const Eigen::MatrixXd>& A,
+      const Eigen::Ref<const Eigen::VectorXd>& b,
+      const Eigen::Ref<const VectorXDecisionVariable>& vars) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    return AddCost(MakeL2NormCost(A, b), vars);
+#pragma GCC diagnostic pop
+  }
+
+  /**
+   * Adds a quadratic cost of the form |Ax-b|²=(Ax-b)ᵀ(Ax-b)
+   */
+  Binding<QuadraticCost> Add2NormSquaredCost(
+      const Eigen::Ref<const Eigen::MatrixXd>& A,
+      const Eigen::Ref<const Eigen::VectorXd>& b, const VariableRefList& vars) {
+    return Add2NormSquaredCost(A, b, ConcatenateVariableRefList(vars));
+  }
+
+  /**
+   * Adds a quadratic cost of the form |Ax-b|²=(Ax-b)ᵀ(Ax-b)
+   */
+  Binding<QuadraticCost> Add2NormSquaredCost(
+      const Eigen::Ref<const Eigen::MatrixXd>& A,
+      const Eigen::Ref<const Eigen::VectorXd>& b,
+      const Eigen::Ref<const VectorXDecisionVariable>& vars) {
+    return AddCost(Make2NormSquaredCost(A, b), vars);
+  }
+
+  /**
    * Adds a cost term in the polynomial form.
    * @param e A symbolic expression in the polynomial form.
    * @return The newly created cost and the bound variables.
@@ -1111,6 +1167,8 @@ class MathematicalProgram {
    * @param e The linear or quadratic expression of the cost.
    * @pre `e` is linear or `e` is quadratic. Otherwise throws a runtime error.
    * @return The newly created cost, together with the bound variables.
+   *
+   * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   Binding<Cost> AddCost(const symbolic::Expression& e);
 
@@ -1195,7 +1253,7 @@ class MathematicalProgram {
    * 1. <tt>lb <= e <= ub</tt> is a trivial constraint such as 1 <= 2 <= 3.
    * 2. <tt>lb <= e <= ub</tt> is unsatisfiable such as 1 <= -5 <= 3
    *
-   * @param e A symbolic expression of the the decision variables.
+   * @param e A symbolic expression of the decision variables.
    * @param lb A scalar, the lower bound.
    * @param ub A scalar, the upper bound.
    *
@@ -1282,9 +1340,9 @@ class MathematicalProgram {
    * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   template <typename Derived>
-  typename std::enable_if<
+  typename std::enable_if_t<
       is_eigen_scalar_same<Derived, symbolic::Formula>::value,
-      Binding<Constraint>>::type
+      Binding<Constraint>>
   AddConstraint(const Eigen::ArrayBase<Derived>& formulas) {
     return AddConstraint(internal::ParseConstraint(formulas));
   }
@@ -1307,9 +1365,9 @@ class MathematicalProgram {
    * @pydrake_mkdoc_identifier{matrix_formula}
    */
   template <typename Derived>
-  typename std::enable_if<
+  typename std::enable_if_t<
       is_eigen_scalar_same<Derived, symbolic::Formula>::value,
-      Binding<Constraint>>::type
+      Binding<Constraint>>
   AddConstraint(const Eigen::MatrixBase<Derived>& formulas) {
     return AddConstraint(formulas.array());
   }
@@ -1482,9 +1540,9 @@ class MathematicalProgram {
    * @tparam Derived An Eigen Array type of Formula.
    */
   template <typename Derived>
-  typename std::enable_if<
+  typename std::enable_if_t<
       is_eigen_scalar_same<Derived, symbolic::Formula>::value,
-      Binding<LinearConstraint>>::type
+      Binding<LinearConstraint>>
   AddLinearConstraint(const Eigen::ArrayBase<Derived>& formulas) {
     Binding<Constraint> binding = internal::ParseConstraint(formulas);
     Constraint* constraint = binding.evaluator().get();
@@ -1554,9 +1612,9 @@ class MathematicalProgram {
    * bound variables.
    */
   template <typename DerivedV, typename DerivedB>
-  typename std::enable_if<
+  typename std::enable_if_t<
       is_eigen_vector_expression_double_pair<DerivedV, DerivedB>::value,
-      Binding<LinearEqualityConstraint>>::type
+      Binding<LinearEqualityConstraint>>
   AddLinearEqualityConstraint(const Eigen::MatrixBase<DerivedV>& v,
                               const Eigen::MatrixBase<DerivedB>& b) {
     return AddConstraint(internal::ParseLinearEqualityConstraint(v, b));
@@ -1584,9 +1642,9 @@ class MathematicalProgram {
    * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   template <typename DerivedV, typename DerivedB>
-  typename std::enable_if<
+  typename std::enable_if_t<
       is_eigen_nonvector_expression_double_pair<DerivedV, DerivedB>::value,
-      Binding<LinearEqualityConstraint>>::type
+      Binding<LinearEqualityConstraint>>
   AddLinearEqualityConstraint(const Eigen::MatrixBase<DerivedV>& V,
                               const Eigen::MatrixBase<DerivedB>& B,
                               bool lower_triangle = false) {
@@ -1774,10 +1832,10 @@ class MathematicalProgram {
    * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   template <typename Derived>
-  typename std::enable_if<
-      std::is_same<typename Derived::Scalar, symbolic::Variable>::value &&
+  typename std::enable_if_t<
+      std::is_same_v<typename Derived::Scalar, symbolic::Variable> &&
           Derived::ColsAtCompileTime == 1,
-      Binding<BoundingBoxConstraint>>::type
+      Binding<BoundingBoxConstraint>>
   AddBoundingBoxConstraint(double lb, double ub,
                            const Eigen::MatrixBase<Derived>& vars) {
     const int kSize = Derived::RowsAtCompileTime;
@@ -1796,10 +1854,10 @@ class MathematicalProgram {
    * @param vars The decision variables.
    */
   template <typename Derived>
-  typename std::enable_if<
-      std::is_same<typename Derived::Scalar, symbolic::Variable>::value &&
+  typename std::enable_if_t<
+      std::is_same_v<typename Derived::Scalar, symbolic::Variable> &&
           Derived::ColsAtCompileTime != 1,
-      Binding<BoundingBoxConstraint>>::type
+      Binding<BoundingBoxConstraint>>
   AddBoundingBoxConstraint(double lb, double ub,
                            const Eigen::MatrixBase<Derived>& vars) {
     const int kSize =
@@ -1853,9 +1911,14 @@ class MathematicalProgram {
    * Vector4<symbolic::Expression> v(x+1, y+1, x, 2.);
    * prog.AddLorentzConeConstraint(v);
    * @endcode
+   * @param eval_type The evaluation type when evaluating the lorentz cone
+   * constraint in generic optimization. Refer to
+   * LorentzConeConstraint::EvalType for more details.
    */
   Binding<LorentzConeConstraint> AddLorentzConeConstraint(
-      const Eigen::Ref<const VectorX<symbolic::Expression>>& v);
+      const Eigen::Ref<const VectorX<symbolic::Expression>>& v,
+      LorentzConeConstraint::EvalType eval_type =
+          LorentzConeConstraint::EvalType::kConvexSmooth);
 
   /**
    * Adds Lorentz cone constraint on the linear expression v1 and quadratic
@@ -1865,6 +1928,9 @@ class MathematicalProgram {
    * @param tol The tolerance to determine if the matrix in v2 is positive
    * semidefinite or not. @see DecomposePositiveQuadraticForm for more
    * explanation. @default is 0.
+   * @param eval_type The evaluation type when evaluating the lorentz cone
+   * constraint in generic optimization. Refer to
+   * LorentzConeConstraint::EvalType for more details.
    * @retval binding The newly added Lorentz cone constraint, together with the
    * bound variables.
    * @pre
@@ -1876,7 +1942,7 @@ class MathematicalProgram {
    *    Also the quadratic expression has to be convex, namely Q is a
    *    positive semidefinite matrix, and the quadratic expression needs
    *    to be non-negative for any x.
-   * @throws std::runtime_error if the preconditions are not satisfied.
+   * @throws std::exception if the preconditions are not satisfied.
    *
    * Notice this constraint is equivalent to the vector [z;y] is within a
    * Lorentz cone, where
@@ -1895,7 +1961,9 @@ class MathematicalProgram {
    */
   Binding<LorentzConeConstraint> AddLorentzConeConstraint(
       const symbolic::Expression& linear_expression,
-      const symbolic::Expression& quadratic_expression, double tol = 0);
+      const symbolic::Expression& quadratic_expression, double tol = 0,
+      LorentzConeConstraint::EvalType eval_type =
+          LorentzConeConstraint::EvalType::kConvexSmooth);
 
   /**
    * Adds Lorentz cone constraint referencing potentially a subset of the
@@ -1913,14 +1981,20 @@ class MathematicalProgram {
    * @param b A @f$\mathbb{R}^n@f$ vector, whose number of rows equals to the
    * size of the decision variables.
    * @param vars The list of @f$ m @f$ decision variables.
+   * @param eval_type The evaluation type when evaluating the lorentz cone
+   * constraint in generic optimization. Refer to
+   * LorentzConeConstraint::EvalType for more details.
    * @return The newly added Lorentz cone constraint.
    *
    * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   Binding<LorentzConeConstraint> AddLorentzConeConstraint(
       const Eigen::Ref<const Eigen::MatrixXd>& A,
-      const Eigen::Ref<const Eigen::VectorXd>& b, const VariableRefList& vars) {
-    return AddLorentzConeConstraint(A, b, ConcatenateVariableRefList(vars));
+      const Eigen::Ref<const Eigen::VectorXd>& b, const VariableRefList& vars,
+      LorentzConeConstraint::EvalType eval_type =
+          LorentzConeConstraint::EvalType::kConvexSmooth) {
+    return AddLorentzConeConstraint(A, b, ConcatenateVariableRefList(vars),
+                                    eval_type);
   }
 
   /**
@@ -1939,6 +2013,9 @@ class MathematicalProgram {
    * @param b A @f$\mathbb{R}^n@f$ vector, whose number of rows equals to the
    * size of the decision variables.
    * @param vars The Eigen vector of @f$ m @f$ decision variables.
+   * @param eval_type The evaluation type when evaluating the lorentz cone
+   * constraint in generic optimization. Refer to
+   * LorentzConeConstraint::EvalType for more details.
    * @return The newly added Lorentz cone constraint.
    *
    * For example, to add the Lorentz cone constraint
@@ -1957,7 +2034,9 @@ class MathematicalProgram {
   Binding<LorentzConeConstraint> AddLorentzConeConstraint(
       const Eigen::Ref<const Eigen::MatrixXd>& A,
       const Eigen::Ref<const Eigen::VectorXd>& b,
-      const Eigen::Ref<const VectorXDecisionVariable>& vars);
+      const Eigen::Ref<const VectorXDecisionVariable>& vars,
+      LorentzConeConstraint::EvalType eval_type =
+          LorentzConeConstraint::EvalType::kConvexSmooth);
 
   /**
    * Imposes that a vector @f$ x\in\mathbb{R}^m @f$ lies in Lorentz cone. Namely
@@ -1968,13 +2047,19 @@ class MathematicalProgram {
    * x(0) >= sqrt(x(1)² + ... + x(m-1)²)
    * <-->
    * @param vars The stacked column of vars should lie within the Lorentz cone.
+   * @param eval_type The evaluation type when evaluating the lorentz cone
+   * constraint in generic optimization. Refer to
+   * LorentzConeConstraint::EvalType for more details.
    * @return The newly added Lorentz cone constraint.
    *
    * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   Binding<LorentzConeConstraint> AddLorentzConeConstraint(
-      const VariableRefList& vars) {
-    return AddLorentzConeConstraint(ConcatenateVariableRefList(vars));
+      const VariableRefList& vars,
+      LorentzConeConstraint::EvalType eval_type =
+          LorentzConeConstraint::EvalType::kConvexSmooth) {
+    return AddLorentzConeConstraint(ConcatenateVariableRefList(vars),
+                                    eval_type);
   }
 
   /**
@@ -1986,18 +2071,23 @@ class MathematicalProgram {
    * x(0) >= sqrt(x(1)² + ... + x(m-1)²)
    * <-->
    * @param vars The stacked column of vars should lie within the Lorentz cone.
+   * @param eval_type The evaluation type when evaluating the lorentz cone
+   * constraint in generic optimization. Refer to
+   * LorentzConeConstraint::EvalType for more details.
    * @return The newly added Lorentz cone constraint.
    *
    * @exclude_from_pydrake_mkdoc{Not bound in pydrake.}
    */
   template <int rows>
   Binding<LorentzConeConstraint> AddLorentzConeConstraint(
-      const Eigen::MatrixBase<VectorDecisionVariable<rows>>& vars) {
+      const Eigen::MatrixBase<VectorDecisionVariable<rows>>& vars,
+      LorentzConeConstraint::EvalType eval_type =
+          LorentzConeConstraint::EvalType::kConvexSmooth) {
     Eigen::Matrix<double, rows, rows> A(vars.rows(), vars.rows());
     A.setIdentity();
     Eigen::Matrix<double, rows, 1> b(vars.rows());
     b.setZero();
-    return AddLorentzConeConstraint(A, b, vars);
+    return AddLorentzConeConstraint(A, b, vars, eval_type);
   }
 
   /**
@@ -2040,7 +2130,7 @@ class MathematicalProgram {
    *    Also the quadratic expression has to be convex, namely Q is a
    *    positive semidefinite matrix, and the quadratic expression needs
    *    to be non-negative for any x.
-   * @throws std::runtime_error if the preconditions are not satisfied.
+   * @throws std::exception if the preconditions are not satisfied.
    *
    * For example, to add the rotated Lorentz cone constraint
    *
@@ -2251,7 +2341,7 @@ class MathematicalProgram {
   /**
    * Adds a positive semidefinite constraint on a symmetric matrix.
    *
-   * @throws std::runtime_error in Debug mode if @p symmetric_matrix_var is not
+   * @throws std::exception in Debug mode if @p symmetric_matrix_var is not
    * symmetric.
    * @param symmetric_matrix_var A symmetric MatrixDecisionVariable object.
    */
@@ -2262,7 +2352,6 @@ class MathematicalProgram {
    * Adds a positive semidefinite constraint on a symmetric matrix of symbolic
    * expressions @p e. We create a new symmetric matrix of variables M being
    * positive semidefinite, with the linear equality constraint e == M.
-   * @tparam Derived An Eigen Matrix of symbolic expressions.
    * @param e Imposes constraint "e is positive semidefinite".
    * @pre{1. e is symmetric.
    *      2. e(i, j) is linear for all i, j
@@ -2284,28 +2373,15 @@ class MathematicalProgram {
    * prog.AddPositiveSemidefiniteConstraint(e);
    * @endcode
    */
-  template <typename Derived>
-  typename std::enable_if<
-      std::is_same<typename Derived::Scalar, symbolic::Expression>::value,
-      Binding<PositiveSemidefiniteConstraint>>::type
-  AddPositiveSemidefiniteConstraint(const Eigen::MatrixBase<Derived>& e) {
-    DRAKE_DEMAND(e.rows() == e.cols());
-    DRAKE_ASSERT(e == e.transpose());
-    const int e_rows = Derived::RowsAtCompileTime;
-    MatrixDecisionVariable<e_rows, e_rows> M{};
-    if (e_rows == Eigen::Dynamic) {
-      M = NewSymmetricContinuousVariables(e.rows());
-    } else {
-      M = NewSymmetricContinuousVariables<e_rows>();
-    }
+  Binding<PositiveSemidefiniteConstraint> AddPositiveSemidefiniteConstraint(
+      const Eigen::Ref<const MatrixX<symbolic::Expression>>& e) {
+    // TODO(jwnimmer-tri) Move this whole function definition into the cc file.
+    DRAKE_THROW_UNLESS(e.rows() == e.cols());
+    DRAKE_ASSERT(CheckStructuralEquality(e, e.transpose().eval()));
+    const MatrixXDecisionVariable M = NewSymmetricContinuousVariables(e.rows());
     // Adds the linear equality constraint that M = e.
     AddLinearEqualityConstraint(
-        e - M, Eigen::Matrix<double, e_rows, e_rows>::Zero(e.rows(), e.rows()),
-        true);
-    const int M_flat_size =
-        e_rows == Eigen::Dynamic ? Eigen::Dynamic : e_rows * e_rows;
-    const Eigen::Map<Eigen::Matrix<symbolic::Variable, M_flat_size, 1>> M_flat(
-        &M(0, 0), e.size());
+        e - M, Eigen::MatrixXd::Zero(e.rows(), e.rows()), true);
     return AddPositiveSemidefiniteConstraint(M);
   }
 
@@ -2394,6 +2470,8 @@ class MathematicalProgram {
    * </pre>
    * Note that M[i][j](0, 1) = Mⁱʲ(i, j) = (X(i, j) + X(j, i)) / 2
    * for i >= j, M[i][j] is the zero matrix.
+   *
+   * @pydrake_mkdoc_identifier{expression}
    */
   std::vector<std::vector<Matrix2<symbolic::Expression>>>
   AddScaledDiagonallyDominantMatrixConstraint(
@@ -2407,6 +2485,8 @@ class MathematicalProgram {
    * @return M For i < j M[i][j] contains the slack variables, mentioned in
    * @ref addsdd "scaled diagonally dominant matrix constraint". For i >= j,
    * M[i][j] contains dummy variables.
+   *
+   * @pydrake_mkdoc_identifier{variable}
    */
   std::vector<std::vector<Matrix2<symbolic::Variable>>>
   AddScaledDiagonallyDominantMatrixConstraint(
@@ -2525,7 +2605,7 @@ class MathematicalProgram {
   /**
    * Gets the initial guess for a single variable.
    * @pre @p decision_variable has been registered in the optimization program.
-   * @throws std::runtime_error if the pre condition is not satisfied.
+   * @throws std::exception if the pre condition is not satisfied.
    */
   double GetInitialGuess(const symbolic::Variable& decision_variable) const;
 
@@ -2533,13 +2613,13 @@ class MathematicalProgram {
    * Gets the initial guess for some variables.
    * @pre Each variable in @p decision_variable_mat has been registered in the
    * optimization program.
-   * @throws std::runtime_error if the pre condition is not satisfied.
+   * @throws std::exception if the pre condition is not satisfied.
    */
   template <typename Derived>
-  typename std::enable_if<
-      std::is_same<typename Derived::Scalar, symbolic::Variable>::value,
+  typename std::enable_if_t<
+      std::is_same_v<typename Derived::Scalar, symbolic::Variable>,
       Eigen::Matrix<double, Derived::RowsAtCompileTime,
-                    Derived::ColsAtCompileTime>>::type
+                    Derived::ColsAtCompileTime>>
   GetInitialGuess(
       const Eigen::MatrixBase<Derived>& decision_variable_mat) const {
     Eigen::Matrix<double, Derived::RowsAtCompileTime,
@@ -2559,7 +2639,7 @@ class MathematicalProgram {
    * Sets the initial guess for a single variable @p decision_variable.
    * The guess is stored as part of this program.
    * @pre decision_variable is a registered decision variable in the program.
-   * @throws std::runtime_error if precondition is not satisfied.
+   * @throws std::exception if precondition is not satisfied.
    */
   void SetInitialGuess(const symbolic::Variable& decision_variable,
                        double variable_guess_value);
@@ -2763,51 +2843,6 @@ class MathematicalProgram {
     return exponential_cone_constraints_;
   }
 
-  /**
-   * Getter returning all costs.
-   * @returns Vector of all cost bindings.
-   * @note The group ordering may change as more cost types are added.
-   */
-  std::vector<Binding<Cost>> GetAllCosts() const {
-    auto costlist = generic_costs_;
-    costlist.insert(costlist.end(), linear_costs_.begin(), linear_costs_.end());
-    costlist.insert(costlist.end(), quadratic_costs_.begin(),
-                    quadratic_costs_.end());
-    return costlist;
-  }
-
-  /**
-   * Getter returning all linear constraints (both linear equality and
-   * inequality constraints).
-   * @returns Vector of all linear constraint bindings.
-   */
-  std::vector<Binding<LinearConstraint>> GetAllLinearConstraints() const {
-    std::vector<Binding<LinearConstraint>> conlist = linear_constraints_;
-    conlist.insert(conlist.end(), linear_equality_constraints_.begin(),
-                   linear_equality_constraints_.end());
-    return conlist;
-  }
-
-  /**
-   * Getter for returning all constraints.
-   * @returns Vector of all constraint bindings.
-   * @note The group ordering may change as more constraint types are added.
-   */
-  std::vector<Binding<Constraint>> GetAllConstraints() const {
-    std::vector<Binding<Constraint>> conlist = generic_constraints_;
-    auto extend = [&conlist](auto container) {
-      conlist.insert(conlist.end(), container.begin(), container.end());
-    };
-    extend(linear_constraints_);
-    extend(linear_equality_constraints_);
-    extend(bbox_constraints_);
-    extend(lorentz_cone_constraint_);
-    extend(rotated_lorentz_cone_constraint_);
-    extend(linear_matrix_inequality_constraint_);
-    extend(linear_complementarity_constraints_);
-    return conlist;
-  }
-
   /** Getter for all bounding box constraints */
   const std::vector<Binding<BoundingBoxConstraint>>& bounding_box_constraints()
       const {
@@ -2820,8 +2855,32 @@ class MathematicalProgram {
     return linear_complementarity_constraints_;
   }
 
+  /**
+   * Getter returning all costs.
+   * @returns Vector of all cost bindings.
+   * @note The group ordering may change as more cost types are added.
+   */
+  std::vector<Binding<Cost>> GetAllCosts() const;
+
+  /**
+   * Getter returning all linear constraints (both linear equality and
+   * inequality constraints).
+   * @returns Vector of all linear constraint bindings.
+   */
+  std::vector<Binding<LinearConstraint>> GetAllLinearConstraints() const;
+
+  /**
+   * Getter for returning all constraints.
+   * @returns Vector of all constraint bindings.
+   * @note The group ordering may change as more constraint types are added.
+   */
+  std::vector<Binding<Constraint>> GetAllConstraints() const;
+
   /** Getter for number of variables in the optimization program */
   int num_vars() const { return decision_variables_.rows(); }
+
+  /** Gets the number of indeterminates in the optimization program */
+  int num_indeterminates() const { return indeterminates_.rows(); }
 
   /** Getter for the initial guess */
   const Eigen::VectorXd& initial_guess() const { return x_initial_guess_; }
@@ -2847,9 +2906,6 @@ class MathematicalProgram {
   std::vector<int> FindDecisionVariableIndices(
       const Eigen::Ref<const VectorXDecisionVariable>& vars) const;
 
-  /** Gets the number of indeterminates in the optimization program */
-  int num_indeterminates() const { return indeterminates_.rows(); }
-
   /** Returns the index of the indeterminate. Internally a solver
    * thinks all indeterminates are stored in an array, and it accesses each
    * individual indeterminate using its index. This index is used when adding
@@ -2866,11 +2922,11 @@ class MathematicalProgram {
    * program.
    * @param prog_var_vals The value of all the decision variables in this
    * program.
-   * @throws std::logic_error if the size of `prog_var_vals` is invalid.
+   * @throws std::exception if the size of `prog_var_vals` is invalid.
    */
   template <typename C, typename DerivedX>
-  typename std::enable_if<is_eigen_vector<DerivedX>::value,
-                          VectorX<typename DerivedX::Scalar>>::type
+  typename std::enable_if_t<is_eigen_vector<DerivedX>::value,
+                            VectorX<typename DerivedX::Scalar>>
   EvalBinding(const Binding<C>& binding,
               const Eigen::MatrixBase<DerivedX>& prog_var_vals) const {
     using Scalar = typename DerivedX::Scalar;
@@ -2898,11 +2954,11 @@ class MathematicalProgram {
    * @param prog_var_vals The value of all the decision variables in this
    * program.
    * @return All binding values, concatenated into a single vector.
-   * @throws std::logic_error if the size of `prog_var_vals` is invalid.
+   * @throws std::exception if the size of `prog_var_vals` is invalid.
    */
   template <typename C, typename DerivedX>
-  typename std::enable_if<is_eigen_vector<DerivedX>::value,
-                          VectorX<typename DerivedX::Scalar>>::type
+  typename std::enable_if_t<is_eigen_vector<DerivedX>::value,
+                            VectorX<typename DerivedX::Scalar>>
   EvalBindings(const std::vector<Binding<C>>& bindings,
                const Eigen::MatrixBase<DerivedX>& prog_var_vals) const {
     // TODO(eric.cousineau): Minimize memory allocations when it becomes a
@@ -2935,8 +2991,8 @@ class MathematicalProgram {
    * binding.variables()(i) in prog_var_vals.
    */
   template <typename C, typename DerivedX>
-  typename std::enable_if<is_eigen_vector<DerivedX>::value,
-                          VectorX<typename DerivedX::Scalar>>::type
+  typename std::enable_if_t<is_eigen_vector<DerivedX>::value,
+                            VectorX<typename DerivedX::Scalar>>
   GetBindingVariableValues(
       const Binding<C>& binding,
       const Eigen::MatrixBase<DerivedX>& prog_var_vals) const {
@@ -2954,33 +3010,10 @@ class MathematicalProgram {
    *
    * @param prog_var_vals The value of all the decision variables in this
    * program.
-   * @throws std::logic_error if the size does not match.
+   * @throws std::exception if the size does not match.
    */
   void EvalVisualizationCallbacks(
-      const Eigen::Ref<const Eigen::VectorXd>& prog_var_vals) const {
-    if (prog_var_vals.rows() != num_vars()) {
-      std::ostringstream oss;
-      oss << "The input binding variable is not in the right size. Expects "
-          << num_vars() << " rows, but it actually has " << prog_var_vals.rows()
-          << " rows.\n";
-      throw std::logic_error(oss.str());
-    }
-
-    Eigen::VectorXd this_x;
-
-    for (auto const& binding : visualization_callbacks_) {
-      auto const& obj = binding.evaluator();
-
-      const int num_v_variables = binding.GetNumElements();
-      this_x.resize(num_v_variables);
-      for (int j = 0; j < num_v_variables; ++j) {
-        this_x(j) =
-            prog_var_vals(FindDecisionVariableIndex(binding.variables()(j)));
-      }
-
-      obj->EvalCallback(this_x);
-    }
-  }
+      const Eigen::Ref<const Eigen::VectorXd>& prog_var_vals) const;
 
   /**
    * Evaluates the evaluator in @p binding at the initial guess.
@@ -2990,6 +3023,43 @@ class MathematicalProgram {
   Eigen::VectorXd EvalBindingAtInitialGuess(const Binding<C>& binding) const {
     return EvalBinding(binding, x_initial_guess_);
   }
+
+  /**
+   * Evaluates CheckSatisfied for the constraint in @p binding using the value
+   * of ALL of the decision variables in this program.
+   * @throws std::exception if the size of `prog_var_vals` is invalid.
+   */
+  bool CheckSatisfied(const Binding<Constraint>& binding,
+                      const Eigen::Ref<const Eigen::VectorXd>& prog_var_vals,
+                      double tol = 1e-6) const;
+
+  /**
+   * Evaluates CheckSatisfied for the all of the constraints in @p binding using
+   * the value of ALL of the decision variables in this program.
+   * @returns true iff all of the constraints are satisfied.
+   * @throws std::exception if the size of `prog_var_vals` is invalid.
+   * @pydrake_mkdoc_identifier{vector}
+   */
+  bool CheckSatisfied(const std::vector<Binding<Constraint>>& bindings,
+                      const Eigen::Ref<const Eigen::VectorXd>& prog_var_vals,
+                      double tol = 1e-6) const;
+
+  /**
+   * Evaluates CheckSatisfied for the constraint in @p binding at the initial
+   * guess.
+   */
+  bool CheckSatisfiedAtInitialGuess(const Binding<Constraint>& binding,
+                                    double tol = 1e-6) const;
+
+  /**
+   * Evaluates CheckSatisfied for the all of the constraints in @p bindings at
+   * the initial guess.
+   * @returns true iff all of the constraints are satisfied.
+   * @pydrake_mkdoc_identifier{vector}
+   */
+  bool CheckSatisfiedAtInitialGuess(
+      const std::vector<Binding<Constraint>>& bindings,
+      double tol = 1e-6) const;
 
   /** Getter for all decision variables in the program. */
   const VectorXDecisionVariable& decision_variables() const {
@@ -3069,11 +3139,76 @@ class MathematicalProgram {
   void SetVariableScaling(const symbolic::Variable& var, double s);
   //@}
 
+  /**
+   * @anchor remove_cost_constraint
+   * @name    Remove costs or constraints
+   * Removes costs or constraints from this program. If this program contains
+   * multiple costs/constraints objects matching the given argument, then all of
+   * these costs/constraints are removed. If this program doesn't contain the
+   * specified cost/constraint, then the code does nothing. We regard two
+   * costs/constraints being equal, if their evaluators point to the same
+   * object, and the associated variables are also the same.
+   * @note If two costs/constraints represent the same expression, but their
+   * evaluators point to different objects, then they are NOT regarded the same.
+   * For example, if we have
+   * @code{.cc}
+   * auto cost1 = prog.AddLinearCost(x[0] + x[1]);
+   * auto cost2 = prog.AddLinearCost(x[0] + x[1]);
+   * // cost1 and cost2 represent the same cost, but cost1.evaluator() and
+   * // cost2.evaluator() point to different objects. So after removing cost1,
+   * // cost2 still lives in prog.
+   * prog.RemoveCost(cost1);
+   * // This will print true.
+   * std::cout << (prog.linear_costs()[0] == cost2) << "\n";
+   * @endcode
+   */
+
+  // @{
+  /** Removes @p cost from this mathematical program.
+   * See @ref remove_cost_constraint "Remove costs or constraints" for more
+   * details.
+   * @return number of cost objects removed from this program. If this program
+   * doesn't contain @p cost, then returns 0. If this program contains multiple
+   * @p cost objects, then returns the repetition of @p cost in this program.
+   */
+  int RemoveCost(const Binding<Cost>& cost);
+
+  /** Removes @p constraint from this mathematical program.
+   * See @ref remove_cost_constraint "Remove costs or constraints" for more
+   * details.
+   * @return number of constraint objects removed from this program. If this
+   * program doesn't contain @p constraint, then returns 0. If this program
+   * contains multiple
+   * @p constraint objects, then returns the repetition of @p constraint in this
+   * program.
+   */
+  int RemoveConstraint(const Binding<Constraint>& constraint);
+  //@}
+
  private:
   static void AppendNanToEnd(int new_var_size, Eigen::VectorXd* vector);
 
-  // maps the ID of a symbolic variable to the index of the variable stored in
-  // the optimization program.
+  // Removes a binding of a constraint/constraint, @p removal, from a given
+  // vector of bindings, @p existings. If @p removal does not belong to @p
+  // existings, then do nothing. If @p removal appears multiple times in @p
+  // existings, then all matching terms are removed. After removing @p removal,
+  // we check if we need to erase @p affected_capability from
+  // required_capabilities_.
+  // @return The number of @p removal object in @p existings.
+  template <typename C>
+  int RemoveCostOrConstraintImpl(const Binding<C>& removal,
+                                 ProgramAttribute affected_capability,
+                                 std::vector<Binding<C>>* existings);
+
+  /**
+   * Check and update if this program requires @p query_capability
+   * This method should be called after changing stored
+   * costs/constraints/callbacks.
+   */
+  void UpdateRequiredCapability(ProgramAttribute query_capability);
+
+  // maps the ID of a symbolic variable to the index of the variable stored
+  // in the optimization program.
   std::unordered_map<symbolic::Variable::Id, int> decision_variable_index_{};
 
   VectorXDecisionVariable decision_variables_;
@@ -3111,45 +3246,17 @@ class MathematicalProgram {
       linear_complementarity_constraints_;
 
   Eigen::VectorXd x_initial_guess_;
-  Eigen::VectorXd x_values_;
-  std::optional<SolverId> solver_id_;
-  double optimal_cost_{};
-  // The lower bound of the objective found by the solver, during the
-  // optimization process.
-  double lower_bound_cost_{};
 
   // The actual per-solver customization options.
   SolverOptions solver_options_;
 
-  ProgramAttributes required_capabilities_{};
+  ProgramAttributes required_capabilities_;
 
   template <typename T>
   void NewVariables_impl(
       VarType type, const T& names, bool is_symmetric,
       Eigen::Ref<MatrixXDecisionVariable> decision_variable_matrix) {
-    switch (type) {
-      case VarType::CONTINUOUS:
-        break;
-      case VarType::BINARY:
-        required_capabilities_.insert(ProgramAttribute::kBinaryVariable);
-        break;
-      case VarType::INTEGER:
-        throw std::runtime_error(
-            "MathematicalProgram does not support integer variables yet.");
-      case VarType::BOOLEAN:
-        throw std::runtime_error(
-            "MathematicalProgram does not support Boolean variables.");
-      case VarType::RANDOM_UNIFORM:
-        throw std::runtime_error(
-            "MathematicalProgram does not support random uniform variables.");
-      case VarType::RANDOM_GAUSSIAN:
-        throw std::runtime_error(
-            "MathematicalProgram does not support random Gaussian variables.");
-      case VarType::RANDOM_EXPONENTIAL:
-        throw std::runtime_error(
-            "MathematicalProgram does not support random exponential "
-            "variables.");
-    }
+    CheckVariableType(type);
     int rows = decision_variable_matrix.rows();
     int cols = decision_variable_matrix.cols();
     DRAKE_ASSERT(!is_symmetric || rows == cols);
@@ -3162,7 +3269,6 @@ class MathematicalProgram {
     DRAKE_ASSERT(static_cast<int>(names.size()) == num_new_vars);
     decision_variables_.conservativeResize(num_vars() + num_new_vars,
                                            Eigen::NoChange);
-    AppendNanToEnd(num_new_vars, &x_values_);
     int row_index = 0;
     int col_index = 0;
     for (int i = 0; i < num_new_vars; ++i) {
@@ -3245,8 +3351,8 @@ class MathematicalProgram {
    * @param vars A matrix of variables.
    */
   template <typename Derived>
-  typename std::enable_if<
-      std::is_same<typename Derived::Scalar, symbolic::Variable>::value>::type
+  typename std::enable_if_t<
+      std::is_same_v<typename Derived::Scalar, symbolic::Variable>>
   CheckIsDecisionVariable(const Eigen::MatrixBase<Derived>& vars) const {
     for (int i = 0; i < vars.rows(); ++i) {
       for (int j = 0; j < vars.cols(); ++j) {
@@ -3265,7 +3371,7 @@ class MathematicalProgram {
    * Ensure a binding is valid *before* adding it to the program.
    * @pre The binding has not yet been registered.
    * @pre The decision variables have been registered.
-   * @throws std::runtime_error if the binding is invalid.
+   * @throws std::exception if the binding is invalid.
    */
   template <typename C>
   void CheckBinding(const Binding<C>& binding) const {
@@ -3329,7 +3435,12 @@ class MathematicalProgram {
       symbolic::internal::DegreeType degree_type);
 
   std::unordered_map<int, double> var_scaling_map_{};
+
+  void CheckVariableType(VarType var_type);
 };
+
+std::ostream& operator<<(std::ostream& os, const MathematicalProgram& prog);
+
 
 }  // namespace solvers
 }  // namespace drake

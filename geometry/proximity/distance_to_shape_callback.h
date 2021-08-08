@@ -7,7 +7,7 @@
 
 #include "drake/common/eigen_types.h"
 #include "drake/geometry/geometry_ids.h"
-#include "drake/geometry/proximity/collision_filter_legacy.h"
+#include "drake/geometry/proximity/collision_filter.h"
 #include "drake/geometry/proximity/proximity_utilities.h"
 #include "drake/geometry/query_results/signed_distance_pair.h"
 #include "drake/math/rigid_transform.h"
@@ -44,7 +44,7 @@ struct CallbackData {
                                   reported.
    @param nearest_pairs_in[out]   The output results. Aliased.  */
   CallbackData(
-      const CollisionFilterLegacy* collision_filter_in,
+      const CollisionFilter* collision_filter_in,
       const std::unordered_map<GeometryId, math::RigidTransform<T>>* X_WGs_in,
       double max_distance_in,
       std::vector<SignedDistancePair<T>>* nearest_pairs_in)
@@ -52,13 +52,13 @@ struct CallbackData {
         X_WGs(*X_WGs_in),
         max_distance(max_distance_in),
         nearest_pairs(*nearest_pairs_in) {
-    DRAKE_DEMAND(collision_filter_in);
-    DRAKE_DEMAND(X_WGs_in);
-    DRAKE_DEMAND(nearest_pairs_in);
+    DRAKE_DEMAND(collision_filter_in != nullptr);
+    DRAKE_DEMAND(X_WGs_in != nullptr);
+    DRAKE_DEMAND(nearest_pairs_in != nullptr);
   }
 
   /* The collision filter system.  */
-  const CollisionFilterLegacy& collision_filter;
+  const CollisionFilter& collision_filter;
 
   /* The T-valued poses of all geometries.  */
   const std::unordered_map<GeometryId, math::RigidTransform<T>>& X_WGs;
@@ -95,7 +95,7 @@ class DistancePairGeometry {
                        const math::RigidTransform<T>& X_WB,
                        SignedDistancePair<T>* result)
       : id_A_(id_A), id_B_(id_B), X_WA_(X_WA), X_WB_(X_WB), result_(result) {
-    DRAKE_ASSERT(result);
+    DRAKE_ASSERT(result != nullptr);
   }
 
   /* @name  Overloads in support of sphere-shape computation

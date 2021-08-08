@@ -8,6 +8,7 @@
 
 #include "drake/bindings/pydrake/common/cpp_template_pybind.h"
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
+#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/common/eigen_pybind.h"
 #include "drake/bindings/pydrake/common/wrap_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
@@ -84,6 +85,7 @@ struct Impl {
     using Base::DeclarePeriodicEvent;
     using Base::DeclarePeriodicPublish;
     using Base::DeclarePerStepEvent;
+    using Base::DeclareStateOutputPort;
     using Base::DeclareVectorInputPort;
     using Base::DeclareVectorOutputPort;
     using Base::MakeWitnessFunction;
@@ -304,14 +306,25 @@ struct Impl {
                 std::optional<RandomDistribution>>(&PySystem::DeclareInputPort),
             py_rvp::reference_internal, py::arg("name"), py::arg("type"),
             py::arg("size"), py::arg("random_type") = std::nullopt,
-            doc.System.DeclareInputPort.doc_4args)
+            doc.System.DeclareInputPort.doc);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    system_cls  // BR
         .def("DeclareInputPort",
-            overload_cast_explicit<  // BR
-                InputPort<T>&, PortDataType, int,
-                std::optional<RandomDistribution>>(&PySystem::DeclareInputPort),
+            WrapDeprecated(doc.System.DeclareInputPort.doc_deprecated,
+                [](PySystem* self, PortDataType type, int size,
+                    std::optional<RandomDistribution> random_type) {
+                  auto& result =
+                      self->DeclareInputPort(type, size, random_type);
+                  // WrapDeprecated cannot handle references, but a pointer
+                  // works and is equivalent as far as Python cares.
+                  return &result;
+                }),
             py_rvp::reference_internal, py::arg("type"), py::arg("size"),
-            py::arg("random_type") = std::nullopt)
-        // - Feedthrough.
+            py::arg("random_type") = std::nullopt,
+            doc.System.DeclareInputPort.doc_deprecated);
+#pragma GCC diagnostic pop
+    system_cls  // - Feedthrough.
         .def("HasAnyDirectFeedthrough", &System<T>::HasAnyDirectFeedthrough,
             doc.System.HasAnyDirectFeedthrough.doc)
         .def("HasDirectFeedthrough",
@@ -510,7 +523,7 @@ Note: The above is for the C++ documentation. For Python, use
               return self->DeclareAbstractInputPort(name, model_value);
             },
             py_rvp::reference_internal, py::arg("name"), py::arg("model_value"),
-            doc.LeafSystem.DeclareAbstractInputPort.doc_2args)
+            doc.LeafSystem.DeclareAbstractInputPort.doc)
         .def("DeclareAbstractParameter",
             &PyLeafSystem::DeclareAbstractParameter, py::arg("model_value"),
             doc.LeafSystem.DeclareAbstractParameter.doc)
@@ -528,15 +541,27 @@ Note: The above is for the C++ documentation. For Python, use
             py::arg("prerequisites_of_calc") =
                 std::set<DependencyTicket>{SystemBase::all_sources_ticket()},
             doc.LeafSystem.DeclareAbstractOutputPort
-                .doc_4args_name_alloc_function_calc_function_prerequisites_of_calc)
+                .doc_4args_name_alloc_function_calc_function_prerequisites_of_calc);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    leaf_system_cls  // BR
         .def("DeclareAbstractOutputPort",
-            WrapCallbacks([](PyLeafSystem* self, AllocCallback arg1,
-                              CalcCallback arg2) -> const OutputPort<T>& {
-              return self->DeclareAbstractOutputPort(arg1, arg2);
-            }),
+            WrapDeprecated(
+                doc.LeafSystem.DeclareAbstractOutputPort
+                    .doc_deprecated_deprecated_3args_constOutputType_voidMySystemconstContextOutputTypeconst_stdset,
+                WrapCallbacks(
+                    [](PyLeafSystem* self, AllocCallback arg1,
+                        CalcCallback arg2) -> const LeafOutputPort<T>* {
+                      // WrapDeprecated cannot handle references, but a pointer
+                      // works and is equivalent as far as Python cares, thus
+                      // the use of `&` here.
+                      return &self->DeclareAbstractOutputPort(arg1, arg2);
+                    })),
             py_rvp::reference_internal, py::arg("alloc"), py::arg("calc"),
             doc.LeafSystem.DeclareAbstractOutputPort
-                .doc_4args_name_alloc_function_calc_function_prerequisites_of_calc)
+                .doc_deprecated_deprecated_3args_constOutputType_voidMySystemconstContextOutputTypeconst_stdset);
+#pragma GCC diagnostic pop
+    leaf_system_cls  // BR
         .def(
             "DeclareVectorInputPort",
             [](PyLeafSystem* self, std::string name,
@@ -548,7 +573,17 @@ Note: The above is for the C++ documentation. For Python, use
             },
             py_rvp::reference_internal, py::arg("name"),
             py::arg("model_vector"), py::arg("random_type") = std::nullopt,
-            doc.LeafSystem.DeclareVectorInputPort.doc_3args)
+            doc.LeafSystem.DeclareVectorInputPort.doc_3args_model_vector)
+        .def(
+            "DeclareVectorInputPort",
+            [](PyLeafSystem* self, std::string name, int size,
+                std::optional<RandomDistribution> random_type)
+                -> InputPort<T>& {
+              return self->DeclareVectorInputPort(name, size, random_type);
+            },
+            py_rvp::reference_internal, py::arg("name"), py::arg("size"),
+            py::arg("random_type") = std::nullopt,
+            doc.LeafSystem.DeclareVectorInputPort.doc_3args_size)
         .def("DeclareVectorOutputPort",
             WrapCallbacks(
                 [](PyLeafSystem* self, const std::string& name,
@@ -561,16 +596,56 @@ Note: The above is for the C++ documentation. For Python, use
             py::arg("calc"),
             py::arg("prerequisites_of_calc") =
                 std::set<DependencyTicket>{SystemBase::all_sources_ticket()},
-            doc.LeafSystem.DeclareVectorOutputPort
-                .doc_4args_name_model_vector_vector_calc_function_prerequisites_of_calc)
+            doc.LeafSystem.DeclareVectorOutputPort.doc_4args_model_vector)
         .def("DeclareVectorOutputPort",
-            WrapCallbacks([](PyLeafSystem* self, const BasicVector<T>& arg1,
-                              CalcVectorCallback arg2) -> const OutputPort<T>& {
-              return self->DeclareVectorOutputPort(arg1, arg2);
-            }),
+            WrapCallbacks(
+                [](PyLeafSystem* self, const std::string& name, int size,
+                    CalcVectorCallback calc,
+                    const std::set<DependencyTicket>& prerequisites_of_calc)
+                    -> const OutputPort<T>& {
+                  return self->DeclareVectorOutputPort(
+                      name, size, calc, prerequisites_of_calc);
+                }),
+            py_rvp::reference_internal, py::arg("name"), py::arg("size"),
+            py::arg("calc"),
+            py::arg("prerequisites_of_calc") =
+                std::set<DependencyTicket>{SystemBase::all_sources_ticket()},
+            doc.LeafSystem.DeclareVectorOutputPort.doc_4args_size);
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    leaf_system_cls  // BR
+        .def("DeclareVectorOutputPort",
+            WrapDeprecated(
+                doc.LeafSystem.DeclareVectorOutputPort.doc_deprecated,
+                WrapCallbacks(
+                    [](PyLeafSystem* self, const BasicVector<T>& arg1,
+                        CalcVectorCallback arg2) -> const OutputPort<T>* {
+                      // WrapDeprecated cannot handle references, but a
+                      // pointer works and is equivalent as far as Python
+                      // cares, thus the use of `&` here.
+                      return &self->DeclareVectorOutputPort(arg1, arg2);
+                    })),
             py_rvp::reference_internal,
-            doc.LeafSystem.DeclareVectorOutputPort
-                .doc_4args_name_model_vector_vector_calc_function_prerequisites_of_calc)
+            doc.LeafSystem.DeclareVectorOutputPort.doc_deprecated);
+#pragma GCC diagnostic pop
+    leaf_system_cls  // BR
+        .def("DeclareStateOutputPort",
+            py::overload_cast<std::variant<std::string, UseDefaultName>,
+                ContinuousStateIndex>(
+                &LeafSystemPublic::DeclareStateOutputPort),
+            py::arg("name"), py::arg("state_index"), py_rvp::reference_internal,
+            doc.LeafSystem.DeclareStateOutputPort.doc_continuous)
+        .def("DeclareStateOutputPort",
+            py::overload_cast<std::variant<std::string, UseDefaultName>,
+                DiscreteStateIndex>(&LeafSystemPublic::DeclareStateOutputPort),
+            py::arg("name"), py::arg("state_index"), py_rvp::reference_internal,
+            doc.LeafSystem.DeclareStateOutputPort.doc_discrete)
+        .def("DeclareStateOutputPort",
+            py::overload_cast<std::variant<std::string, UseDefaultName>,
+                AbstractStateIndex>(&LeafSystemPublic::DeclareStateOutputPort),
+            py::arg("name"), py::arg("state_index"), py_rvp::reference_internal,
+            doc.LeafSystem.DeclareStateOutputPort.doc_abstract)
         .def(
             "DeclareInitializationEvent",
             [](PyLeafSystem* self, const Event<T>& event) {
@@ -817,13 +892,24 @@ void DoScalarIndependentDefinitions(py::module m) {
             });
     // Bind templated instantiations.
     auto converter_methods = [converter](auto pack) {
+      constexpr auto& cls_doc = pydrake_doc.drake.systems.SystemScalarConverter;
       using Pack = decltype(pack);
       using T = typename Pack::template type_at<0>;
       using U = typename Pack::template type_at<1>;
-      AddTemplateMethod(converter, "Add",
-          WrapCallbacks(&SystemScalarConverter::Add<T, U>), GetPyParam<T, U>());
       AddTemplateMethod(converter, "IsConvertible",
           &SystemScalarConverter::IsConvertible<T, U>, GetPyParam<T, U>());
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+      AddTemplateMethod(converter, "Add",
+          WrapDeprecated(cls_doc.Add.doc_deprecated,
+              WrapCallbacks(&SystemScalarConverter::Add<T, U>)),
+          GetPyParam<T, U>());
+      // N.B. When the deprecation date happens, the C++ member function Add()
+      // should become internal or private, to be used only by pydrake here
+      // via this method with a leading underscore.
+      AddTemplateMethod(converter, "_Add",
+          WrapCallbacks(&SystemScalarConverter::Add<T, U>), GetPyParam<T, U>());
+#pragma GCC diagnostic pop
     };
     // N.B. When changing the pairs of supported types below, ensure that these
     // reflect the stanzas for the advanced constructor of

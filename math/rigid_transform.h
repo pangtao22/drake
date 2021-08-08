@@ -102,7 +102,7 @@ class RigidTransform {
   /// have unit length [i.e., `quaternion.norm()` does not have to be 1].
   /// @param[in] p position vector from frame A's origin to frame B's origin,
   /// expressed in frame A.  In monogram notation p is denoted `p_AoBo_A`.
-  /// @throws std::logic_error in debug builds if the rotation matrix
+  /// @throws std::exception in debug builds if the rotation matrix
   /// that is built from `quaternion` is invalid.
   /// @see RotationMatrix::RotationMatrix(const Eigen::Quaternion<T>&)
   RigidTransform(const Eigen::Quaternion<T>& quaternion, const Vector3<T>& p)
@@ -114,7 +114,7 @@ class RigidTransform {
   /// may not have unit length [i.e., `lambda.norm()` does not have to be 1].
   /// @param[in] p position vector from frame A's origin to frame B's origin,
   /// expressed in frame A.  In monogram notation p is denoted `p_AoBo_A
-  /// @throws std::logic_error in debug builds if the rotation matrix
+  /// @throws std::exception in debug builds if the rotation matrix
   /// that is built from `theta_lambda` is invalid.
   /// @see RotationMatrix::RotationMatrix(const Eigen::AngleAxis<T>&)
   RigidTransform(const Eigen::AngleAxis<T>& theta_lambda, const Vector3<T>& p)
@@ -151,7 +151,7 @@ class RigidTransform {
   /// @param[in] pose Isometry3 that contains an allegedly valid rotation matrix
   /// `R_AB` and also contains a position vector `p_AoBo_A` from frame A's
   /// origin to frame B's origin.  `p_AoBo_A` must be expressed in frame A.
-  /// @throws std::logic_error in debug builds if R_AB is not a proper
+  /// @throws std::exception in debug builds if R_AB is not a proper
   /// orthonormal 3x3 rotation matrix.
   /// @note No attempt is made to orthogonalize the 3x3 rotation matrix part of
   /// `pose`.  As needed, use RotationMatrix::ProjectToRotationMatrix().
@@ -166,7 +166,7 @@ class RigidTransform {
   ///  │ R_AB  p_AoBo_A │
   ///  └                ┘
   /// </pre>
-  /// @throws std::logic_error in debug builds if the `R_AB` part of `pose` is
+  /// @throws std::exception in debug builds if the `R_AB` part of `pose` is
   /// not a proper orthonormal 3x3 rotation matrix.
   /// @note No attempt is made to orthogonalize the 3x3 rotation matrix part of
   /// `pose`.  As needed, use RotationMatrix::ProjectToRotationMatrix().
@@ -187,7 +187,7 @@ class RigidTransform {
   ///  │   0      1     │
   ///  └                ┘
   /// </pre>
-  /// @throws std::logic_error in debug builds if the `R_AB` part of `pose`
+  /// @throws std::exception in debug builds if the `R_AB` part of `pose`
   /// is not a proper orthonormal 3x3 rotation matrix or if `pose` is a 4x4
   /// matrix whose final row is not `[0, 0, 0, 1]`.
   /// @note No attempt is made to orthogonalize the 3x3 rotation matrix part of
@@ -201,7 +201,7 @@ class RigidTransform {
 
   /// Constructs a %RigidTransform from an appropriate Eigen <b>expression</b>.
   /// @param[in] pose Generic Eigen matrix <b>expression</b>.
-  /// @throws std::logic_error if the Eigen <b>expression</b> in pose does not
+  /// @throws std::exception if the Eigen <b>expression</b> in pose does not
   /// resolve to a Vector3 or 3x4 matrix or 4x4 matrix or if the rotational part
   /// of `pose` is not a proper orthonormal 3x3 rotation matrix or if `pose` is
   /// a 4x4 matrix whose final row is not `[0, 0, 0, 1]`.
@@ -263,7 +263,7 @@ class RigidTransform {
   /// @param[in] pose Isometry3 that contains an allegedly valid rotation matrix
   /// `R_AB` and also contains a position vector `p_AoBo_A` from frame A's
   /// origin to frame B's origin.  `p_AoBo_A` must be expressed in frame A.
-  /// @throws std::logic_error in debug builds if R_AB is not a proper
+  /// @throws std::exception in debug builds if R_AB is not a proper
   /// orthonormal 3x3 rotation matrix.
   /// @note No attempt is made to orthogonalize the 3x3 rotation matrix part of
   /// `pose`.  As needed, use RotationMatrix::ProjectToRotationMatrix().
@@ -434,16 +434,50 @@ class RigidTransform {
   /// @returns `this` %RigidTransform which has been multiplied by `other`.
   /// On return, `this = X_AC`, where `X_AC = X_AB * X_BC`.
   RigidTransform<T>& operator*=(const RigidTransform<T>& other) {
-    p_AoBo_A_ = *this * other.translation();
-    R_AB_ *= other.rotation();
+    if constexpr (std::is_same_v<T, double>) {
+      internal::ComposeXX(*this, other, this);
+    } else {
+      p_AoBo_A_ = *this * other.translation();
+      R_AB_ *= other.rotation();
+    }
     return *this;
   }
 
   /// Multiplies `this` %RigidTransform `X_AB` by the `other` %RigidTransform
   /// `X_BC` and returns the %RigidTransform `X_AC = X_AB * X_BC`.
   RigidTransform<T> operator*(const RigidTransform<T>& other) const {
-    const Vector3<T> p_AoCo_A = *this * other.translation();
-    return RigidTransform<T>(rotation() * other.rotation(), p_AoCo_A);
+    RigidTransform<T> X_AC(internal::DoNotInitializeMemberFields{});
+    if constexpr (std::is_same_v<T, double>) {
+      internal::ComposeXX(*this, other, &X_AC);
+    } else {
+      X_AC.set(rotation() * other.rotation(), *this * other.translation());
+    }
+    return X_AC;
+  }
+
+  /// Calculates the product of `this` inverted and another %RigidTransform.
+  /// If you consider `this` to be the transform X_AB, and `other` to be
+  /// X_AC, then this method returns X_BC = X_AB⁻¹ * X_AC. For T==double, this
+  /// method can be _much_ faster than inverting first and then performing the
+  /// composition, because it can take advantage of the special structure of
+  /// a rigid transform to avoid unnecessary memory and floating point
+  /// operations. On some platforms it can use SIMD instructions for further
+  /// speedups.
+  /// @param[in] other %RigidTransform that post-multiplies `this` inverted.
+  /// @retval X_BC where X_BC = this⁻¹ * other.
+  /// @note It is possible (albeit improbable) to create an invalid rigid
+  /// transform by accumulating round-off error with a large number of
+  /// multiplies.
+  RigidTransform<T> InvertAndCompose(const RigidTransform<T>& other) const {
+    const RigidTransform<T>& X_AC = other;  // Nicer name.
+    RigidTransform<T> X_BC(internal::DoNotInitializeMemberFields{});
+    if constexpr (std::is_same_v<T, double>) {
+      internal::ComposeXinvX(*this, X_AC, &X_BC);
+    } else {
+      const RigidTransform<T> X_BA = inverse();
+      X_BC = X_BA * X_AC;
+    }
+    return X_BC;
   }
 
   /// Multiplies `this` %RigidTransform `X_AB` by the translation-only transform
@@ -580,6 +614,10 @@ class RigidTransform {
   // epsilon) used to check whether or not a matrix is homogeneous.
   static constexpr double kInternalToleranceForHomogeneousCheck{
       4 * std::numeric_limits<double>::epsilon() };
+
+  // Constructs a RigidTransform without initializing the underlying 3x4 matrix.
+  explicit RigidTransform(internal::DoNotInitializeMemberFields)
+      : R_AB_{internal::DoNotInitializeMemberFields{}} {}
 
   // Throw an exception if the bottom row of a 4x4 matrix is not [0, 0, 0, 1].
   // Note: To allow this method to be used with other %RigidTransform methods

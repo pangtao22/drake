@@ -1,6 +1,7 @@
 #include "drake/geometry/proximity_engine.h"
 
 #include <cmath>
+#include <fstream>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -8,7 +9,9 @@
 #include <fcl/fcl.h>
 #include <gtest/gtest.h>
 
+#include "drake/common/filesystem.h"
 #include "drake/common/find_resource.h"
+#include "drake/common/temp_directory.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/expect_no_throw.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
@@ -47,11 +50,6 @@ class ProximityEngineTester {
   static bool IsDeepCopy(const ProximityEngine<T>& test_engine,
                          const ProximityEngine<T>& ref_engine) {
     return ref_engine.IsDeepCopy(test_engine);
-  }
-
-  template <typename T>
-  static int peek_next_clique(const ProximityEngine<T>& engine) {
-    return engine.peek_next_clique();
   }
 
   template <typename T>
@@ -611,15 +609,41 @@ GTEST_TEST(ProximityEngineTests, RemoveGeometry) {
 
 // Tests for reading .obj files.------------------------------------------------
 
-// Tests exception when we read an .obj file with two objects into Convex
-GTEST_TEST(ProximityEngineTests, ExceptionTwoObjectsInObjFileForConvex) {
+// Tests exception when we fail to read an .obj file into a Convex.
+GTEST_TEST(ProximityEngineTests, FailedParsing) {
   ProximityEngine<double> engine;
-  Convex convex{
-      drake::FindResourceOrThrow("drake/geometry/test/forbidden_two_cubes.obj"),
-      1.0};
-  DRAKE_EXPECT_THROWS_MESSAGE(
-      engine.AddDynamicGeometry(convex, {}, GeometryId::get_new_id()),
-      std::runtime_error, ".*only OBJs with a single object.*");
+
+  // The obj contains multiple objects.
+  {
+    Convex convex{drake::FindResourceOrThrow(
+                      "drake/geometry/test/forbidden_two_cubes.obj"),
+                  1.0};
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        engine.AddDynamicGeometry(convex, {}, GeometryId::get_new_id()),
+        std::runtime_error, ".*only OBJs with a single object.*");
+  }
+
+  const filesystem::path temp_dir = temp_directory();
+  // An empty file.
+  {
+    const filesystem::path file = temp_dir / "empty.obj";
+    std::ofstream f(file.string());
+    f.close();
+    Convex convex{file.string(), 1.0};
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        engine.AddDynamicGeometry(convex, {}, GeometryId::get_new_id()),
+        std::runtime_error, "The file parsed contains no objects;.+");
+  }
+
+  // The file is not an OBJ.
+  { const filesystem::path file = temp_dir / "not_an_obj.txt";
+    std::ofstream f(file.string());
+    f << "I'm not a valid obj\n";
+    f.close();
+    Convex convex{file.string(), 1.0};
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        engine.AddDynamicGeometry(convex, {}, GeometryId::get_new_id()),
+        std::runtime_error, "The file parsed contains no objects;.+");}
 }
 
 // Tests for copy/move semantics.  ---------------------------------------------
@@ -836,7 +860,14 @@ GTEST_TEST(ProximityEngineTests, SignedDistancePairClosestPoint) {
 
   // Case: the pair is filtered.
   {
-    engine.ExcludeCollisionsWithin({id_A, id_B}, {});
+    // I know the GeometrySet only has id_A and id_B, so I'll construct the
+    // extracted set by hand.
+    auto extract_ids = [id_A, id_B](const GeometrySet&) {
+      return std::unordered_set<GeometryId>{id_A, id_B};
+    };
+    engine.collision_filter().Apply(
+        CollisionFilterDeclaration().ExcludeWithin(GeometrySet{id_A, id_B}),
+        extract_ids, false /* is_permanent */);
     DRAKE_EXPECT_THROWS_MESSAGE(
         engine.ComputeSignedDistancePairClosestPoints(id_A, id_B, X_WGs),
         std::runtime_error,
@@ -1077,8 +1108,8 @@ std::vector<SignedDistanceToPointTestData> GenDistanceTestDataBoxBoundary(
 // to one of the 6 faces, the 12 edges, and the 8 vertices of the box.
 // First we call GenDistanceTestDataBoxBoundary() to generate test data for
 // query points on the box boundary. Then, we move the query point along the
-// gradient vector by a unit distance.  In each case, the the nearest point to
-// Q on ∂G stays the same, the signed distance becomes +1, and the gradient
+// gradient vector by a unit distance.  In each case, the nearest point to Q
+// on ∂G stays the same, the signed distance becomes +1, and the gradient
 // vector stays the same.
 std::vector<SignedDistanceToPointTestData> GenDistanceTestDataOutsideBox(
     const RigidTransformd& X_WG = RigidTransformd::Identity()) {
@@ -1862,45 +1893,68 @@ GTEST_TEST(ProximityEngineTests, FindCollisionCandidatesResultOrdering) {
 // Confirms that the ComputeContactSurfaces() computation returns the
 // same results twice in a row. This test is explicitly required because it is
 // known that updating the pose in the FCL tree can lead to erratic ordering.
-GTEST_TEST(ProximityEngineTests, ComputeContactSurfacesResultOrdering) {
-  ProximityEngine<double> engine;
+// We also test ComputePolygonalContactSurfaces() similarly.
+class ProximityEngineHydro : public testing::Test {
+ protected:
+  void SetUp() override {
+    const double r = 0.5;
+    // For radius = 0.5, we find 4 spheres is sufficient to expose the old bug.
+    // And, for contact surfaces, we need an even number to guarantee rigid-soft
+    // alternation.
+    poses_ = MakeCollidingRing(r, 4);
 
-  const double r = 0.5;
-  // For radius = 0.5, we find 4 spheres is sufficient to expose the old bug.
-  // And, for contact surfaces, we need an even number to guarantee rigid-soft
-  // alternation.
-  unordered_map<GeometryId, RigidTransformd> poses = MakeCollidingRing(r, 4);
+    ProximityProperties soft_properties;
+    AddContactMaterial(1e8, {}, {}, {}, &soft_properties);
+    AddSoftHydroelasticProperties(r, &soft_properties);
+    ProximityProperties rigid_properties;
+    AddRigidHydroelasticProperties(r, &rigid_properties);
 
-  ProximityProperties soft_properties;
-  AddContactMaterial(1e8, {}, {}, {}, &soft_properties);
-  AddSoftHydroelasticProperties(r, &soft_properties);
-  ProximityProperties rigid_properties;
-  AddRigidHydroelasticProperties(r, &rigid_properties);
+    // Extract the ids from poses and sort them so that we know we're assigning
+    // appropriate alternativing compliance.
+    std::vector<GeometryId> ids;
+    for (const auto& pair : poses_) {
+      ids.push_back(pair.first);
+    }
+    std::sort(ids.begin(), ids.end());
 
-  // Extract the ids from poses and sort them so that we know we're assigning
-  // appropriate alternativing compliance.
-  std::vector<GeometryId> ids;
-  for (const auto& pair : poses) {
-    ids.push_back(pair.first);
+    int n = 0;
+    const Sphere sphere{r};
+    for (const auto& id : ids) {
+      engine_.AddDynamicGeometry(sphere, {}, id,
+                                 (n % 2) ? soft_properties : rigid_properties);
+      ++n;
+    }
   }
-  std::sort(ids.begin(), ids.end());
 
-  int n = 0;
-  const Sphere sphere{r};
-  for (const auto& id : ids) {
-    engine.AddDynamicGeometry(sphere, {}, id,
-                              (n % 2) ? soft_properties : rigid_properties);
-    ++n;
+  ProximityEngine<double> engine_;
+  unordered_map<GeometryId, RigidTransformd> poses_;
+};
+
+TEST_F(ProximityEngineHydro, ComputeContactSurfacesResultOrdering) {
+  engine_.UpdateWorldPoses(poses_);
+  const auto results1 = engine_.ComputeContactSurfaces(poses_);
+  ASSERT_EQ(results1.size(), poses_.size());
+
+  engine_.UpdateWorldPoses(poses_);
+  const auto results2 = engine_.ComputeContactSurfaces(poses_);
+  ASSERT_EQ(results2.size(), poses_.size());
+
+  for (size_t i = 0; i < poses_.size(); ++i) {
+    EXPECT_EQ(results1[i].id_M(), results2[i].id_M());
+    EXPECT_EQ(results1[i].id_N(), results2[i].id_N());
   }
-  engine.UpdateWorldPoses(poses);
-  const auto results1 = engine.ComputeContactSurfaces(poses);
-  ASSERT_EQ(results1.size(), poses.size());
+}
 
-  engine.UpdateWorldPoses(poses);
-  const auto results2 = engine.ComputeContactSurfaces(poses);
-  ASSERT_EQ(results1.size(), poses.size());
+TEST_F(ProximityEngineHydro, ComputePolygonalContactSurfacesResultOrdering) {
+  engine_.UpdateWorldPoses(poses_);
+  const auto results1 = engine_.ComputePolygonalContactSurfaces(poses_);
+  ASSERT_EQ(results1.size(), poses_.size());
 
-  for (size_t i = 0; i < poses.size(); ++i) {
+  engine_.UpdateWorldPoses(poses_);
+  const auto results2 = engine_.ComputePolygonalContactSurfaces(poses_);
+  ASSERT_EQ(results2.size(), poses_.size());
+
+  for (size_t i = 0; i < poses_.size(); ++i) {
     EXPECT_EQ(results1[i].id_M(), results2[i].id_M());
     EXPECT_EQ(results1[i].id_N(), results2[i].id_N());
   }
@@ -1909,54 +1963,89 @@ GTEST_TEST(ProximityEngineTests, ComputeContactSurfacesResultOrdering) {
 // Confirms that the ComputeContactSurfacesWithFallback() computation returns
 // the same results twice in a row. This test is explicitly required because it
 // is known that updating the pose in the FCL tree can lead to erratic ordering.
-GTEST_TEST(ProximityEngineTests,
-           ComputeContactSurfacesWithFallbackResultOrdering) {
-  ProximityEngine<double> engine;
+// We also test ComputePolygonalContactSurfacesWithFallback() similarly.
+class ProximityEngineHydroWithFallback : public testing::Test {
+ protected:
+  void SetUp() override {
+    const double r = 0.5;
+    // For this case we want at least four contacts *of each type*. So, we order
+    // geometries as: S S R R S S R R. This will give us four soft contacts and
+    // four rigid contacts.
+    N_ = 8;
+    poses_ = MakeCollidingRing(r, N_);
 
-  const double r = 0.5;
-  // For this case we want at least four contacts *of each type*. So, we order
-  // geometries as: S S R R S S R R. This will give us four soft contacts and
-  // four rigid contacts.
-  const int N = 8;
-  unordered_map<GeometryId, RigidTransformd> poses = MakeCollidingRing(r, N);
+    ProximityProperties soft_properties;
+    AddContactMaterial(1e8, {}, {}, {}, &soft_properties);
+    AddSoftHydroelasticProperties(r / 2, &soft_properties);
+    ProximityProperties rigid_properties;
+    AddRigidHydroelasticProperties(r, &rigid_properties);
 
-  ProximityProperties soft_properties;
-  AddContactMaterial(1e8, {}, {}, {}, &soft_properties);
-  AddSoftHydroelasticProperties(r / 2, &soft_properties);
-  ProximityProperties rigid_properties;
-  AddRigidHydroelasticProperties(r, &rigid_properties);
+    // Extract the ids from poses and sort them so that we know we're assigning
+    // appropriate alternativing compliance.
+    std::vector<GeometryId> ids;
+    for (const auto& pair : poses_) {
+      ids.push_back(pair.first);
+    }
+    std::sort(ids.begin(), ids.end());
 
-  // Extract the ids from poses and sort them so that we know we're assigning
-  // appropriate alternativing compliance.
-  std::vector<GeometryId> ids;
-  for (const auto& pair : poses) {
-    ids.push_back(pair.first);
+    int n = 0;
+    const Sphere sphere{r};
+    for (const auto& id : ids) {
+      bool is_soft = (n % 4) < 2;
+      engine_.AddDynamicGeometry(sphere, {}, id,
+                                 is_soft ? soft_properties : rigid_properties);
+      ++n;
+    }
   }
-  std::sort(ids.begin(), ids.end());
 
-  int n = 0;
-  const Sphere sphere{r};
-  for (const auto& id : ids) {
-    bool is_soft = (n % 4) < 2;
-    engine.AddDynamicGeometry(sphere, {}, id,
-                              is_soft ? soft_properties : rigid_properties);
-    ++n;
-  }
-  engine.UpdateWorldPoses(poses);
+  size_t N_;
+  ProximityEngine<double> engine_;
+  unordered_map<GeometryId, RigidTransformd> poses_;
+};
+
+TEST_F(ProximityEngineHydroWithFallback,
+       ComputeContactSurfacesWithFallbackResultOrdering) {
+  engine_.UpdateWorldPoses(poses_);
   vector<ContactSurface<double>> surfaces1;
   vector<PenetrationAsPointPair<double>> points1;
-  engine.ComputeContactSurfacesWithFallback(poses, &surfaces1, &points1);
-  ASSERT_EQ(surfaces1.size(), N / 2);
-  ASSERT_EQ(points1.size(), N / 2);
+  engine_.ComputeContactSurfacesWithFallback(poses_, &surfaces1, &points1);
+  ASSERT_EQ(surfaces1.size(), N_ / 2);
+  ASSERT_EQ(points1.size(), N_ / 2);
 
-  engine.UpdateWorldPoses(poses);
+  engine_.UpdateWorldPoses(poses_);
   vector<ContactSurface<double>> surfaces2;
   vector<PenetrationAsPointPair<double>> points2;
-  engine.ComputeContactSurfacesWithFallback(poses, &surfaces2, &points2);
-  ASSERT_EQ(surfaces2.size(), N / 2);
-  ASSERT_EQ(points2.size(), N / 2);
+  engine_.ComputeContactSurfacesWithFallback(poses_, &surfaces2, &points2);
+  ASSERT_EQ(surfaces2.size(), N_ / 2);
+  ASSERT_EQ(points2.size(), N_ / 2);
 
-  for (size_t i = 0; i < N / 2; ++i) {
+  for (size_t i = 0; i < N_ / 2; ++i) {
+    EXPECT_EQ(surfaces1[i].id_M(), surfaces2[i].id_M());
+    EXPECT_EQ(surfaces1[i].id_N(), surfaces2[i].id_N());
+    EXPECT_EQ(points1[i].id_A, points2[i].id_A);
+    EXPECT_EQ(points1[i].id_B, points2[i].id_B);
+  }
+}
+
+TEST_F(ProximityEngineHydroWithFallback,
+       ComputePolygonalContactSurfacesWithFallbackResultOrdering) {
+  engine_.UpdateWorldPoses(poses_);
+  vector<ContactSurface<double>> surfaces1;
+  vector<PenetrationAsPointPair<double>> points1;
+  engine_.ComputePolygonalContactSurfacesWithFallback(poses_, &surfaces1,
+                                                      &points1);
+  ASSERT_EQ(surfaces1.size(), N_ / 2);
+  ASSERT_EQ(points1.size(), N_ / 2);
+
+  engine_.UpdateWorldPoses(poses_);
+  vector<ContactSurface<double>> surfaces2;
+  vector<PenetrationAsPointPair<double>> points2;
+  engine_.ComputePolygonalContactSurfacesWithFallback(poses_, &surfaces2,
+                                                      &points2);
+  ASSERT_EQ(surfaces2.size(), N_ / 2);
+  ASSERT_EQ(points2.size(), N_ / 2);
+
+  for (size_t i = 0; i < N_ / 2; ++i) {
     EXPECT_EQ(surfaces1[i].id_M(), surfaces2[i].id_M());
     EXPECT_EQ(surfaces1[i].id_N(), surfaces2[i].id_N());
     EXPECT_EQ(points1[i].id_A, points2[i].id_A);
@@ -2297,78 +2386,31 @@ TEST_F(SimplePenetrationTest, HasCollisionsDynamicAndDynamicSingleSource) {
   EXPECT_TRUE(ad_engine->HasCollisions());
 }
 
-// Invokes ExcludeCollisionsWithin in various scenarios which will and won't
-// generate cliques.
-TEST_F(SimplePenetrationTest, ExcludeCollisionsWithinCliqueGeneration) {
-  using PET = ProximityEngineTester;
-  const GeometryId id_dynamic1 = GeometryId::get_new_id();
-  engine_.AddDynamicGeometry(sphere_, {}, id_dynamic1);
-  const GeometryId id_dynamic2 = GeometryId::get_new_id();
-  engine_.AddDynamicGeometry(sphere_, {}, id_dynamic2);
-
-  RigidTransformd pose = RigidTransformd::Identity();
-  const GeometryId id_anchored1 = GeometryId::get_new_id();
-  engine_.AddAnchoredGeometry(sphere_, pose, id_anchored1);
-  const GeometryId id_anchored2 = GeometryId::get_new_id();
-  engine_.AddAnchoredGeometry(sphere_, pose, id_anchored2);
-
-  int expected_clique = PET::peek_next_clique(engine_);
-
-  // Named aliases for otherwise inscrutable true/false magic values. The
-  // parameter in the invoked method is called `is_dynamic`. So, we set the
-  // the constant `is_dynamic` to true and its opposite, `is_anchored` to false.
-  const bool is_anchored = false;
-  const bool is_dynamic = true;
-
-  // No dynamic geometry --> no cliques generated.
-  engine_.ExcludeCollisionsWithin({}, {id_anchored1, id_anchored2});
-  ASSERT_EQ(PET::peek_next_clique(engine_), expected_clique);
-  EXPECT_TRUE(engine_.CollisionFiltered(id_anchored1, is_anchored, id_anchored2,
-                                        is_anchored));
-
-  // Single dynamic and no anchored geometry --> no cliques generated.
-  engine_.ExcludeCollisionsWithin({id_dynamic1}, {});
-  ASSERT_EQ(PET::peek_next_clique(engine_), expected_clique);
-
-  // Multiple dynamic and no anchored geometry --> cliques generated.
-  engine_.ExcludeCollisionsWithin({id_dynamic1, id_dynamic2}, {});
-  ASSERT_EQ(PET::peek_next_clique(engine_), ++expected_clique);
-  EXPECT_TRUE(engine_.CollisionFiltered(id_dynamic1, is_dynamic, id_dynamic2,
-                                        is_dynamic));
-
-  // Single dynamic and (one or more) anchored geometry --> cliques generated.
-  engine_.ExcludeCollisionsWithin({id_dynamic1}, {id_anchored1});
-  ASSERT_EQ(PET::peek_next_clique(engine_), ++expected_clique);
-  EXPECT_TRUE(engine_.CollisionFiltered(id_anchored1, is_anchored, id_dynamic1,
-                                        is_dynamic));
-  engine_.ExcludeCollisionsWithin({id_dynamic1}, {id_anchored1, id_anchored2});
-  ASSERT_EQ(PET::peek_next_clique(engine_), ++expected_clique);
-  EXPECT_TRUE(engine_.CollisionFiltered(id_anchored2, is_anchored, id_dynamic1,
-                                        is_dynamic));
-
-  // Multiple dynamic and (one or more) anchored geometry --> cliques generated.
-  engine_.ExcludeCollisionsWithin({id_dynamic1, id_dynamic2}, {id_anchored1});
-  ASSERT_EQ(PET::peek_next_clique(engine_), ++expected_clique);
-  engine_.ExcludeCollisionsWithin({id_dynamic1, id_dynamic2},
-                                  {id_anchored1, id_anchored2});
-  ASSERT_EQ(PET::peek_next_clique(engine_), ++expected_clique);
-}
-
 // Performs the same collision test where the geometries have been filtered.
-TEST_F(SimplePenetrationTest, ExcludeCollisionsWithin) {
+TEST_F(SimplePenetrationTest, WithCollisionFilters) {
   GeometryId origin_id = GeometryId::get_new_id();
   engine_.AddDynamicGeometry(sphere_, {}, origin_id);
 
   GeometryId collide_id = GeometryId::get_new_id();
   engine_.AddDynamicGeometry(sphere_, {}, collide_id);
-  EXPECT_EQ(engine_.num_geometries(), 2);
+  ASSERT_EQ(engine_.num_geometries(), 2);
 
   X_WGs_[origin_id] = RigidTransformd::Identity();
   X_WGs_[collide_id] = RigidTransformd::Identity();
 
-  EXPECT_FALSE(engine_.CollisionFiltered(origin_id, true, collide_id, true));
-  engine_.ExcludeCollisionsWithin({origin_id, collide_id}, {});
-  EXPECT_TRUE(engine_.CollisionFiltered(origin_id, true, collide_id, true));
+  ASSERT_TRUE(engine_.collision_filter().CanCollideWith(origin_id, collide_id));
+
+  // I know the GeometrySet only has id_A and id_B, so I'll construct the
+  // extracted set by hand.
+  auto extract_ids = [origin_id, collide_id](const GeometrySet&) {
+    return std::unordered_set<GeometryId>{origin_id, collide_id};
+  };
+  engine_.collision_filter().Apply(CollisionFilterDeclaration().ExcludeWithin(
+                                       GeometrySet{origin_id, collide_id}),
+                                   extract_ids, false /* is_permanent */);
+
+  EXPECT_FALSE(
+      engine_.collision_filter().CanCollideWith(origin_id, collide_id));
 
   // Non-colliding case.
   MoveDynamicSphere(collide_id, false /* not colliding */);
@@ -2388,103 +2430,7 @@ TEST_F(SimplePenetrationTest, ExcludeCollisionsWithin) {
   ExpectIgnoredPenetration(origin_id, collide_id, ad_engine.get());
 }
 
-// Invokes ExcludeCollisionsBetween in various scenarios which will and won't
-// generate cliques.
-TEST_F(SimplePenetrationTest, ExcludeCollisionsBetweenCliqueGeneration) {
-  using PET = ProximityEngineTester;
-  GeometryId dynamic1 = GeometryId::get_new_id();
-  engine_.AddDynamicGeometry(sphere_, {}, dynamic1);
-  GeometryId dynamic2 = GeometryId::get_new_id();
-  engine_.AddDynamicGeometry(sphere_, {}, dynamic2);
-  GeometryId dynamic3 = GeometryId::get_new_id();
-  engine_.AddDynamicGeometry(sphere_, {}, dynamic3);
-
-  RigidTransformd pose = RigidTransformd::Identity();
-  GeometryId anchored1 = GeometryId::get_new_id();
-  engine_.AddAnchoredGeometry(sphere_, pose, anchored1);
-  GeometryId anchored2 = GeometryId::get_new_id();
-  engine_.AddAnchoredGeometry(sphere_, pose, anchored2);
-  GeometryId anchored3 = GeometryId::get_new_id();
-  engine_.AddAnchoredGeometry(sphere_, pose, anchored3);
-
-  int expected_clique = PET::peek_next_clique(engine_);
-
-  // No dynamic geometry --> no cliques generated.
-  engine_.ExcludeCollisionsBetween({}, {anchored1}, {}, {anchored2});
-  ASSERT_EQ(PET::peek_next_clique(engine_), expected_clique);
-
-  // One empty group --> no cliques generated
-  engine_.ExcludeCollisionsBetween({}, {}, {dynamic1}, {anchored1});
-  ASSERT_EQ(PET::peek_next_clique(engine_), expected_clique);
-  engine_.ExcludeCollisionsBetween({dynamic1}, {anchored1}, {}, {});
-  ASSERT_EQ(PET::peek_next_clique(engine_), expected_clique);
-
-  // Two groups with the same single geometry --> no cliques generated.
-  engine_.ExcludeCollisionsBetween({dynamic1}, {}, {dynamic1}, {});
-  ASSERT_EQ(PET::peek_next_clique(engine_), expected_clique);
-
-  // Groups with dynamic and anchored geometry -- cliques generated for (g, a)
-  // pairs but *not* (a, a) pairs: (d1, d2), (d1, a2), (d2, a1).
-  engine_.ExcludeCollisionsBetween({dynamic1}, {anchored1}, {dynamic2},
-                                   {anchored2});
-  expected_clique += 3;
-  ASSERT_EQ(PET::peek_next_clique(engine_), expected_clique);
-
-  // Repeat previous filter declaration -- no cliques added.
-  engine_.ExcludeCollisionsBetween({dynamic1}, {anchored1}, {dynamic2},
-                                   {anchored2});
-  ASSERT_EQ(PET::peek_next_clique(engine_), expected_clique);
-
-  // Partial repeat -- add one anchored geometry to one set. One new clique for
-  // (d2, a3).
-  engine_.ExcludeCollisionsBetween({dynamic1}, {anchored1, anchored3},
-                                   {dynamic2}, {anchored2});
-  ASSERT_EQ(PET::peek_next_clique(engine_), ++expected_clique);
-
-  // Partial repeat -- add one dynamic geometry to one set. Two new cliques for
-  // (d3, d2) and (d3, a2).
-  engine_.ExcludeCollisionsBetween({dynamic1, dynamic3}, {anchored1},
-                                   {dynamic2}, {anchored2});
-  expected_clique += 2;
-  ASSERT_EQ(PET::peek_next_clique(engine_), expected_clique);
-}
-
-TEST_F(SimplePenetrationTest, ExcludeCollisionsBetween) {
-  GeometryId origin_id = GeometryId::get_new_id();
-  engine_.AddDynamicGeometry(sphere_, {}, origin_id);
-
-  GeometryId collide_id = GeometryId::get_new_id();
-  engine_.AddDynamicGeometry(sphere_, {}, collide_id);
-  EXPECT_EQ(engine_.num_geometries(), 2);
-
-  EXPECT_FALSE(engine_.CollisionFiltered(origin_id, true,
-                                         collide_id, true));
-  engine_.ExcludeCollisionsBetween({origin_id}, {}, {collide_id}, {});
-  EXPECT_TRUE(engine_.CollisionFiltered(origin_id, true,
-                                        collide_id, true));
-
-  X_WGs_[origin_id] = RigidTransformd::Identity();
-  X_WGs_[collide_id] = RigidTransformd::Identity();
-
-  // Non-colliding case.
-  MoveDynamicSphere(collide_id, false /* not colliding */);
-  ExpectIgnoredPenetration(origin_id, collide_id, &engine_);
-
-  // Colliding case.
-  MoveDynamicSphere(collide_id, true /* colliding */);
-  ExpectIgnoredPenetration(origin_id, collide_id, &engine_);
-
-  // Test colliding case on copy.
-  ProximityEngine<double> copy_engine(engine_);
-  ExpectIgnoredPenetration(origin_id, collide_id, &copy_engine);
-
-  // Test AutoDiffXd converted engine.
-  std::unique_ptr<ProximityEngine<AutoDiffXd>> ad_engine =
-      engine_.ToAutoDiffXd();
-  ExpectIgnoredPenetration(origin_id, collide_id, ad_engine.get());
-}
-
-// Confirms that non-positve thresholds produce the right value. Creates three
+// Confirms that non-positive thresholds produce the right value. Creates three
 // spheres: A, B, & C. A is separated from B & C and B & C are penetrating.
 // We confirm that query tolerance of 0, returns B & C and that a tolerance
 // of penetration depth + epsilon returns B & C, and depth - epsilon omits

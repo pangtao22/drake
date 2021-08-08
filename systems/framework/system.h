@@ -18,6 +18,7 @@
 #include "drake/common/drake_assert.h"
 #include "drake/common/drake_bool.h"
 #include "drake/common/drake_copyable.h"
+#include "drake/common/drake_deprecated.h"
 #include "drake/common/drake_throw.h"
 #include "drake/common/nice_type_name.h"
 #include "drake/common/pointer_cast.h"
@@ -35,31 +36,6 @@
 
 namespace drake {
 namespace systems {
-
-#if !defined(DRAKE_DOXYGEN_CXX)
-// Private helper class for System.
-class SystemImpl {
- public:
-  DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(SystemImpl)
-  SystemImpl() = delete;
-
- private:
-  // Attorney-Client idiom to expose a subset of private elements of System.
-  // We are the attorney.  These are the clients that can access our private
-  // members, and thus access some subset of System's private members.
-  template <typename> friend class Diagram;
-
-  // Return a mutable reference to the System's SystemScalarConverter.  Diagram
-  // needs this in order to withdraw support for certain scalar type conversion
-  // operations once it learns about what its subsystems support.
-  template <typename T>
-  static SystemScalarConverter& get_mutable_system_scalar_converter(
-      System<T>* system) {
-    DRAKE_DEMAND(system != nullptr);
-    return system->system_scalar_converter_;
-  }
-};
-#endif  // DRAKE_DOXYGEN_CXX
 
 /** Base class for all System functionality that is dependent on the templatized
 scalar type T for input, state, parameters, and outputs.
@@ -391,7 +367,7 @@ class System : public SystemBase {
   const Vec<T>* EvalVectorInput(const Context<T>& context,
                                 int port_index) const {
     static_assert(
-        std::is_base_of<BasicVector<T>, Vec<T>>::value,
+        std::is_base_of_v<BasicVector<T>, Vec<T>>,
         "In EvalVectorInput<Vec>, Vec must be a subclass of BasicVector.");
 
     ValidateContext(context);
@@ -594,7 +570,7 @@ class System : public SystemBase {
   of the state variables to change. See the documentation for
   DispatchUnrestrictedUpdateHandler() for more details.
 
-  @throws std::logic_error if the dimensionality of the state variables
+  @throws std::exception if the dimensionality of the state variables
           changes in the callback. */
   void CalcUnrestrictedUpdate(
       const Context<T>& context,
@@ -820,14 +796,14 @@ class System : public SystemBase {
 
   /** Returns a const reference to the subcontext that corresponds to the
   contained %System `subsystem`.
-  @throws std::logic_error if `subsystem` not contained in `this` %System.
+  @throws std::exception if `subsystem` not contained in `this` %System.
   @pre The given `context` is valid for use with `this` %System. */
   const Context<T>& GetSubsystemContext(const System<T>& subsystem,
                                         const Context<T>& context) const;
 
   /** Returns a mutable reference to the subcontext that corresponds to the
   contained %System `subsystem`.
-  @throws std::logic_error if `subsystem` not contained in `this` %System.
+  @throws std::exception if `subsystem` not contained in `this` %System.
   @pre The given `context` is valid for use with `this` %System. */
   Context<T>& GetMutableSubsystemContext(const System<T>& subsystem,
                                          Context<T>* context) const;
@@ -836,7 +812,7 @@ class System : public SystemBase {
   `this` %System is already the top level (root) %System, just returns
   `root_context`. (A root Context is one that does not have a parent
   Context.)
-  @throws std::logic_error if the given `root_context` is not actually
+  @throws std::exception if the given `root_context` is not actually
       a root context.
   @see GetSubsystemContext() */
   const Context<T>& GetMyContextFromRoot(const Context<T>& root_context) const;
@@ -930,7 +906,13 @@ class System : public SystemBase {
   // TODO(sherm1) Make this an InputPortIndex.
   /** Returns the typed input port at index @p port_index. */
   const InputPort<T>& get_input_port(int port_index) const {
-    return dynamic_cast<const InputPort<T>&>(
+    // Profiling revealed that it is too expensive to do a dynamic_cast here.
+    // A static_cast is safe as long as GetInputPortBaseOrThrow always returns
+    // a satisfactory type. As of this writing, it only ever returns values
+    // supplied via SystemBase::AddInputPort, which atop its implementation
+    // has a check that port.get_system_interface() matches `this` which is a
+    // System<T>, so we are safe.
+    return static_cast<const InputPort<T>&>(
         this->GetInputPortBaseOrThrow(__func__, port_index));
   }
 
@@ -955,7 +937,7 @@ class System : public SystemBase {
   /** Returns the typed input port with the unique name @p port_name.
   The current implementation performs a linear search over strings; prefer
   get_input_port() when performance is a concern.
-  @throws std::logic_error if port_name is not found. */
+  @throws std::exception if port_name is not found. */
   const InputPort<T>& GetInputPort(const std::string& port_name) const;
 
   /** Returns true iff the system has an InputPort of the given @p
@@ -965,7 +947,13 @@ class System : public SystemBase {
   // TODO(sherm1) Make this an OutputPortIndex.
   /** Returns the typed output port at index @p port_index. */
   const OutputPort<T>& get_output_port(int port_index) const {
-    return dynamic_cast<const OutputPort<T>&>(
+    // Profiling revealed that it is too expensive to do a dynamic_cast here.
+    // A static_cast is safe as long as GetInputPortBaseOrThrow always returns
+    // a satisfactory type. As of this writing, it only ever returns values
+    // supplied via SystemBase::AddInputPort, which atop its implementation
+    // has a check that port.get_system_interface() matches `this` which is a
+    // System<T>, so we are safe.
+    return static_cast<const OutputPort<T>&>(
         this->GetOutputPortBaseOrThrow(__func__, port_index));
   }
 
@@ -990,7 +978,7 @@ class System : public SystemBase {
   /** Returns the typed output port with the unique name @p port_name.
   The current implementation performs a linear search over strings; prefer
   get_output_port() when performance is a concern.
-  @throws std::logic_error if port_name is not found. */
+  @throws std::exception if port_name is not found. */
   const OutputPort<T>& GetOutputPort(const std::string& port_name) const;
 
   /** Returns true iff the system has an OutputPort of the given @p
@@ -1002,7 +990,7 @@ class System : public SystemBase {
   int num_constraints() const;
 
   /** Returns the constraint at index @p constraint_index.
-  @throws std::out_of_range for an invalid constraint_index. */
+  @throws std::exception for an invalid constraint_index. */
   const SystemConstraint<T>& get_constraint(
       SystemConstraintIndex constraint_index) const;
 
@@ -1155,7 +1143,10 @@ class System : public SystemBase {
   in @p other_context, as evaluated by @p other_system.
   @throws std::exception unless `other_context` and `target_context` both
   have the same shape as this System, and the `other_system`. Ignores
-  disconnected inputs. */
+  disconnected inputs.
+  @throws std::exception if `this` system's scalar type T != double and
+  `other_system` has any abstract input ports whose contained type depends on
+  scalar type. */
   void FixInputPortsFrom(const System<double>& other_system,
                          const Context<double>& other_context,
                          Context<T>* target_context) const;
@@ -1388,7 +1379,7 @@ class System : public SystemBase {
   /** Adds a port with the specified @p type and @p size to the input topology.
 
   Input port names must be unique for this system (passing in a duplicate
-  @p name will throw std::logic_error). If @p name is given as
+  @p name will throw std::exception). If @p name is given as
   kUseDefaultName, then a default value of e.g. "u2", where 2
   is the input number will be provided. An empty @p name is not permitted.
 
@@ -1398,7 +1389,7 @@ class System : public SystemBase {
   reason explicitly about randomness at the system level.  All random input
   ports are assumed to be statistically independent.
   @pre @p name must not be empty.
-  @throws std::logic_error for a duplicate port name.
+  @throws std::exception for a duplicate port name.
   @returns the declared port. */
   InputPort<T>& DeclareInputPort(
       std::variant<std::string, UseDefaultName> name, PortDataType type,
@@ -1407,16 +1398,14 @@ class System : public SystemBase {
   //@}
 
   // =========================================================================
-  /** @name             To-be-deprecated declarations
+  /** @name                Deprecated declarations
   Methods in this section leave out the port name parameter and are the same
   as invoking the corresponding method with `kUseDefaultName` as the name.
   We intend to make specifying the name required and will deprecate these
   soon. Don't use them. */
   //@{
 
-  /** See the nearly identical signature with an additional (first) argument
-  specifying the port name.  This version will be deprecated as discussed
-  in #9447. */
+  DRAKE_DEPRECATED("2021-10-01", "Pass a port name as the first argument.")
   InputPort<T>& DeclareInputPort(
       PortDataType type, int size,
       std::optional<RandomDistribution> random_type = std::nullopt);
@@ -1471,7 +1460,7 @@ class System : public SystemBase {
 
   @note The public method has already verified that `proposed_derivatives`
   is compatible with this System and that `residual` is non-null and of the
-  the declared size (as reported by
+  declared size (as reported by
   SystemBase::implicit_time_derivatives_residual_size()). You do not have to
   check those two conditions in your implementation, but if you have additional
   restrictions you should validate that they are also met. */
@@ -1583,7 +1572,7 @@ class System : public SystemBase {
 
   The default implementation uses the identity mapping, and correctly does
   nothing if the %System does not have second-order state variables. It
-  throws std::runtime_error if the `generalized_velocity` and
+  throws std::exception if the `generalized_velocity` and
   `qdot` are not the same size, but that is not enough to guarantee that
   the default implementation is adequate. Child classes must
   override this function if qdot != v (even if they are the same size).
@@ -1605,7 +1594,7 @@ class System : public SystemBase {
 
   The default implementation uses the identity mapping, and correctly does
   nothing if the %System does not have second-order state variables. It
-  throws std::runtime_error if the `generalized_velocity` (`v`) and
+  throws std::exception if the `generalized_velocity` (`v`) and
   `qdot` are not the same size, but that is not enough to guarantee that
   the default implementation is adequate. Child classes must
   override this function if `qdot != v` (even if they are the same size).
@@ -1650,37 +1639,37 @@ class System : public SystemBase {
   }
 
   EventCollection<PublishEvent<T>>& get_mutable_forced_publish_events() {
-    DRAKE_DEMAND(forced_publish_events_.get());
+    DRAKE_DEMAND(forced_publish_events_ != nullptr);
     return *forced_publish_events_;
   }
 
   EventCollection<DiscreteUpdateEvent<T>>&
   get_mutable_forced_discrete_update_events() {
-    DRAKE_DEMAND(forced_discrete_update_events_.get());
+    DRAKE_DEMAND(forced_discrete_update_events_ != nullptr);
     return *forced_discrete_update_events_;
   }
 
   EventCollection<UnrestrictedUpdateEvent<T>>&
   get_mutable_forced_unrestricted_update_events() {
-    DRAKE_DEMAND(forced_unrestricted_update_events_.get());
+    DRAKE_DEMAND(forced_unrestricted_update_events_ != nullptr);
     return *forced_unrestricted_update_events_;
   }
 
   const EventCollection<PublishEvent<T>>&
   get_forced_publish_events() const {
-    DRAKE_DEMAND(forced_publish_events_.get());
+    DRAKE_DEMAND(forced_publish_events_ != nullptr);
     return *forced_publish_events_;
   }
 
   const EventCollection<DiscreteUpdateEvent<T>>&
   get_forced_discrete_update_events() const {
-    DRAKE_DEMAND(forced_discrete_update_events_.get());
+    DRAKE_DEMAND(forced_discrete_update_events_ != nullptr);
     return *forced_discrete_update_events_;
   }
 
   const EventCollection<UnrestrictedUpdateEvent<T>>&
   get_forced_unrestricted_update_events() const {
-    DRAKE_DEMAND(forced_unrestricted_update_events_.get());
+    DRAKE_DEMAND(forced_unrestricted_update_events_ != nullptr);
     return *forced_unrestricted_update_events_;
   }
 
@@ -1697,6 +1686,11 @@ class System : public SystemBase {
   void set_forced_unrestricted_update_events(
   std::unique_ptr<EventCollection<UnrestrictedUpdateEvent<T>>> forced) {
     forced_unrestricted_update_events_ = std::move(forced);
+  }
+
+  /** Returns the SystemScalarConverter for `this` system. */
+  SystemScalarConverter& get_mutable_system_scalar_converter() {
+    return system_scalar_converter_;
   }
 
   /** Checks whether the given object was created for this system.
@@ -1726,10 +1720,6 @@ class System : public SystemBase {
   }
 
  private:
-  // Attorney-Client idiom to expose a subset of private elements of System.
-  // Refer to SystemImpl comments for details.
-  friend class SystemImpl;
-
   // For any T1 & T2, System<T1> considers System<T2> a friend, so that System
   // can safely and efficiently convert scalar types. See for example
   // System<T>::ToScalarTypeMaybe.

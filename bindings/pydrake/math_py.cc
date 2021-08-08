@@ -8,6 +8,7 @@
 #include "drake/bindings/pydrake/autodiff_types_pybind.h"
 #include "drake/bindings/pydrake/common/cpp_template_pybind.h"
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
+#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/common/eigen_pybind.h"
 #include "drake/bindings/pydrake/common/type_pack.h"
 #include "drake/bindings/pydrake/common/value_pybind.h"
@@ -158,6 +159,9 @@ void DoScalarDependentDefinitions(py::module m, T) {
             cls_doc.MakeYRotation.doc)
         .def_static("MakeZRotation", &Class::MakeZRotation, py::arg("theta"),
             cls_doc.MakeZRotation.doc)
+        .def_static("MakeFromOneVector", &Class::MakeFromOneVector,
+            py::arg("b_A"), py::arg("axis_index"),
+            cls_doc.MakeFromOneVector.doc)
         .def_static("Identity", &Class::Identity, cls_doc.Identity.doc)
         .def("set", &Class::set, py::arg("R"), cls_doc.set.doc)
         .def("inverse", &Class::inverse, cls_doc.inverse.doc)
@@ -316,12 +320,16 @@ void DoScalarIndependentDefinitions(py::module m) {
   // TODO(eric.cousineau): Bind remaining classes for all available scalar
   // types.
   using T = double;
-  m.def(
-      "ComputeBasisFromAxis",
-      [](int axis_index, const Vector3<T>& axis) {
-        return ComputeBasisFromAxis(axis_index, axis);
-      },
-      py::arg("axis_index"), py::arg("axis_W"), doc.ComputeBasisFromAxis.doc);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  m.def("ComputeBasisFromAxis",
+      WrapDeprecated(doc.ComputeBasisFromAxis.doc_deprecated,
+          [](int axis_index, const Vector3<T>& axis) {
+            return ComputeBasisFromAxis(axis_index, axis);
+          }),
+      py::arg("axis_index"), py::arg("axis_W"),
+      doc.ComputeBasisFromAxis.doc_deprecated);
+#pragma GCC diagnostic pop  // pop -Wdeprecated-declarations
   py::class_<BarycentricMesh<T>>(m, "BarycentricMesh", doc.BarycentricMesh.doc)
       .def(py::init<BarycentricMesh<T>::MeshGrid>(),
           doc.BarycentricMesh.ctor.doc)
@@ -433,8 +441,22 @@ void DoScalarIndependentDefinitions(py::module m) {
       .def("RealContinuousLyapunovEquation", &RealContinuousLyapunovEquation,
           py::arg("A"), py::arg("Q"), doc.RealContinuousLyapunovEquation.doc)
       .def("DiscreteAlgebraicRiccatiEquation",
-          &DiscreteAlgebraicRiccatiEquation, py::arg("A"), py::arg("B"),
-          py::arg("Q"), py::arg("R"), doc.DiscreteAlgebraicRiccatiEquation.doc)
+          py::overload_cast<const Eigen::Ref<const Eigen::MatrixXd>&,
+              const Eigen::Ref<const Eigen::MatrixXd>&,
+              const Eigen::Ref<const Eigen::MatrixXd>&,
+              const Eigen::Ref<const Eigen::MatrixXd>&>(
+              &DiscreteAlgebraicRiccatiEquation),
+          py::arg("A"), py::arg("B"), py::arg("Q"), py::arg("R"),
+          doc.DiscreteAlgebraicRiccatiEquation.doc_4args)
+      .def("DiscreteAlgebraicRiccatiEquation",
+          py::overload_cast<const Eigen::Ref<const Eigen::MatrixXd>&,
+              const Eigen::Ref<const Eigen::MatrixXd>&,
+              const Eigen::Ref<const Eigen::MatrixXd>&,
+              const Eigen::Ref<const Eigen::MatrixXd>&,
+              const Eigen::Ref<const Eigen::MatrixXd>&>(
+              &DiscreteAlgebraicRiccatiEquation),
+          py::arg("A"), py::arg("B"), py::arg("Q"), py::arg("R"), py::arg("N"),
+          doc.DiscreteAlgebraicRiccatiEquation.doc_5args)
       .def("RealDiscreteLyapunovEquation", &RealDiscreteLyapunovEquation,
           py::arg("A"), py::arg("Q"), doc.RealDiscreteLyapunovEquation.doc);
 

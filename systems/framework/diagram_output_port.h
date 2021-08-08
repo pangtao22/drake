@@ -46,6 +46,7 @@ class DiagramOutputPort final : public OutputPort<T> {
   //
   // @param diagram The Diagram that will own this port.
   // @param system_interface The same Diagram cast to its base class.
+  // @param system_id The ID of the same Diagram.
   // @param name A name for the port.  Output ports names must be unique
   //     within the `diagram` System.
   // @param index The output port index to be assigned to the new port.
@@ -71,13 +72,14 @@ class DiagramOutputPort final : public OutputPort<T> {
   // the caller to do that cast for us so take a System<T> here.
   DiagramOutputPort(const System<T>* diagram,
                     internal::SystemMessageInterface* system_interface,
+                    internal::SystemId system_id,
                     std::string name,
                     OutputPortIndex index,
                     DependencyTicket ticket,
                     const OutputPort<T>* source_output_port,
                     SubsystemIndex source_subsystem_index)
-      : OutputPort<T>(diagram, system_interface, std::move(name), index, ticket,
-                      source_output_port->get_data_type(),
+      : OutputPort<T>(diagram, system_interface, system_id, std::move(name),
+                      index, ticket, source_output_port->get_data_type(),
                       source_output_port->size()),
         source_output_port_(source_output_port),
         source_subsystem_index_(source_subsystem_index) {
@@ -99,7 +101,7 @@ class DiagramOutputPort final : public OutputPort<T> {
     return source_output_port_->Calc(subcontext, value);
   }
 
-  // Given he whole Diagram context, extracts the appropriate subcontext and
+  // Given the whole Diagram context, extracts the appropriate subcontext and
   // delegates to the source output port.
   const AbstractValue& DoEval(const Context<T>& diagram_context) const final {
     const Context<T>& subcontext = get_subcontext(diagram_context);
@@ -123,8 +125,13 @@ class DiagramOutputPort final : public OutputPort<T> {
 
   // Digs out the right subcontext for delegation.
   const Context<T>& get_subcontext(const Context<T>& diagram_context) const {
+    // Profiling revealed that it is too expensive to do a dynamic_cast here.
+    // A static_cast is safe as long as this is invoked only by methods that
+    // validate the SystemId, so that we know this Context is ours. As of this
+    // writing, only OutputPort::Eval and OutputPort::Calc invoke this and
+    // they do so safely.
     const DiagramContext<T>* diagram_context_downcast =
-        dynamic_cast<const DiagramContext<T>*>(&diagram_context);
+        static_cast<const DiagramContext<T>*>(&diagram_context);
     DRAKE_DEMAND(diagram_context_downcast != nullptr);
     return diagram_context_downcast->GetSubsystemContext(
         source_subsystem_index_);

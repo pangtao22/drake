@@ -10,7 +10,7 @@
 
 #include "drake/common/eigen_types.h"
 #include "drake/geometry/geometry_ids.h"
-#include "drake/geometry/proximity/collision_filter_legacy.h"
+#include "drake/geometry/proximity/collision_filter.h"
 #include "drake/geometry/proximity/hydroelastic_internal.h"
 #include "drake/geometry/proximity/mesh_half_space_intersection.h"
 #include "drake/geometry/proximity/mesh_intersection.h"
@@ -35,6 +35,7 @@ namespace hydroelastic {
       each indexed by its corresponding geometry's GeometryId.
     - The representation of all geometries that have been prepped for computing
       contact surfaces.
+    - The choice of how to represent contact polygons.
     - A vector of contact surfaces -- one instance of ContactSurface for
       every supported, unfiltered penetrating pair.
 
@@ -42,37 +43,44 @@ namespace hydroelastic {
 template <typename T>
 struct CallbackData {
   /* Constructs the fully-specified callback data. The values are as described
-   in the class documentation. The parameters are all aliased in the data and
-   must remain valid at least as long as the CallbackData instance.
+   in the class documentation. All parameters except `polygon_representation`
+   are aliased in the data and must remain valid at least as long as the
+   CallbackData instance.
 
    @param collision_filter_in     The collision filter system. Aliased.
    @param X_WGs_in                The T-valued poses. Aliased.
    @param geometries_in           The set of all hydroelastic geometric
                                   representations. Aliased.
+   @param polygon_representation_in  The choice of representation of contact
+                                  polygons.
    @param surfaces_in             The output results. Aliased.  */
   CallbackData(
-      const CollisionFilterLegacy* collision_filter_in,
+      const CollisionFilter* collision_filter_in,
       const std::unordered_map<GeometryId, math::RigidTransform<T>>* X_WGs_in,
       const Geometries* geometries_in,
+      ContactPolygonRepresentation polygon_representation_in,
       std::vector<ContactSurface<T>>* surfaces_in)
       : collision_filter(*collision_filter_in),
         X_WGs(*X_WGs_in),
         geometries(*geometries_in),
+        polygon_representation(polygon_representation_in),
         surfaces(*surfaces_in) {
-    DRAKE_DEMAND(collision_filter_in);
-    DRAKE_DEMAND(X_WGs_in);
-    DRAKE_DEMAND(geometries_in);
-    DRAKE_DEMAND(surfaces_in);
+    DRAKE_DEMAND(collision_filter_in != nullptr);
+    DRAKE_DEMAND(X_WGs_in != nullptr);
+    DRAKE_DEMAND(geometries_in != nullptr);
+    DRAKE_DEMAND(surfaces_in != nullptr);
   }
 
   /* The collision filter system.  */
-  const CollisionFilterLegacy& collision_filter;
+  const CollisionFilter& collision_filter;
 
   /* The T-valued poses of all geometries.  */
   const std::unordered_map<GeometryId, math::RigidTransform<T>>& X_WGs;
 
   /* The hydroelastic geometric representations.  */
   const Geometries& geometries;
+
+  const ContactPolygonRepresentation polygon_representation;
 
   /* The results of the distance query.  */
   std::vector<ContactSurface<T>>& surfaces;
@@ -94,36 +102,35 @@ template <typename T>
 std::unique_ptr<ContactSurface<T>> DispatchRigidSoftCalculation(
     const SoftGeometry& soft, const math::RigidTransform<T>& X_WS,
     GeometryId id_S, const RigidGeometry& rigid,
-    const math::RigidTransform<T>& X_WR, GeometryId id_R) {
+    const math::RigidTransform<T>& X_WR, GeometryId id_R,
+    ContactPolygonRepresentation representation) {
   if (soft.is_half_space() || rigid.is_half_space()) {
     if (soft.is_half_space()) {
       DRAKE_DEMAND(!rigid.is_half_space());
       // Soft half space with rigid mesh.
       const SurfaceMesh<double>& mesh_R = rigid.mesh();
-      const Bvh<SurfaceMesh<double>>& bvh_R = rigid.bvh();
-
+      const Bvh<Obb, SurfaceMesh<double>>& bvh_R = rigid.bvh();
       return ComputeContactSurfaceFromSoftHalfSpaceRigidMesh(
-          id_S, X_WS, soft.pressure_scale(), id_R, mesh_R, bvh_R, X_WR);
+          id_S, X_WS, soft.pressure_scale(), id_R, mesh_R, bvh_R, X_WR,
+          representation);
     } else {
-      // Soft volume vs rigid half space. The half space-mesh intersection
-      // requires the mesh field to be a linear mesh field.
-      const auto& field_S =
-          dynamic_cast<const VolumeMeshFieldLinear<double, double>&>(
-              soft.pressure_field());
-      const Bvh<VolumeMesh<double>>& bvh_S = soft.bvh();
+      // Soft volume vs rigid half space.
+      const VolumeMeshFieldLinear<double, double>& field_S =
+          soft.pressure_field();
+      const Bvh<Obb, VolumeMesh<double>>& bvh_S = soft.bvh();
       return ComputeContactSurfaceFromSoftVolumeRigidHalfSpace(
-          id_S, field_S, bvh_S, X_WS, id_R, X_WR);
+          id_S, field_S, bvh_S, X_WS, id_R, X_WR, representation);
     }
   } else {
     // soft cannot be a half space; so this must be mesh-mesh.
     const VolumeMeshFieldLinear<double, double>& field_S =
         soft.pressure_field();
-    const Bvh<VolumeMesh<double>>& bvh_S = soft.bvh();
+    const Bvh<Obb, VolumeMesh<double>>& bvh_S = soft.bvh();
     const SurfaceMesh<double>& mesh_R = rigid.mesh();
-    const Bvh<SurfaceMesh<double>>& bvh_R = rigid.bvh();
+    const Bvh<Obb, SurfaceMesh<double>>& bvh_R = rigid.bvh();
 
     return ComputeContactSurfaceFromSoftVolumeRigidSurface(
-        id_S, field_S, bvh_S, X_WS, id_R, mesh_R, bvh_R, X_WR);
+        id_S, field_S, bvh_S, X_WS, id_R, mesh_R, bvh_R, X_WR, representation);
   }
 }
 
@@ -173,8 +180,8 @@ CalcContactSurfaceResult MaybeCalcContactSurface(
   const math::RigidTransform<T>& X_WS(data->X_WGs.at(id_S));
   const math::RigidTransform<T>& X_WR(data->X_WGs.at(id_R));
 
-  std::unique_ptr<ContactSurface<T>> surface =
-      DispatchRigidSoftCalculation(soft, X_WS, id_S, rigid, X_WR, id_R);
+  std::unique_ptr<ContactSurface<T>> surface = DispatchRigidSoftCalculation(
+      soft, X_WS, id_S, rigid, X_WR, id_R, data->polygon_representation);
 
   if (surface != nullptr) {
     DRAKE_DEMAND(surface->id_M() < surface->id_N());
@@ -200,7 +207,7 @@ bool Callback(fcl::CollisionObjectd* object_A_ptr,
   const EncodedData encoding_b(*object_B_ptr);
 
   const bool can_collide = data.collision_filter.CanCollideWith(
-      encoding_a.encoding(), encoding_b.encoding());
+      encoding_a.id(), encoding_b.id());
 
   if (can_collide) {
     CalcContactSurfaceResult result =
@@ -278,7 +285,7 @@ bool CallbackWithFallback(fcl::CollisionObjectd* object_A_ptr,
   const EncodedData encoding_b(*object_B_ptr);
 
   const bool can_collide = data.data.collision_filter.CanCollideWith(
-      encoding_a.encoding(), encoding_b.encoding());
+      encoding_a.id(), encoding_b.id());
 
   if (can_collide) {
     CalcContactSurfaceResult result =

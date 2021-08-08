@@ -10,6 +10,7 @@
 #include "drake/common/drake_assert.h"
 #include "drake/common/drake_copyable.h"
 #include "drake/common/eigen_types.h"
+#include "drake/geometry/proximity/aabb.h"
 #include "drake/geometry/proximity/obb.h"
 #include "drake/geometry/proximity/surface_mesh.h"
 #include "drake/geometry/proximity/volume_mesh.h"
@@ -19,6 +20,9 @@
 namespace drake {
 namespace geometry {
 namespace internal {
+
+/* Forward declaration to enable Bvh for deformable meshes. */
+template <typename> class BvhUpdater;
 
 template <class MeshType>
 struct MeshTraits;
@@ -34,7 +38,7 @@ struct MeshTraits<VolumeMesh<T>> {
 };
 
 /* Node of the tree structure representing the Bvh.  */
-template <class MeshType>
+template <class BvType, class MeshType>
 class BvNode {
  public:
   static constexpr int kMaxElementPerLeaf =
@@ -48,9 +52,9 @@ class BvNode {
   };
 
   /* Constructor for leaf nodes consisting of multiple elements.
-   @param obb The bounding volume encompassing the elements.
-   @param data contains indices into the mesh for retrieving the elements. */
-  BvNode(Obb bv, LeafData data)
+   @param bv    The bounding volume encompassing the elements.
+   @param data  The indices of the mesh elements contained in the leaf. */
+  BvNode(BvType bv, LeafData data)
       : bv_(std::move(bv)), child_(std::move(data)) {}
 
   /* Constructor for branch/internal nodes.
@@ -58,15 +62,15 @@ class BvNode {
    @param left Unique pointer to the left child branch.
    @param right Unique pointer to the right child branch.
    @pre Both children must be distinct and not null.   */
-  BvNode(Obb bv, std::unique_ptr<BvNode<MeshType>> left,
-         std::unique_ptr<BvNode<MeshType>> right)
+  BvNode(BvType bv, std::unique_ptr<BvNode<BvType, MeshType>> left,
+         std::unique_ptr<BvNode<BvType, MeshType>> right)
       : bv_(std::move(bv)),
         child_(NodeChildren(std::move(left), std::move(right))) {}
 
   DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(BvNode)
 
   /* Returns the bounding volume.  */
-  const Obb& bv() const { return bv_; }
+  const BvType& bv() const { return bv_; }
 
   /* Returns the number of element indices.
    @pre is_leaf() returns true. */
@@ -84,13 +88,13 @@ class BvNode {
 
   /* Returns the left child branch.
    @pre is_leaf() returns false.  */
-  const BvNode<MeshType>& left() const {
+  const BvNode<BvType, MeshType>& left() const {
     return *(std::get<NodeChildren>(child_).left);
   }
 
   /* Returns the right child branch.
    @pre is_leaf() returns false.  */
-  const BvNode<MeshType>& right() const {
+  const BvNode<BvType, MeshType>& right() const {
     return *(std::get<NodeChildren>(child_).right);
   }
 
@@ -99,10 +103,23 @@ class BvNode {
     return std::holds_alternative<LeafData>(child_);
   }
 
-  /* Compares element indices only. Bounding volumes are not checked.
+  /* Compares this node with the given node in a strictly *topological* manner.
+   For them to be considered "equal leaves", both nodes must be leaves and must
+   contain the same indicies.
+
+   Because this test considers only the Bvh tree *topology* it can be used to
+   compare nodes that have been constructed from meshes with different scalar
+   types (e.g., SurfaceMesh<double> and SurfaceMesh<AutoDiffXd)) or meshes with
+   different bounding volume types (e.g., Aabb vs Obb). The only true
+   requirement is that the element index types contained in the leaf can be
+   compared (this excludes VolumeMesh vs SurfaceMesh).
+
    @pre both nodes are leaves.  */
-  bool EqualLeaf(const BvNode<MeshType>& other_leaf) const {
-    if (this == &other_leaf) return true;
+  template <typename OtherBvNode>
+  bool EqualLeaf(const OtherBvNode& other_leaf) const {
+    if constexpr (std::is_same_v<OtherBvNode, BvNode<BvType, MeshType>>) {
+      if (this == &other_leaf) return true;
+    }
     if (this->num_element_indices() != other_leaf.num_element_indices()) {
       return false;
     }
@@ -115,12 +132,27 @@ class BvNode {
   }
 
  private:
-  struct NodeChildren {
-    std::unique_ptr<BvNode<MeshType>> left;
-    std::unique_ptr<BvNode<MeshType>> right;
+  template <typename> friend class BvhUpdater;
 
-    NodeChildren(std::unique_ptr<BvNode<MeshType>> left_in,
-                 std::unique_ptr<BvNode<MeshType>> right_in)
+  /* Provide disciplined access to BvhUpdater to a mutable child node. */
+  BvNode<BvType, MeshType>& left() {
+    return *(std::get<NodeChildren>(child_).left);
+  }
+
+  /* Provide disciplined access to BvhUpdater to a mutable child node. */
+  BvNode<BvType, MeshType>& right() {
+    return *(std::get<NodeChildren>(child_).right);
+  }
+
+  /* Provide disciplined access to BvhUpdater to a mutable bounding volume. */
+  BvType& bv() { return bv_; }
+
+  struct NodeChildren {
+    std::unique_ptr<BvNode<BvType, MeshType>> left;
+    std::unique_ptr<BvNode<BvType, MeshType>> right;
+
+    NodeChildren(std::unique_ptr<BvNode<BvType, MeshType>> left_in,
+                 std::unique_ptr<BvNode<BvType, MeshType>> right_in)
         : left(std::move(left_in)), right(std::move(right_in)) {
       DRAKE_DEMAND(left != nullptr);
       DRAKE_DEMAND(right != nullptr);
@@ -128,11 +160,12 @@ class BvNode {
     }
 
     NodeChildren(const NodeChildren& other)
-        : NodeChildren{std::make_unique<BvNode<MeshType>>(*other.left),
-                       std::make_unique<BvNode<MeshType>>(*other.right)} {}
+        : NodeChildren{
+              std::make_unique<BvNode<BvType, MeshType>>(*other.left),
+              std::make_unique<BvNode<BvType, MeshType>>(*other.right)} {}
   };
 
-  Obb bv_;
+  BvType bv_;
 
   // If this is a leaf node then the child refers to indices into the mesh's
   // elements (i.e., triangles or tetrahedra) bounded by the node's bounding
@@ -159,19 +192,22 @@ using BvttCallback = std::function<BvttCallbackResult(
  for identifying those objects in or near a particular region of interest. It
  serves as a basis for culling objects that are trivially far from the region,
  reducing the number of "narrow-phase" calculations. The underlying structure
- is a binary tree of oriented bounding boxes (Obb) that encompass one or more
+ is a binary tree of bounding volumes (bv) that encompass one or more
  mesh elements. The bounding volumes are all measured and expressed in this
  hierarchy's frame H. Leaf nodes contain element indices into elements of the
  mesh. The BVH needs a reference to the mesh in order to build the tree, but
  does not own the mesh.
  @pre    The mesh is not mutable. Modifications to the mesh after
          constructing the BVH will make the BVH invalid.
- @tparam MeshType SurfaceMesh<double> or VolumeMesh<double> (Exotic types like
-         SurfaceMesh<AutoDiffXd> are not supported).  */
-template <class MeshType>
+ @tparam BvType           The bounding volume type (e.g., Aabb, Obb).
+ @tparam SourceMeshType   SurfaceMesh<T> or VolumeMesh<T>, T = double or
+                          AutoDiffXd.  */
+template <class BvType, class SourceMeshType>
 class Bvh {
  public:
+  using MeshType = SourceMeshType;
   using IndexType = typename MeshType::ElementIndex;
+  using NodeType = BvNode<BvType, MeshType>;
 
   explicit Bvh(const MeshType& mesh);
 
@@ -180,31 +216,40 @@ class Bvh {
   Bvh& operator=(const Bvh& bvh) {
     if (&bvh == this) return *this;
 
-    root_node_ = std::make_unique<BvNode<MeshType>>(*bvh.root_node_);
+    root_node_ = std::make_unique<NodeType>(*bvh.root_node_);
     return *this;
   }
 
   Bvh(Bvh&&) = default;
   Bvh& operator=(Bvh&&) = default;
 
-  const BvNode<MeshType>& root_node() const { return *root_node_; }
+  const NodeType& root_node() const { return *root_node_; }
 
-  /* Perform a query of this bvh's mesh elements against the given bvh's
-   mesh elements and runs the callback for each unculled pair.  */
-  template <class OtherMeshType>
-  void Collide(const Bvh<OtherMeshType>& bvh, const math::RigidTransformd& X_AB,
-               BvttCallback<MeshType, OtherMeshType> callback) const {
+  /* Perform a query of this %Bvh's mesh elements (measured and expressed in
+   Frame A) against the given %Bvh's mesh elements (measured and expressed in
+   Frame B). The callback is invoked on every pair of elements that cannot
+   conclusively be shown to be separated via bounding-volume comparisons (the
+   unculled pairs).
+
+   @param bvh_B           The bounding volume hierarchy to collide with.
+   @param X_AB            The relative pose of the two hierarchies.
+   @param callback        The callback to invoke on each unculled pair.
+   @tparam OtherBvhType   The type of Bvh to collide against this.  */
+  template <class OtherBvhType>
+  void Collide(
+      const OtherBvhType& bvh_B, const math::RigidTransformd& X_AB,
+      BvttCallback<MeshType, typename OtherBvhType::MeshType> callback) const {
     using NodePair =
-        std::pair<const BvNode<MeshType>&, const BvNode<OtherMeshType>&>;
+        std::pair<const NodeType&, const typename OtherBvhType::NodeType&>;
     std::stack<NodePair, std::vector<NodePair>> node_pairs;
-    node_pairs.emplace(root_node(), bvh.root_node());
+    node_pairs.emplace(root_node(), bvh_B.root_node());
 
     while (!node_pairs.empty()) {
       const auto& [node_a, node_b] = node_pairs.top();
       node_pairs.pop();
 
       // Check if the bounding volumes overlap.
-      if (!Obb::HasOverlap(node_a.bv(), node_b.bv(), X_AB)) {
+      if (!BvType::HasOverlap(node_a.bv(), node_b.bv(), X_AB)) {
         continue;
       }
 
@@ -215,9 +260,9 @@ class Bvh {
         const int num_b_elements = node_b.num_element_indices();
         for (int a = 0; a < num_a_elements; ++a) {
           for (int b = 0; b < num_b_elements; ++b) {
-            BvttCallbackResult result =
+            const BvttCallbackResult result =
                 callback(node_a.element_index(a), node_b.element_index(b));
-            if (result == BvttCallbackResult::Terminate) return;  // Exit early.
+            if (result == BvttCallbackResult::Terminate) return;
           }
         }
       } else if (node_b.is_leaf()) {
@@ -254,19 +299,19 @@ class Bvh {
                         the primitive.
 
    @note This method can be only used for a primitive type that has an overload
-   for Obb::HasOverlap() defined.   */
+   for BvType::HasOverlap() defined.  */
   template <typename PrimitiveType>
   void Collide(
       const PrimitiveType& primitive_P, const math::RigidTransformd& X_PH,
       std::function<BvttCallbackResult(typename MeshType::ElementIndex)>
           callback) const {
-    std::stack<const BvNode<MeshType>*> nodes;
+    std::stack<const NodeType*> nodes;
     nodes.emplace(&root_node());
     while (!nodes.empty()) {
       const auto node = nodes.top();
       nodes.pop();
 
-      if (!Obb::HasOverlap(node->bv(), primitive_P, X_PH)) {
+      if (!BvType::HasOverlap(node->bv(), primitive_P, X_PH)) {
         continue;
       }
       // Run the call back if `node` is a leaf.
@@ -287,27 +332,29 @@ class Bvh {
    collision candidates and returns them all.
    @return Vector of element index pairs whose elements are candidates for
    collision.  */
-  template <class OtherMeshType>
-  std::vector<std::pair<IndexType, typename OtherMeshType::ElementIndex>>
-  GetCollisionCandidates(const Bvh<OtherMeshType>& bvh,
+  template <class OtherBvhType>
+  std::vector<
+      std::pair<IndexType, typename OtherBvhType::MeshType::ElementIndex>>
+  GetCollisionCandidates(const OtherBvhType& bvh_B,
                          const math::RigidTransformd& X_AB) const {
-    std::vector<std::pair<IndexType, typename OtherMeshType::ElementIndex>>
-        result;
-    auto callback =
-        [&result](
-            IndexType a,
-            typename OtherMeshType::ElementIndex b) -> BvttCallbackResult {
+    using OtherIndexType = typename OtherBvhType::MeshType::ElementIndex;
+    std::vector<std::pair<IndexType, OtherIndexType>> result;
+    auto callback = [&result](IndexType a,
+                              OtherIndexType b) -> BvttCallbackResult {
       result.emplace_back(a, b);
       return BvttCallbackResult::Continue;
     };
-    Collide(bvh, X_AB, callback);
+    Collide(bvh_B, X_AB, callback);
     return result;
   }
 
   /* Compares the two Bvh instances for exact equality down to the last bit.
    Assumes that the quantities are measured and expressed in the same frame. */
-  bool Equal(const Bvh<MeshType>& other) const {
-    if (this == &other) return true;
+  template <typename OtherBvhType>
+  bool Equal(const OtherBvhType& other) const {
+    if constexpr (std::is_same_v<OtherBvhType, Bvh<BvType, SourceMeshType>>) {
+      if (this == &other) return true;
+    }
     return EqualTrees(this->root_node(), other.root_node());
   }
 
@@ -315,14 +362,18 @@ class Bvh {
   // Convenience class for testing.
   friend class BvhTester;
 
+  template <typename> friend class BvhUpdater;
+
+  NodeType& mutable_root_node() { return *root_node_; }
+
   using CentroidPair = std::pair<IndexType, Vector3<double>>;
 
-  static std::unique_ptr<BvNode<MeshType>> BuildBvTree(
+  static std::unique_ptr<NodeType> BuildBvTree(
       const MeshType& mesh,
       const typename std::vector<CentroidPair>::iterator& start,
       const typename std::vector<CentroidPair>::iterator& end);
 
-  static Obb ComputeBoundingVolume(
+  static BvType ComputeBoundingVolume(
       const MeshType& mesh,
       const typename std::vector<CentroidPair>::iterator& start,
       const typename std::vector<CentroidPair>::iterator& end);
@@ -332,31 +383,37 @@ class Bvh {
   static Vector3<double> ComputeCentroid(const MeshType& mesh,
                                          IndexType i);
 
-  // Tests that the two hierarchy trees, rooted at nodes a and b, are equal in
-  // the sense that they have identical structure and equal bounding volumes
-  // (see Obb::Equal()).
-  static bool EqualTrees(const BvNode<MeshType>& a, const BvNode<MeshType>& b);
+  // Tests that two trees, rooted at nodes a and b, respectively, are equal
+  // in the sense that they have identical node structure and equal bounding
+  // volumes (see BvType::Equal()). The two hierarchies must be built from the
+  // same bounding volume type, and the same mesh type, but the mesh scalar can
+  // differ.
+  template <typename OtherNodeType>
+  static bool EqualTrees(const NodeType& a, const OtherNodeType& b) {
+    if constexpr (std::is_same_v<NodeType, OtherNodeType>) {
+      if (&a == &b) return true;
+    }
+
+    if (!a.bv().Equal(b.bv())) return false;
+
+    if (a.is_leaf()) {
+      if (!b.is_leaf()) {
+        return false;
+      }
+      return a.EqualLeaf(b);
+    } else {
+      if (b.is_leaf()) {
+        return false;
+      }
+      return EqualTrees(a.left(), b.left()) && EqualTrees(a.right(), b.right());
+    }
+  }
 
   static constexpr int kElementVertexCount = MeshType::kVertexPerElement;
 
-  std::unique_ptr<BvNode<MeshType>> root_node_;
+  std::unique_ptr<NodeType> root_node_;
 };
 
 }  // namespace internal
 }  // namespace geometry
 }  // namespace drake
-
-extern template class drake::geometry::internal::Bvh<
-    drake::geometry::SurfaceMesh<double>>;
-extern template class drake::geometry::internal::Bvh<
-    drake::geometry::VolumeMesh<double>>;
-
-// TODO(SeanCurtis-TRI): Remove support for building a Bvh on an AutoDiff-valued
-//  mesh after we've cleaned up the scalar types in hydroelastics. Specifically,
-//  this is here to support the unit tests in mesh_intersection_test.cc. Also
-//  the calls to convert_to_double should be removed.
-//  See issue #14136.
-extern template class drake::geometry::internal::Bvh<
-    drake::geometry::SurfaceMesh<drake::AutoDiffXd>>;
-extern template class drake::geometry::internal::Bvh<
-    drake::geometry::VolumeMesh<drake::AutoDiffXd>>;

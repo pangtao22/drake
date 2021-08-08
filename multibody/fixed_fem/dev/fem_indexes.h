@@ -4,7 +4,7 @@
 
 namespace drake {
 namespace multibody {
-namespace fixed_fem {
+namespace fem {
 /** Index used to identify element by index among FEM elements. */
 using ElementIndex = TypeSafeIndex<class ElementTag>;
 
@@ -15,7 +15,7 @@ using NodeIndex = TypeSafeIndex<class NodeTag>;
 using DofIndex = TypeSafeIndex<class DofTag>;
 
 /** Index into a vector of deformable bodies. */
-using SoftBodyIndex = TypeSafeIndex<class BodyTag>;
-}  // namespace fixed_fem
+using DeformableBodyIndex = TypeSafeIndex<class DeformableBodyTag>;
+}  // namespace fem
 }  // namespace multibody
 }  // namespace drake

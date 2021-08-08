@@ -40,7 +40,6 @@ using std::runtime_error;
 using std::set;
 using std::shared_ptr;
 using std::string;
-using std::to_string;
 using std::unordered_map;
 using std::vector;
 
@@ -51,17 +50,13 @@ using symbolic::Variables;
 
 using internal::CreateBinding;
 
-MathematicalProgram::MathematicalProgram()
-    : x_initial_guess_(0),
-      optimal_cost_(numeric_limits<double>::quiet_NaN()),
-      lower_bound_cost_(-numeric_limits<double>::infinity()),
-      required_capabilities_{} {}
+MathematicalProgram::MathematicalProgram() = default;
 
 MathematicalProgram::~MathematicalProgram() = default;
 
 std::unique_ptr<MathematicalProgram> MathematicalProgram::Clone() const {
   // The constructor of MathematicalProgram will construct each solver. It
-  // also sets x_values_ and x_initial_guess_ to default values.
+  // also sets x_initial_guess_ to default values.
   auto new_prog = std::make_unique<MathematicalProgram>();
   // Add variables and indeterminates
   // AddDecisionVariables and AddIndeterminates also set
@@ -90,11 +85,16 @@ std::unique_ptr<MathematicalProgram> MathematicalProgram::Clone() const {
       linear_complementarity_constraints_;
 
   new_prog->x_initial_guess_ = x_initial_guess_;
-  new_prog->solver_id_ = solver_id_;
   new_prog->solver_options_ = solver_options_;
 
   new_prog->required_capabilities_ = required_capabilities_;
   return new_prog;
+}
+
+string MathematicalProgram::to_string() const {
+  std::ostringstream os;
+  os << *this;
+  return os.str();
 }
 
 MatrixXDecisionVariable MathematicalProgram::NewVariables(
@@ -111,7 +111,8 @@ MatrixXDecisionVariable MathematicalProgram::NewSymmetricContinuousVariables(
   int count = 0;
   for (int j = 0; j < static_cast<int>(rows); ++j) {
     for (int i = j; i < static_cast<int>(rows); ++i) {
-      names[count] = name + "(" + to_string(i) + "," + to_string(j) + ")";
+      names[count] =
+          name + "(" + std::to_string(i) + "," + std::to_string(j) + ")";
       ++count;
     }
   }
@@ -136,13 +137,13 @@ void MathematicalProgram::AddDecisionVariables(
       throw std::runtime_error(fmt::format("{} is already an indeterminate.",
                                            decision_variables(i)));
     }
+    CheckVariableType(decision_variables(i).get_type());
     decision_variable_index_.insert(std::make_pair(
         decision_variables(i).get_id(), num_existing_decision_vars + i));
   }
   decision_variables_.conservativeResize(num_existing_decision_vars +
                                          decision_variables.rows());
   decision_variables_.tail(decision_variables.rows()) = decision_variables;
-  AppendNanToEnd(decision_variables.rows(), &x_values_);
   AppendNanToEnd(decision_variables.rows(), &x_initial_guess_);
 }
 
@@ -336,7 +337,7 @@ VectorXIndeterminate MathematicalProgram::NewIndeterminates(
     int rows, const string& name) {
   vector<string> names(rows);
   for (int i = 0; i < static_cast<int>(rows); ++i) {
-    names[i] = name + "(" + to_string(i) + ")";
+    names[i] = name + "(" + std::to_string(i) + ")";
   }
   return NewIndeterminates(rows, names);
 }
@@ -347,7 +348,8 @@ MatrixXIndeterminate MathematicalProgram::NewIndeterminates(
   int count = 0;
   for (int j = 0; j < static_cast<int>(cols); ++j) {
     for (int i = 0; i < static_cast<int>(rows); ++i) {
-      names[count] = name + "(" + to_string(i) + "," + to_string(j) + ")";
+      names[count] =
+          name + "(" + std::to_string(i) + "," + std::to_string(j) + ")";
       ++count;
     }
   }
@@ -393,7 +395,7 @@ Binding<VisualizationCallback> MathematicalProgram::AddVisualizationCallback(
 }
 
 Binding<Cost> MathematicalProgram::AddCost(const Binding<Cost>& binding) {
-  // See AddCost(const Binding<Constraint>&) for explanation
+  // See AddConstraint(const Binding<Constraint>&) for explanation
   Cost* cost = binding.evaluator().get();
   if (dynamic_cast<QuadraticCost*>(cost)) {
     return AddCost(internal::BindingDynamicCast<QuadraticCost>(binding));
@@ -808,23 +810,25 @@ Binding<LorentzConeConstraint> MathematicalProgram::AddConstraint(
 }
 
 Binding<LorentzConeConstraint> MathematicalProgram::AddLorentzConeConstraint(
-    const Eigen::Ref<const VectorX<Expression>>& v) {
-  return AddConstraint(internal::ParseLorentzConeConstraint(v));
+    const Eigen::Ref<const VectorX<Expression>>& v,
+    LorentzConeConstraint::EvalType eval_type) {
+  return AddConstraint(internal::ParseLorentzConeConstraint(v, eval_type));
 }
 
 Binding<LorentzConeConstraint> MathematicalProgram::AddLorentzConeConstraint(
     const Expression& linear_expression, const Expression& quadratic_expression,
-    double tol) {
+    double tol, LorentzConeConstraint::EvalType eval_type) {
   return AddConstraint(internal::ParseLorentzConeConstraint(
-      linear_expression, quadratic_expression, tol));
+      linear_expression, quadratic_expression, tol, eval_type));
 }
 
 Binding<LorentzConeConstraint> MathematicalProgram::AddLorentzConeConstraint(
     const Eigen::Ref<const Eigen::MatrixXd>& A,
     const Eigen::Ref<const Eigen::VectorXd>& b,
-    const Eigen::Ref<const VectorXDecisionVariable>& vars) {
+    const Eigen::Ref<const VectorXDecisionVariable>& vars,
+    LorentzConeConstraint::EvalType eval_type) {
   shared_ptr<LorentzConeConstraint> constraint =
-      make_shared<LorentzConeConstraint>(A, b);
+      make_shared<LorentzConeConstraint>(A, b, eval_type);
   return AddConstraint(Binding<LorentzConeConstraint>(constraint, vars));
 }
 
@@ -1146,6 +1150,39 @@ MathematicalProgram::AddExponentialConeConstraint(
   return AddExponentialConeConstraint(A.sparseView(), Eigen::Vector3d(b), vars);
 }
 
+std::vector<Binding<Cost>> MathematicalProgram::GetAllCosts() const {
+  auto costlist = generic_costs_;
+  costlist.insert(costlist.end(), linear_costs_.begin(), linear_costs_.end());
+  costlist.insert(costlist.end(), quadratic_costs_.begin(),
+                  quadratic_costs_.end());
+  return costlist;
+}
+
+std::vector<Binding<LinearConstraint>>
+MathematicalProgram::GetAllLinearConstraints() const {
+  std::vector<Binding<LinearConstraint>> conlist = linear_constraints_;
+  conlist.insert(conlist.end(), linear_equality_constraints_.begin(),
+                 linear_equality_constraints_.end());
+  return conlist;
+}
+
+std::vector<Binding<Constraint>> MathematicalProgram::GetAllConstraints()
+    const {
+  std::vector<Binding<Constraint>> conlist = generic_constraints_;
+  auto extend = [&conlist](auto container) {
+    conlist.insert(conlist.end(), container.begin(), container.end());
+  };
+  extend(linear_constraints_);
+  extend(linear_equality_constraints_);
+  extend(bbox_constraints_);
+  extend(lorentz_cone_constraint_);
+  extend(rotated_lorentz_cone_constraint_);
+  extend(linear_matrix_inequality_constraint_);
+  extend(linear_complementarity_constraints_);
+  extend(exponential_cone_constraints_);
+  return conlist;
+}
+
 int MathematicalProgram::FindDecisionVariableIndex(const Variable& var) const {
   auto it = decision_variable_index_.find(var.get_id());
   if (it == decision_variable_index_.end()) {
@@ -1177,6 +1214,34 @@ size_t MathematicalProgram::FindIndeterminateIndex(const Variable& var) const {
     throw runtime_error(oss.str());
   }
   return it->second;
+}
+
+bool MathematicalProgram::CheckSatisfied(
+    const Binding<Constraint>& binding,
+    const Eigen::Ref<const Eigen::VectorXd>& prog_var_vals, double tol) const {
+  const Eigen::VectorXd vals = GetBindingVariableValues(binding, prog_var_vals);
+  return binding.evaluator()->CheckSatisfied(vals, tol);
+}
+
+bool MathematicalProgram::CheckSatisfied(
+    const std::vector<Binding<Constraint>>& bindings,
+    const Eigen::Ref<const Eigen::VectorXd>& prog_var_vals, double tol) const {
+  for (const auto& b : bindings) {
+    if (!CheckSatisfied(b, prog_var_vals, tol)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool MathematicalProgram::CheckSatisfiedAtInitialGuess(
+    const Binding<Constraint>& binding, double tol) const {
+  return CheckSatisfied(binding, x_initial_guess_, tol);
+}
+
+bool MathematicalProgram::CheckSatisfiedAtInitialGuess(
+    const std::vector<Binding<Constraint>>& bindings, double tol) const {
+  return CheckSatisfied(bindings, x_initial_guess_, tol);
 }
 
 namespace {
@@ -1304,6 +1369,32 @@ void MathematicalProgram::AppendNanToEnd(int new_var_size, Eigen::VectorXd* v) {
   v->tail(new_var_size).fill(std::numeric_limits<double>::quiet_NaN());
 }
 
+void MathematicalProgram::EvalVisualizationCallbacks(
+    const Eigen::Ref<const Eigen::VectorXd>& prog_var_vals) const {
+  if (prog_var_vals.rows() != num_vars()) {
+    std::ostringstream oss;
+    oss << "The input binding variable is not in the right size. Expects "
+        << num_vars() << " rows, but it actually has " << prog_var_vals.rows()
+        << " rows.\n";
+    throw std::logic_error(oss.str());
+  }
+
+  Eigen::VectorXd this_x;
+
+  for (auto const& binding : visualization_callbacks_) {
+    auto const& obj = binding.evaluator();
+
+    const int num_v_variables = binding.GetNumElements();
+    this_x.resize(num_v_variables);
+    for (int j = 0; j < num_v_variables; ++j) {
+      this_x(j) =
+          prog_var_vals(FindDecisionVariableIndex(binding.variables()(j)));
+    }
+
+    obj->EvalCallback(this_x);
+  }
+}
+
 void MathematicalProgram::SetVariableScaling(const symbolic::Variable& var,
                                              double s) {
   DRAKE_DEMAND(0 < s);
@@ -1316,6 +1407,275 @@ void MathematicalProgram::SetVariableScaling(const symbolic::Variable& var,
     var_scaling_map_.insert(std::pair<int, double>(idx, s));
   }
 }
+
+template <typename C>
+int MathematicalProgram::RemoveCostOrConstraintImpl(
+    const Binding<C>& removal, ProgramAttribute affected_capability,
+    std::vector<Binding<C>>* existings) {
+  const int num_existing = static_cast<int>(existings->size());
+  existings->erase(std::remove(existings->begin(), existings->end(), removal),
+                   existings->end());
+  UpdateRequiredCapability(affected_capability);
+  const int num_removed = num_existing - static_cast<int>(existings->size());
+  return num_removed;
+}
+
+namespace {
+// Update @p program_capabilities. If @p binding is empty, then remove @p
+// capability from @p program_capabilities; otherwise add @p capability to @p
+// program_capabilities.
+template <typename C>
+void UpdateRequiredCapabilityImpl(ProgramAttribute capability,
+                                  const std::vector<C>& bindings,
+                                  ProgramAttributes* program_capabilities) {
+  if (bindings.empty()) {
+    // erasing a non-existent key doesn't cause an error.
+    program_capabilities->erase(capability);
+  } else {
+    program_capabilities->emplace(capability);
+  }
+}
+}  // namespace
+
+void MathematicalProgram::UpdateRequiredCapability(
+    ProgramAttribute query_capability) {
+  switch (query_capability) {
+    case ProgramAttribute::kLinearCost: {
+      UpdateRequiredCapabilityImpl(query_capability, this->linear_costs(),
+                                   &required_capabilities_);
+      break;
+    }
+    case ProgramAttribute::kQuadraticCost: {
+      UpdateRequiredCapabilityImpl(query_capability, this->quadratic_costs(),
+                                   &required_capabilities_);
+      break;
+    }
+    case ProgramAttribute::kGenericCost: {
+      UpdateRequiredCapabilityImpl(query_capability, this->generic_costs(),
+                                   &required_capabilities_);
+      break;
+    }
+    case ProgramAttribute::kGenericConstraint: {
+      UpdateRequiredCapabilityImpl(query_capability,
+                                   this->generic_constraints(),
+                                   &required_capabilities_);
+      break;
+    }
+    case ProgramAttribute::kLinearConstraint: {
+      if (this->linear_constraints().empty() &&
+          this->bounding_box_constraints().empty()) {
+        required_capabilities_.erase(ProgramAttribute::kLinearConstraint);
+      } else {
+        required_capabilities_.emplace(ProgramAttribute::kLinearConstraint);
+      }
+      break;
+    }
+    case ProgramAttribute::kLinearEqualityConstraint: {
+      UpdateRequiredCapabilityImpl(query_capability,
+                                   this->linear_equality_constraints(),
+                                   &required_capabilities_);
+      break;
+    }
+    case ProgramAttribute::kLinearComplementarityConstraint: {
+      UpdateRequiredCapabilityImpl(query_capability,
+                                   this->linear_complementarity_constraints(),
+                                   &required_capabilities_);
+      break;
+    }
+    case ProgramAttribute::kLorentzConeConstraint: {
+      UpdateRequiredCapabilityImpl(query_capability,
+                                   this->lorentz_cone_constraints(),
+                                   &required_capabilities_);
+      break;
+    }
+    case ProgramAttribute::kRotatedLorentzConeConstraint: {
+      UpdateRequiredCapabilityImpl(query_capability,
+                                   this->rotated_lorentz_cone_constraints(),
+                                   &required_capabilities_);
+      break;
+    }
+    case ProgramAttribute::kPositiveSemidefiniteConstraint: {
+      if (positive_semidefinite_constraint_.empty() &&
+          linear_matrix_inequality_constraint_.empty()) {
+        required_capabilities_.erase(
+            ProgramAttribute::kPositiveSemidefiniteConstraint);
+      } else {
+        required_capabilities_.emplace(
+            ProgramAttribute::kPositiveSemidefiniteConstraint);
+      }
+      break;
+    }
+    case ProgramAttribute::kExponentialConeConstraint: {
+      UpdateRequiredCapabilityImpl(query_capability,
+                                   this->exponential_cone_constraints(),
+                                   &required_capabilities_);
+      break;
+    }
+    case ProgramAttribute::kQuadraticConstraint: {
+      // Currently we store quadratic constraint as generic constraint. We
+      // don't enable kQuadraticConstraint capability.
+      throw std::runtime_error(
+          "UpdateRequiredCapability(): should not handle quadratic constraint "
+          "capability.");
+    }
+    case ProgramAttribute::kBinaryVariable: {
+      bool has_binary_var = false;
+      for (int i = 0; i < num_vars(); ++i) {
+        if (decision_variables_(i).get_type() ==
+            symbolic::Variable::Type::BINARY) {
+          has_binary_var = true;
+          break;
+        }
+      }
+      if (has_binary_var) {
+        required_capabilities_.emplace(ProgramAttribute::kBinaryVariable);
+      } else {
+        required_capabilities_.erase(ProgramAttribute::kBinaryVariable);
+      }
+      break;
+    }
+    case ProgramAttribute::kCallback: {
+      UpdateRequiredCapabilityImpl(query_capability, visualization_callbacks_,
+                                   &required_capabilities_);
+      break;
+    }
+  }
+}
+
+int MathematicalProgram::RemoveCost(const Binding<Cost>& cost) {
+  Cost* cost_evaluator = cost.evaluator().get();
+  // TODO(hongkai.dai): Remove the dynamic cast as part of #8349.
+  if (dynamic_cast<QuadraticCost*>(cost_evaluator)) {
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<QuadraticCost>(cost),
+        ProgramAttribute::kQuadraticCost, &(this->quadratic_costs_));
+  } else if (dynamic_cast<LinearCost*>(cost_evaluator)) {
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<LinearCost>(cost),
+        ProgramAttribute::kLinearCost, &(this->linear_costs_));
+  } else {
+    return RemoveCostOrConstraintImpl(cost, ProgramAttribute::kGenericCost,
+                                      &(this->generic_costs_));
+  }
+  DRAKE_UNREACHABLE();
+}
+
+int MathematicalProgram::RemoveConstraint(
+    const Binding<Constraint>& constraint) {
+  Constraint* constraint_evaluator = constraint.evaluator().get();
+  // TODO(hongkai.dai): Remove the dynamic cast as part of #8349.
+  // Check constraints types in reverse order, such that classes that inherit
+  // from other classes will not be prematurely added to less specific (or
+  // incorrect) container.
+  if (dynamic_cast<ExponentialConeConstraint*>(constraint_evaluator)) {
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<ExponentialConeConstraint>(constraint),
+        ProgramAttribute::kExponentialConeConstraint,
+        &exponential_cone_constraints_);
+  } else if (dynamic_cast<LinearMatrixInequalityConstraint*>(
+                 constraint_evaluator)) {
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<LinearMatrixInequalityConstraint>(
+            constraint),
+        ProgramAttribute::kPositiveSemidefiniteConstraint,
+        &linear_matrix_inequality_constraint_);
+  } else if (dynamic_cast<PositiveSemidefiniteConstraint*>(
+                 constraint_evaluator)) {
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<PositiveSemidefiniteConstraint>(
+            constraint),
+        ProgramAttribute::kPositiveSemidefiniteConstraint,
+        &positive_semidefinite_constraint_);
+  } else if (dynamic_cast<RotatedLorentzConeConstraint*>(
+                 constraint_evaluator)) {
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<RotatedLorentzConeConstraint>(constraint),
+        ProgramAttribute::kRotatedLorentzConeConstraint,
+        &rotated_lorentz_cone_constraint_);
+  } else if (dynamic_cast<LorentzConeConstraint*>(constraint_evaluator)) {
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<LorentzConeConstraint>(constraint),
+        ProgramAttribute::kLorentzConeConstraint, &lorentz_cone_constraint_);
+  } else if (dynamic_cast<LinearComplementarityConstraint*>(
+                 constraint_evaluator)) {
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<LinearComplementarityConstraint>(
+            constraint),
+        ProgramAttribute::kLinearComplementarityConstraint,
+        &linear_complementarity_constraints_);
+  } else if (dynamic_cast<LinearEqualityConstraint*>(constraint_evaluator)) {
+    // LinearEqualityConstraint is derived from LinearConstraint. Put this
+    // branch before the LinearConstraint branch.
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<LinearEqualityConstraint>(constraint),
+        ProgramAttribute::kLinearEqualityConstraint,
+        &linear_equality_constraints_);
+  } else if (dynamic_cast<BoundingBoxConstraint*>(constraint_evaluator)) {
+    // BoundingBoxConstraint is derived from LinearConstraint. Put this branch
+    // before the LinearConstraint branch.
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<BoundingBoxConstraint>(constraint),
+        ProgramAttribute::kLinearConstraint, &bbox_constraints_);
+  } else if (dynamic_cast<LinearConstraint*>(constraint_evaluator)) {
+    return RemoveCostOrConstraintImpl(
+        internal::BindingDynamicCast<LinearConstraint>(constraint),
+        ProgramAttribute::kLinearConstraint, &linear_constraints_);
+  } else {
+    // All constraints are derived from Constraint class. Put this branch last.
+    return RemoveCostOrConstraintImpl(constraint,
+                                      ProgramAttribute::kGenericConstraint,
+                                      &generic_constraints_);
+  }
+  DRAKE_UNREACHABLE();
+}
+
+void MathematicalProgram::CheckVariableType(VarType var_type) {
+  switch (var_type) {
+    case VarType::CONTINUOUS:
+      break;
+    case VarType::BINARY:
+      required_capabilities_.insert(ProgramAttribute::kBinaryVariable);
+      break;
+    case VarType::INTEGER:
+      throw std::runtime_error(
+          "MathematicalProgram does not support integer variables yet.");
+    case VarType::BOOLEAN:
+      throw std::runtime_error(
+          "MathematicalProgram does not support Boolean variables.");
+    case VarType::RANDOM_UNIFORM:
+      throw std::runtime_error(
+          "MathematicalProgram does not support random uniform variables.");
+    case VarType::RANDOM_GAUSSIAN:
+      throw std::runtime_error(
+          "MathematicalProgram does not support random Gaussian variables.");
+    case VarType::RANDOM_EXPONENTIAL:
+      throw std::runtime_error(
+          "MathematicalProgram does not support random exponential "
+          "variables.");
+  }
+}
+
+std::ostream& operator<<(std::ostream& os, const MathematicalProgram& prog) {
+  if (prog.num_vars() > 0) {
+    os << "Decision variables:" << prog.decision_variables().transpose()
+       << "\n\n";
+  } else {
+    os << "No decision variables.\n";
+  }
+
+  if (prog.num_indeterminates() > 0) {
+    os << "Indeterminates:" << prog.indeterminates().transpose() << "\n\n";
+  }
+
+  for (const auto& b : prog.GetAllCosts()) {
+    os << b << "\n";
+  }
+  for (const auto& b : prog.GetAllConstraints()) {
+    os << b;
+  }
+  return os;
+}
+
 
 }  // namespace solvers
 }  // namespace drake

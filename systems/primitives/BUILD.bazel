@@ -26,6 +26,7 @@ drake_cc_package_library(
         ":gain",
         ":integrator",
         ":linear_system",
+        ":linear_transform_density",
         ":matrix_gain",
         ":multiplexer",
         ":pass_through",
@@ -39,6 +40,8 @@ drake_cc_package_library(
         ":trajectory_affine_system",
         ":trajectory_linear_system",
         ":trajectory_source",
+        ":vector_log",
+        ":vector_log_sink",
         ":wrap_to_system",
         ":zero_order_hold",
     ],
@@ -174,6 +177,15 @@ drake_cc_library(
 )
 
 drake_cc_library(
+    name = "linear_transform_density",
+    srcs = ["linear_transform_density.cc"],
+    hdrs = ["linear_transform_density.h"],
+    deps = [
+        "//systems/framework",
+    ],
+)
+
+drake_cc_library(
     name = "matrix_gain",
     srcs = ["matrix_gain.cc"],
     hdrs = ["matrix_gain.h"],
@@ -215,6 +227,7 @@ drake_cc_library(
     srcs = ["random_source.cc"],
     hdrs = ["random_source.h"],
     deps = [
+        "//common:default_scalars",
         "//common:essential",
         "//common:unused",
         "//systems/framework:diagram_builder",
@@ -296,6 +309,27 @@ drake_cc_library(
     hdrs = ["trajectory_source.h"],
     deps = [
         "//common/trajectories:trajectory",
+        "//systems/framework",
+    ],
+)
+
+drake_cc_library(
+    name = "vector_log",
+    srcs = ["vector_log.cc"],
+    hdrs = ["vector_log.h"],
+    deps = [
+        "//common:default_scalars",
+        "//common:essential",
+        "//common:reset_after_move",
+    ],
+)
+
+drake_cc_library(
+    name = "vector_log_sink",
+    srcs = ["vector_log_sink.cc"],
+    hdrs = ["vector_log_sink.h"],
+    deps = [
+        ":vector_log",
         "//systems/framework",
     ],
 )
@@ -476,6 +510,17 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
+    name = "linear_transform_density_test",
+    deps = [
+        ":linear_transform_density",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
+        "//math:gradient",
+        "//systems/framework/test_utilities",
+    ],
+)
+
+drake_cc_googletest(
     name = "matrix_gain_test",
     deps = [
         ":affine_linear_test",
@@ -560,6 +605,7 @@ drake_cc_googletest(
         ":signal_logger",
         "//common/test_utilities:eigen_matrix_compare",
         "//systems/analysis:simulator",
+        "//systems/framework/test_utilities",
     ],
 )
 
@@ -618,6 +664,37 @@ drake_cc_googletest(
         "//common/test_utilities:eigen_matrix_compare",
         "//common/trajectories:piecewise_polynomial",
         "//systems/framework",
+    ],
+)
+
+drake_cc_googletest(
+    name = "vector_log_limit_malloc_test",
+    deps = [
+        ":vector_log",
+        "//common/test_utilities:limit_malloc",
+    ],
+)
+
+drake_cc_googletest(
+    name = "vector_log_test",
+    deps = [
+        ":vector_log",
+    ],
+)
+
+drake_cc_googletest(
+    name = "vector_log_sink_test",
+    deps = [
+        ":affine_system",
+        ":constant_vector_source",
+        ":linear_system",
+        ":vector_log_sink",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_no_throw",
+        "//common/test_utilities:expect_throws_message",
+        "//systems/analysis:simulator",
+        "//systems/framework",
+        "//systems/framework/test_utilities:scalar_conversion",
     ],
 )
 

@@ -127,7 +127,7 @@ Algebraic Equation or Differential Complementarity Problem index
 <pre>
 d/dt gₚ(t; q) = ġₚ(t, q; v)
 </pre>
-vs. equations that **must** be posed at at the velocity-level
+vs. equations that **must** be posed at the velocity-level
 (i.e., nonholonomic constraints):<pre>
 gᵥ(t, q; v).
 </pre>
@@ -316,6 +316,14 @@ constraint problem data</h4>
     "ConstraintAccelProblemData") or `N_transpose_mult` (for
     @ref drake::multibody::constraint::ConstraintVelProblemData
     "ConstraintVelProblemData")
+*/
+
+/** @defgroup discretization A stable discretization strategy
+@ingroup constraint_overview
+
+To be written. Refer to
+https://github.com/RobotLocomotion/drake/pull/7055
+for a preview.
 */
 
 /** @defgroup constraint_references References

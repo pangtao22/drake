@@ -7,13 +7,15 @@
 
 #include "drake/common/copyable_unique_ptr.h"
 #include "drake/geometry/geometry_ids.h"
+#include "drake/geometry/proximity/bvh.h"
+#include "drake/geometry/proximity/obb.h"
 #include "drake/geometry/proximity/surface_mesh.h"
 #include "drake/geometry/proximity_properties.h"
 #include "drake/geometry/shape_specification.h"
 
 namespace drake {
 namespace multibody {
-namespace fixed_fem {
+namespace fem {
 namespace internal {
 /* Representation of a group of rigid collision objects, consisting of their
  poses in the world, surface meshes, and proximity properties. Collision objects
@@ -23,7 +25,7 @@ namespace internal {
  object has been added, its proximity properties and surface mesh can be queried
  with its unique GeometryId. Its pose can be queried and updated with the unique
  GeometryId.
- @tparam_default_scalar T. */
+ @tparam_default_scalar */
 template <typename T>
 class CollisionObjects : public geometry::ShapeReifier {
  public:
@@ -50,6 +52,18 @@ class CollisionObjects : public geometry::ShapeReifier {
     const auto it = rigid_representations_.find(id);
     DRAKE_DEMAND(it != rigid_representations_.end());
     return *(it->second.surface_mesh);
+  }
+
+  /* Returns the bounding volume hierarchy associated with the geometry with the
+   given `id`.
+   @pre The geometry with `id` has been registered in `this` %CollisionObjects
+   with AddCollisionObject(). */
+  const geometry::internal::Bvh<geometry::internal::Obb,
+                                geometry::SurfaceMesh<double>>&
+  bvh(geometry::GeometryId id) const {
+    const auto it = rigid_representations_.find(id);
+    DRAKE_DEMAND(it != rigid_representations_.end());
+    return *(it->second.bvh);
   }
 
   /* Returns the proximity properties of the geometry with GeometryId `id`.
@@ -113,10 +127,17 @@ class CollisionObjects : public geometry::ShapeReifier {
      properties and identity pose in world. */
     RigidRepresentation(std::unique_ptr<geometry::SurfaceMesh<double>> mesh,
                         const geometry::ProximityProperties& props)
-        : surface_mesh(std::move(mesh)), properties(props) {}
+        : surface_mesh(std::move(mesh)),
+          bvh(std::make_unique<geometry::internal::Bvh<
+                  geometry::internal::Obb, geometry::SurfaceMesh<double>>>(
+              *surface_mesh)),
+          properties(props) {}
     /* We use copyable_unique_ptr here so that the data can be default
      constructed and copy assigned. */
     copyable_unique_ptr<geometry::SurfaceMesh<double>> surface_mesh;
+    copyable_unique_ptr<geometry::internal::Bvh<geometry::internal::Obb,
+                                                geometry::SurfaceMesh<double>>>
+        bvh;
     geometry::ProximityProperties properties;
     math::RigidTransform<T> pose_in_world;
   };
@@ -148,8 +169,8 @@ class CollisionObjects : public geometry::ShapeReifier {
   std::vector<geometry::GeometryId> geometry_ids_;
 };
 }  // namespace internal
-}  // namespace fixed_fem
+}  // namespace fem
 }  // namespace multibody
 }  // namespace drake
 DRAKE_DECLARE_CLASS_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_SCALARS(
-    class ::drake::multibody::fixed_fem::internal::CollisionObjects);
+    class ::drake::multibody::fem::internal::CollisionObjects);

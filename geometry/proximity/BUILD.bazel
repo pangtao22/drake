@@ -16,9 +16,11 @@ drake_cc_package_library(
     deps = [
         ":bv",
         ":bvh",
-        ":collision_filter_legacy",
+        ":bvh_updater",
+        ":collision_filter",
         ":collisions_exist_callback",
         ":contact_surface_utility",
+        ":deformable_volume_mesh",
         ":distance_to_point_callback",
         ":distance_to_shape_callback",
         ":find_collision_candidates_callback",
@@ -34,6 +36,7 @@ drake_cc_package_library(
         ":make_ellipsoid_mesh",
         ":make_sphere_field",
         ":make_sphere_mesh",
+        ":mesh_deformer",
         ":mesh_field",
         ":mesh_half_space_intersection",
         ":mesh_intersection",
@@ -94,11 +97,24 @@ drake_cc_library(
 )
 
 drake_cc_library(
-    name = "collision_filter_legacy",
-    hdrs = ["collision_filter_legacy.h"],
+    name = "bvh_updater",
+    hdrs = ["bvh_updater.h"],
+    deps = [
+        ":bv",
+        ":bvh",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "collision_filter",
+    srcs = ["collision_filter.cc"],
+    hdrs = ["collision_filter.h"],
     deps = [
         "//common:essential",
-        "//common:sorted_vectors_have_intersection",
+        "//common:unused",
+        "//geometry:collision_filter_declaration",
+        "//geometry:geometry_ids",
     ],
 )
 
@@ -112,7 +128,7 @@ drake_cc_library(
         "collisions_exist_callback.h",
     ],
     deps = [
-        ":collision_filter_legacy",
+        ":collision_filter",
         ":proximity_utilities",
         "//geometry:geometry_ids",
         "@fcl",
@@ -125,6 +141,19 @@ drake_cc_library(
     hdrs = ["contact_surface_utility.h"],
     deps = [
         ":surface_mesh",
+        "//common:default_scalars",
+    ],
+)
+
+drake_cc_library(
+    name = "deformable_volume_mesh",
+    srcs = ["deformable_volume_mesh.cc"],
+    hdrs = ["deformable_volume_mesh.h"],
+    deps = [
+        ":bvh",
+        ":bvh_updater",
+        ":mesh_deformer",
+        ":volume_mesh",
     ],
 )
 
@@ -139,6 +168,7 @@ drake_cc_library(
     ],
     deps = [
         ":proximity_utilities",
+        "//common:default_scalars",
         "//common:essential",
         "//geometry:geometry_ids",
         "//geometry/query_results:signed_distance_to_point",
@@ -157,9 +187,10 @@ drake_cc_library(
         "distance_to_shape_callback.h",
     ],
     deps = [
-        ":collision_filter_legacy",
+        ":collision_filter",
         ":distance_to_point_callback",
         ":proximity_utilities",
+        "//common:default_scalars",
         "//geometry/query_results:signed_distance_pair",
     ],
 )
@@ -174,7 +205,7 @@ drake_cc_library(
         "find_collision_candidates_callback.h",
     ],
     deps = [
-        ":collision_filter_legacy",
+        ":collision_filter",
         ":proximity_utilities",
         "//common:sorted_pair",
         "@fcl",
@@ -193,7 +224,7 @@ drake_cc_library(
         "hydroelastic_callback.h",
     ],
     deps = [
-        ":collision_filter_legacy",
+        ":collision_filter",
         ":hydroelastic_internal",
         ":mesh_half_space_intersection",
         ":mesh_intersection",
@@ -249,6 +280,7 @@ drake_cc_library(
     deps = [
         ":distance_to_point_callback",
         ":mesh_field",
+        "//common:default_scalars",
         "//common:essential",
         "//common:unused",
         "//geometry:shape_specification",
@@ -264,6 +296,7 @@ drake_cc_library(
         ":surface_mesh",
         ":volume_mesh",
         ":volume_to_surface_mesh",
+        "//common:default_scalars",
         "//geometry:shape_specification",
     ],
 )
@@ -276,6 +309,7 @@ drake_cc_library(
         ":distance_to_point_callback",
         ":mesh_field",
         ":volume_to_surface_mesh",
+        "//common:default_scalars",
         "//common:essential",
         "//common:unused",
         "//geometry:shape_specification",
@@ -303,6 +337,7 @@ drake_cc_library(
         ":surface_mesh",
         ":volume_mesh",
         ":volume_to_surface_mesh",
+        "//common:default_scalars",
         "//common:essential",
         "//geometry:shape_specification",
     ],
@@ -318,6 +353,7 @@ drake_cc_library(
         ":surface_mesh",
         ":volume_mesh",
         ":volume_to_surface_mesh",
+        "//common:default_scalars",
         "//common:essential",
         "//geometry:shape_specification",
     ],
@@ -399,6 +435,7 @@ drake_cc_library(
         ":contact_surface_utility",
         ":posed_half_space",
         ":surface_mesh",
+        "//common:default_scalars",
         "//common:essential",
         "//geometry:geometry_ids",
         "//geometry:utilities",
@@ -417,6 +454,7 @@ drake_cc_library(
         ":posed_half_space",
         ":surface_mesh",
         ":volume_mesh",
+        "//common:default_scalars",
         "//common:essential",
         "//geometry/query_results:contact_surface",
         "//math:geometric_transform",
@@ -433,6 +471,7 @@ drake_cc_library(
         ":mesh_field",
         ":plane",
         ":volume_mesh",
+        "//common:default_scalars",
         "//geometry/query_results:contact_surface",
         "//math:geometric_transform",
     ],
@@ -488,8 +527,9 @@ drake_cc_library(
         "penetration_as_point_pair_callback.h",
     ],
     deps = [
-        ":collision_filter_legacy",
+        ":collision_filter",
         ":distance_to_point_callback",
+        "//common:default_scalars",
         "//geometry/query_results:penetration_as_point_pair",
         "//geometry/query_results:signed_distance_to_point",
         "@fcl",
@@ -579,6 +619,16 @@ drake_cc_library(
 )
 
 drake_cc_library(
+    name = "mesh_deformer",
+    srcs = ["mesh_deformer.cc"],
+    hdrs = ["mesh_deformer.h"],
+    deps = [
+        ":surface_mesh",
+        ":volume_mesh",
+    ],
+)
+
+drake_cc_library(
     name = "volume_to_surface_mesh",
     srcs = [
         "volume_to_surface_mesh.cc",
@@ -622,14 +672,13 @@ drake_cc_library(
     hdrs = ["test/characterization_utilities.h"],
     visibility = ["//visibility:private"],
     deps = [
-        ":collision_filter_legacy",
+        ":collision_filter",
         "//common:temp_directory",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
         "//geometry:proximity_engine",
         "//geometry:utilities",
         "//math:geometric_transform",
-        "//math:orthonormal_basis",
     ],
 )
 
@@ -639,9 +688,27 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
+    name = "bvh_updater_test",
+    deps = [
+        ":bvh",
+        ":bvh_updater",
+        ":make_sphere_mesh",
+        ":mesh_deformer",
+        "//common/test_utilities:eigen_matrix_compare",
+    ],
+)
+
+drake_cc_googletest(
     name = "collisions_exist_callback_test",
     deps = [
         ":collisions_exist_callback",
+    ],
+)
+
+drake_cc_googletest(
+    name = "collision_filter_test",
+    deps = [
+        ":collision_filter",
     ],
 )
 
@@ -661,6 +728,15 @@ drake_cc_googletest(
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
         "//math:autodiff",
+    ],
+)
+
+drake_cc_googletest(
+    name = "deformable_volume_mesh_test",
+    deps = [
+        ":deformable_volume_mesh",
+        ":make_box_mesh",
+        "//common/test_utilities:eigen_matrix_compare",
     ],
 )
 
@@ -852,8 +928,8 @@ drake_cc_googletest(
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
         "//math:autodiff",
+        "//math:geometric_transform",
         "//math:gradient",
-        "//math:orthonormal_basis",
     ],
 )
 
@@ -865,8 +941,8 @@ drake_cc_googletest(
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
         "//math:autodiff",
+        "//math:geometric_transform",
         "//math:gradient",
-        "//math:orthonormal_basis",
     ],
 )
 
@@ -995,6 +1071,16 @@ drake_cc_googletest(
         "//common/test_utilities:eigen_matrix_compare",
         "//math:autodiff",
         "//math:geometric_transform",
+    ],
+)
+
+drake_cc_googletest(
+    name = "mesh_deformer_test",
+    deps = [
+        ":make_box_mesh",
+        ":mesh_deformer",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
     ],
 )
 

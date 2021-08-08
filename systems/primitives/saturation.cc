@@ -21,12 +21,15 @@ Saturation<T>::Saturation(int input_size)
 
   // Input and outputs are of same dimension.
   input_port_index_ =
-      this->DeclareInputPort(kVectorValued, input_size_).get_index();
+      this->DeclareInputPort(kUseDefaultName, kVectorValued, input_size_)
+          .get_index();
   max_value_port_index_ =
-      this->DeclareInputPort(kVectorValued, input_size_).get_index();
+      this->DeclareInputPort(kUseDefaultName, kVectorValued, input_size_)
+          .get_index();
   min_value_port_index_ =
-      this->DeclareInputPort(kVectorValued, input_size_).get_index();
-  this->DeclareVectorOutputPort(BasicVector<T>(input_size_),
+      this->DeclareInputPort(kUseDefaultName, kVectorValued, input_size_)
+          .get_index();
+  this->DeclareVectorOutputPort(kUseDefaultName, input_size_,
                                 &Saturation::CalcSaturatedOutput)
       .get_index();
 }
@@ -47,8 +50,9 @@ Saturation<T>::Saturation(const VectorX<T>& min_value,
   DRAKE_THROW_UNLESS((min_value_.array() <= max_value_.array()).all());
 
   input_port_index_ =
-      this->DeclareInputPort(kVectorValued, input_size_).get_index();
-  this->DeclareVectorOutputPort(BasicVector<T>(input_size_),
+      this->DeclareInputPort(kUseDefaultName, kVectorValued, input_size_)
+          .get_index();
+  this->DeclareVectorOutputPort(kUseDefaultName, input_size_,
                                 &Saturation::CalcSaturatedOutput)
       .get_index();
 }

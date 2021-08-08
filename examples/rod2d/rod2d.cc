@@ -31,7 +31,9 @@ Rod2D<T>::Rod2D(SystemType system_type, double dt)
     // Discretization approach requires three position variables and
     // three velocity variables, all discrete, and periodic update.
     this->DeclarePeriodicDiscreteUpdate(dt);
-    this->DeclareDiscreteState(6);
+    auto state_index = this->DeclareDiscreteState(6);
+    state_output_port_ = &this->DeclareStateOutputPort(
+        "state_output", state_index);
   } else {
     if (dt != 0)
       throw std::logic_error(
@@ -40,14 +42,15 @@ Rod2D<T>::Rod2D(SystemType system_type, double dt)
 
     // Both piecewise DAE and compliant approach require six continuous
     // variables.
-    this->DeclareContinuousState(Rod2dStateVector<T>(), 3, 3, 0);  // q, v, z
+    auto state_index = this->DeclareContinuousState(
+        Rod2dStateVector<T>(), 3, 3, 0);  // q, v, z
+    state_output_port_ = &this->DeclareStateOutputPort(
+        "state_output", state_index);
   }
   // TODO(edrumwri): When type is SystemType::kPiecewiseDAE, allocate the
   // abstract mode variables.
 
-  this->DeclareInputPort(systems::kVectorValued, 3);
-  state_output_port_ = &this->DeclareVectorOutputPort(
-      "state_output", systems::BasicVector<T>(6), &Rod2D::CopyStateOut);
+  this->DeclareInputPort(systems::kUseDefaultName, systems::kVectorValued, 3);
 }
 
 // Computes the external forces on the rod.
@@ -80,7 +83,7 @@ int Rod2D<T>::DetermineNumWitnessFunctions(
 
 /// Gets the integer variable 'k' used to determine the point of contact
 /// indicated by the current mode.
-/// @throws std::logic_error if this is a discretized system (implying that
+/// @throws std::exception if this is a discretized system (implying that
 ///         modes are unused).
 /// @returns the value -1 to indicate the bottom of the rod (when theta = pi/2),
 ///          +1 to indicate the top of the rod (when theta = pi/2), or 0 to
@@ -158,7 +161,7 @@ void Rod2D<T>::GetContactPoints(const systems::Context<T>& context,
   using std::cos;
   using std::sin;
 
-  DRAKE_DEMAND(points);
+  DRAKE_DEMAND(points != nullptr);
   DRAKE_DEMAND(points->empty());
 
   const Vector3<T> q = GetRodConfig(context);
@@ -182,7 +185,7 @@ template <class T>
 void Rod2D<T>::GetContactPointsTangentVelocities(
     const systems::Context<T>& context,
     const std::vector<Vector2<T>>& points, std::vector<T>* vels) const {
-  DRAKE_DEMAND(vels);
+  DRAKE_DEMAND(vels != nullptr);
   const Vector3<T> q = GetRodConfig(context);
   const Vector3<T> v = GetRodVelocity(context);
 
@@ -302,7 +305,7 @@ void Rod2D<T>::CalcConstraintProblemData(
     multibody::constraint::ConstraintAccelProblemData<T>* data)
     const {
   using std::abs;
-  DRAKE_DEMAND(data);
+  DRAKE_DEMAND(data != nullptr);
   DRAKE_DEMAND(points.size() == tangent_vels.size());
 
   // Set the inertia solver.
@@ -410,7 +413,7 @@ void Rod2D<T>::CalcImpactProblemData(
     const std::vector<Vector2<T>>& points,
     multibody::constraint::ConstraintVelProblemData<T>* data) const {
   using std::abs;
-  DRAKE_DEMAND(data);
+  DRAKE_DEMAND(data != nullptr);
 
   // Setup the generalized inertia matrix.
   Matrix3<T> M;
@@ -473,16 +476,6 @@ void Rod2D<T>::CalcImpactProblemData(
 
   data->kL.resize(0);
   data->gammaL.resize(0);
-}
-
-template <typename T>
-void Rod2D<T>::CopyStateOut(const systems::Context<T>& context,
-                            systems::BasicVector<T>* state_port_value) const {
-  // Output port value is just the continuous or discrete state.
-  const VectorX<T> state = (system_type_ == SystemType::kDiscretized)
-                               ? context.get_discrete_state(0).CopyToVector()
-                               : context.get_continuous_state().CopyToVector();
-  state_port_value->SetFromVector(state);
 }
 
 /// Integrates the Rod 2D example forward in time using a
@@ -603,9 +596,10 @@ void Rod2D<T>::DoCalcDiscreteVariableUpdates(
   VectorX<T> qplus = q + vplus * dt_;
 
   // Set the new discrete state.
-  systems::BasicVector<T>& new_state = discrete_state->get_mutable_vector(0);
-  new_state.get_mutable_value().segment(0, 3) = qplus;
-  new_state.get_mutable_value().segment(3, 3) = vplus;
+  Eigen::VectorBlock<VectorX<T>> new_state =
+      discrete_state->get_mutable_value(0);
+  new_state.segment(0, 3) = qplus;
+  new_state.segment(3, 3) = vplus;
 }
 
 // Computes the impulses such that the vertical velocity at the contact point

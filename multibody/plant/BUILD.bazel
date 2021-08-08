@@ -58,6 +58,7 @@ drake_cc_library(
     name = "dummy_model",
     testonly = 1,
     hdrs = ["test/dummy_model.h"],
+    visibility = ["//visibility:private"],
     deps = [
         ":multibody_plant_core",
     ],
@@ -76,6 +77,7 @@ drake_cc_library(
         "multibody_plant_discrete_update_manager_attorney.h",
         "multibody_plant_model_attorney.h",
         "physical_model.h",
+        "scalar_convertible_component.h",
     ],
     visibility = ["//visibility:private"],
     deps = [
@@ -92,7 +94,6 @@ drake_cc_library(
         "//geometry:geometry_roles",
         "//geometry:scene_graph",
         "//math:geometric_transform",
-        "//math:orthonormal_basis",
         "//multibody/contact_solvers:contact_solver",
         "//multibody/contact_solvers:sparse_linear_operator",
         "//multibody/hydroelastics:hydroelastic_engine",
@@ -290,6 +291,8 @@ drake_cc_googletest(
         ":hydroelastic_traction",
         "//common:find_resource",
         "//common/test_utilities:eigen_matrix_compare",
+        "//math:autodiff",
+        "//math:gradient",
         "//multibody/parsing",
     ],
 )
@@ -662,6 +665,7 @@ drake_cc_googletest(
     name = "multibody_plant_hydroelastic_contact_results_output_test",
     deps = [
         ":plant",
+        "//common/test_utilities:eigen_matrix_compare",
         "//examples/multibody/rolling_sphere:make_rolling_sphere_plant",
     ],
 )
@@ -669,6 +673,7 @@ drake_cc_googletest(
 drake_cc_googletest(
     name = "multibody_plant_scalar_conversion_test",
     deps = [
+        ":dummy_model",
         ":plant",
     ],
 )
@@ -698,7 +703,9 @@ drake_cc_googletest(
         ":dummy_model",
         ":multibody_plant_core",
         "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
         "//systems/analysis:simulator",
+        "//systems/framework:abstract_value_cloner",
     ],
 )
 

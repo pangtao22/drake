@@ -4,6 +4,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <typeinfo>
 #include <unordered_map>
 
 #include "fmt/ostream.h"
@@ -239,7 +240,7 @@ class GeometryProperties {
 
   /** Retrieves the indicated property group. The returned group is valid for
    as long as this instance.
-   @throws std::logic_error if there is no group with the given name.  */
+   @throws std::exception if there is no group with the given name.  */
   const Group& GetPropertiesInGroup(const std::string& group_name) const;
 
   /** Returns all of the defined group names.  */
@@ -251,7 +252,7 @@ class GeometryProperties {
    @param group_name   The group name.
    @param name         The name of the property -- must be unique in the group.
    @param value        The value to assign to the property.
-   @throws std::logic_error if the property already exists.
+   @throws std::exception if the property already exists.
    @tparam ValueType   The type of data to store with the attribute -- must be
                        copy constructible or cloneable (see Value).  */
   template <typename ValueType>
@@ -272,7 +273,7 @@ class GeometryProperties {
    @param group_name   The group name.
    @param name         The name of the property -- must be unique in the group.
    @param value        The value to assign to the property.
-   @throws std::logic_error if the property exists with a different type.
+   @throws std::exception if the property exists with a different type.
    @tparam ValueType   The type of data to store with the attribute -- must be
                        copy constructible or cloneable (see Value).  */
   template <typename ValueType>
@@ -287,7 +288,7 @@ class GeometryProperties {
    @param group_name   The group name.
    @param name         The name of the property -- must be unique in the group.
    @param value        The value to assign to the property.
-   @throws std::logic_error if the property already exists.  */
+   @throws std::exception if the property already exists.  */
   void AddPropertyAbstract(const std::string& group_name,
                            const std::string& name, const AbstractValue& value);
 
@@ -299,7 +300,7 @@ class GeometryProperties {
    @param group_name   The group name.
    @param name         The name of the property -- must be unique in the group.
    @param value        The value to assign to the property.
-   @throws std::logic_error if the property exists with a different type.  */
+   @throws std::exception if the property exists with a different type.  */
   void UpdatePropertyAbstract(const std::string& group_name,
                               const std::string& name,
                               const AbstractValue& value);
@@ -319,9 +320,9 @@ class GeometryProperties {
 
    @param group_name  The name of the group to which the property belongs.
    @param name        The name of the desired property.
-   @throws std::logic_error if a) the group name is invalid,
-                            b) the property name is invalid, or
-                            c) the property type is not that specified.
+   @throws std::exception if a) the group name is invalid,
+                          b) the property name is invalid, or
+                          c) the property type is not that specified.
    @tparam ValueType  The expected type of the desired property.
    @returns const ValueType& of stored value.
             If ValueType is Eigen::Vector4d, the return type will be a copy
@@ -334,7 +335,7 @@ class GeometryProperties {
     if constexpr (std::is_same_v<ValueType, Eigen::Vector4d>) {
       const Rgba color =
           GetValueOrThrow<Rgba>("GetProperty", group_name, name, abstract,
-                                NiceTypeName::Get<Eigen::Vector4d>());
+                                typeid(Eigen::Vector4d));
       return ToVector4d(color);
     } else {
       return GetValueOrThrow<ValueType>("GetProperty", group_name, name,
@@ -347,8 +348,8 @@ class GeometryProperties {
 
    @param group_name  The name of the group to which the property belongs.
    @param name        The name of the desired property.
-   @throws std::logic_error if a) the group name is invalid, or
-                            b) the property name is invalid. */
+   @throws std::exception if a) the group name is invalid, or
+                          b) the property name is invalid. */
   const AbstractValue& GetPropertyAbstract(const std::string& group_name,
                                            const std::string& name) const;
 
@@ -374,8 +375,8 @@ class GeometryProperties {
    @param name           The name of the desired property.
    @param default_value  The alternate value to return if the property cannot
                          be acquired.
-   @throws std::logic_error if a property of the given name exists but is not
-                            of `ValueType`.  */
+   @throws std::exception if a property of the given name exists but is not
+                          of `ValueType`.  */
   template <typename ValueType>
   ValueType GetPropertyOrDefault(const std::string& group_name,
                                  const std::string& name,
@@ -388,7 +389,7 @@ class GeometryProperties {
       if constexpr (std::is_same_v<ValueType, Eigen::Vector4d>) {
         const Rgba color = GetValueOrThrow<Rgba>(
             "GetPropertyOrDefault", group_name, name, *abstract,
-            NiceTypeName::Get<Eigen::Vector4d>());
+            typeid(Eigen::Vector4d));
         return ToVector4d(color);
       } else {
         // This incurs the cost of copying a stored value.
@@ -470,13 +471,13 @@ class GeometryProperties {
   static const ValueType& GetValueOrThrow(
       const std::string& method, const std::string& group_name,
       const std::string& name, const AbstractValue& abstract,
-      const std::string& nice_type_name = NiceTypeName::Get<ValueType>()) {
+      const std::type_info& requested_type = typeid(ValueType)) {
     const ValueType* value = abstract.maybe_get_value<ValueType>();
     if (value == nullptr) {
       throw std::logic_error(fmt::format(
           "{}(): The property ('{}', '{}') exists, but is of a different type. "
           "Requested '{}', but found '{}'",
-          method, group_name, name, nice_type_name,
+          method, group_name, name, NiceTypeName::Get(requested_type),
           abstract.GetNiceTypeName()));
     }
     return *value;

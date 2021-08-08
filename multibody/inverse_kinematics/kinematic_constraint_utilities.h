@@ -58,12 +58,12 @@ void UpdateContextPositionsAndVelocities(
 /*
  * Normalize an Eigen vector of doubles. This function is used in the
  * constructor of some kinematic constraints.
- * @throws std::invalid_argument if the vector is close to zero.
+ * @throws std::exception if the vector is close to zero.
  */
 template <typename DerivedA>
-typename std::enable_if<
+typename std::enable_if_t<
     is_eigen_vector_of<DerivedA, double>::value,
-    Eigen::Matrix<double, DerivedA::RowsAtCompileTime, 1>>::type
+    Eigen::Matrix<double, DerivedA::RowsAtCompileTime, 1>>
 NormalizeVector(const Eigen::MatrixBase<DerivedA>& a) {
   const double a_norm = a.norm();
   if (a_norm < 100 * a.rows() * std::numeric_limits<double>::epsilon()) {
@@ -75,7 +75,7 @@ NormalizeVector(const Eigen::MatrixBase<DerivedA>& a) {
 /*
  * If `plant` is not nullptr, return a reference to the MultibodyPlant to which
  * it points.
- * @throws std::invalid_argument if `plant` is nullptr.
+ * @throws std::exception if `plant` is nullptr.
  */
 template <typename T>
 const MultibodyPlant<T>& RefFromPtrOrThrow(

@@ -10,6 +10,7 @@
 
 #include <Eigen/SparseCore>
 
+#include "drake/common/drake_deprecated.h"
 #include "drake/solvers/evaluator_base.h"
 
 namespace drake {
@@ -36,6 +37,8 @@ class Cost : public EvaluatorBase {
 
 /**
  * Implements a cost of the form @f[ a'x + b @f].
+ *
+ * @ingroup solver_evaluators
  */
 class LinearCost : public Cost {
  public:
@@ -63,9 +66,8 @@ class LinearCost : public Cost {
   double b() const { return b_; }
 
   /**
-   * Updates the linear term, upper and lower bounds in the linear constraint.
-   * The updated constraint is @f[ a_new' x + b_new @f].
-   * Note that the number of variables (number of cols) cannot change.
+   * Updates the coefficients of the cost.
+   * Note that the number of variables (size of a) cannot change.
    * @param new_a New linear term.
    * @param new_b (optional) New constant term.
    */
@@ -102,6 +104,8 @@ class LinearCost : public Cost {
 
 /**
  * Implements a cost of the form @f[ .5 x'Qx + b'x + c @f].
+ *
+ * @ingroup solver_evaluators
  */
 class QuadraticCost : public Cost {
  public:
@@ -211,6 +215,8 @@ class QuadraticCost : public Cost {
 
 /**
  * Creates a cost term of the form (x-x_desired)'*Q*(x-x_desired).
+ *
+ * @ingroup solver_evaluators
  */
 std::shared_ptr<QuadraticCost> MakeQuadraticErrorCost(
     const Eigen::Ref<const Eigen::MatrixXd>& Q,
@@ -219,14 +225,79 @@ std::shared_ptr<QuadraticCost> MakeQuadraticErrorCost(
 /**
  * Creates a cost term of the form | Ax - b |^2.
  */
+DRAKE_DEPRECATED("2021-09-01", "Use Make2NormSquaredCost instead")
 std::shared_ptr<QuadraticCost> MakeL2NormCost(
     const Eigen::Ref<const Eigen::MatrixXd>& A,
     const Eigen::Ref<const Eigen::VectorXd>& b);
 
 /**
+ * Creates a quadratic cost of the form |Ax-b|²=(Ax-b)ᵀ(Ax-b)
+ *
+ * @ingroup solver_evaluators
+ */
+std::shared_ptr<QuadraticCost> Make2NormSquaredCost(
+    const Eigen::Ref<const Eigen::MatrixXd>& A,
+    const Eigen::Ref<const Eigen::VectorXd>& b);
+
+/**
+ * Implements a cost of the form @f[ |Ax + b|₂ @f].
+ *
+ * @ingroup solver_evaluators
+ */
+class L2NormCost : public Cost {
+ public:
+  DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(L2NormCost)
+
+  // TODO(russt): Add an option to select an implementation that smooths the
+  // gradient discontinuity at the origin.
+  /**
+   * Construct a cost of the form @f[ |Ax + b|₂ @f].
+   * @param A Linear term.
+   * @param b Constant term.
+   */
+  L2NormCost(const Eigen::Ref<const Eigen::MatrixXd>& A,
+             const Eigen::Ref<const Eigen::VectorXd>& b);
+
+  ~L2NormCost() override {}
+
+  const Eigen::MatrixXd& A() const { return A_; }
+
+  const Eigen::VectorXd& b() const { return b_; }
+
+  /**
+   * Updates the coefficients of the cost.
+   * Note that the number of variables (columns of A) cannot change.
+   * @param new_A New linear term.
+   * @param new_b New constant term.
+   */
+  void UpdateCoefficients(const Eigen::Ref<const Eigen::MatrixXd>& new_A,
+                          const Eigen::Ref<const Eigen::VectorXd>& new_b);
+
+ protected:
+  void DoEval(const Eigen::Ref<const Eigen::VectorXd>& x,
+              Eigen::VectorXd* y) const override;
+
+  void DoEval(const Eigen::Ref<const AutoDiffVecXd>& x,
+              AutoDiffVecXd* y) const override;
+
+  void DoEval(const Eigen::Ref<const VectorX<symbolic::Variable>>& x,
+              VectorX<symbolic::Expression>* y) const override;
+
+  std::ostream& DoDisplay(std::ostream&,
+                          const VectorX<symbolic::Variable>&) const override;
+
+ private:
+  Eigen::MatrixXd A_;
+  Eigen::VectorXd b_;
+};
+
+
+/**
  * A cost that may be specified using another (potentially nonlinear)
  * evaluator.
  * @tparam EvaluatorType The nested evaluator.
+ *
+ * @ingroup solver_evaluators
  */
 template <typename EvaluatorType = EvaluatorBase>
 class EvaluatorCost : public Cost {
@@ -266,6 +337,8 @@ class EvaluatorCost : public Cost {
  * caller must provide a list of Polynomial::VarType variables that correspond
  * to the members of the Binding<> (the individual scalar elements of the
  * given VariableList).
+ *
+ * @ingroup solver_evaluators
  */
 class PolynomialCost : public EvaluatorCost<PolynomialEvaluator> {
  public:
@@ -293,6 +366,8 @@ class PolynomialCost : public EvaluatorCost<PolynomialEvaluator> {
  * @tparam FF The forwarded function type (e.g., `const F&, `F&&`, ...).
  * The class `F` should have functions numInputs(), numOutputs(), and
  * eval(x, y).
+ *
+ * @ingroup solver_evaluators
  */
 template <typename FF>
 std::shared_ptr<Cost> MakeFunctionCost(FF&& f) {

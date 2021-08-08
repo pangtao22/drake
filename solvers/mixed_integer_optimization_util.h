@@ -64,10 +64,10 @@ struct LogarithmicSos2NewBinaryVariables<Eigen::Dynamic> {
  * (1, 1) represents integer 2, so only λ(2) and λ(3) can be strictly positive.
  */
 template <typename Derived>
-typename std::enable_if<
+typename std::enable_if_t<
     drake::is_eigen_vector_of<Derived, symbolic::Expression>::value,
     typename LogarithmicSos2NewBinaryVariables<
-        Derived::RowsAtCompileTime>::type>::type
+        Derived::RowsAtCompileTime>::type>
 AddLogarithmicSos2Constraint(MathematicalProgram* prog,
                              const Eigen::MatrixBase<Derived>& lambda,
                              const std::string& binary_variable_name = "y") {
@@ -129,7 +129,7 @@ void AddSos2Constraint(
  * (y(0), ..., y(⌈log₂(n)⌉) equals to binary_encoding.row(M), then λ(M) = 1
  * @param binary_encoding A n x ⌈log₂(n)⌉ matrix. binary_encoding.row(i)
  * represents integer i. No two rows of `binary_encoding` can be the same.
- * @throws std::runtime_error if @p binary_encoding has a non-binary entry (0,
+ * @throws std::exception if @p binary_encoding has a non-binary entry (0,
  * 1).
  */
 void AddLogarithmicSos1Constraint(
@@ -241,13 +241,13 @@ std::ostream& operator<<(std::ostream& os, const IntervalBinning& binning);
  */
 template <typename DerivedPhiX, typename DerivedPhiY, typename DerivedBx,
     typename DerivedBy>
-typename std::enable_if<
+  typename std::enable_if_t<
     is_eigen_vector_of<DerivedPhiX, double>::value &&
         is_eigen_vector_of<DerivedPhiY, double>::value &&
         is_eigen_vector_of<DerivedBx, symbolic::Expression>::value &&
         is_eigen_vector_of<DerivedBy, symbolic::Expression>::value,
     MatrixDecisionVariable<DerivedPhiX::RowsAtCompileTime,
-                           DerivedPhiY::RowsAtCompileTime>>::type
+                           DerivedPhiY::RowsAtCompileTime>>
 AddBilinearProductMcCormickEnvelopeSos2(
     MathematicalProgram* prog, const symbolic::Variable& x,
     const symbolic::Variable& y, const symbolic::Expression& w,

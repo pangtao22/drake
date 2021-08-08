@@ -28,11 +28,15 @@ using std::shared_ptr;
 using std::unique_ptr;
 using std::vector;
 
+using Eigen::Matrix;
+using Eigen::Matrix2d;
+using Eigen::Matrix3d;
 using Eigen::Ref;
 using drake::Vector1d;
 using Eigen::Vector2d;
+using Eigen::Vector3d;
+using Eigen::Vector4d;
 using Eigen::VectorXd;
-using drake::solvers::internal::is_convertible_workaround;
 using drake::solvers::test::GenericTrivialCost2;
 
 namespace drake {
@@ -43,37 +47,6 @@ using symbolic::test::ExprEqual;
 
 namespace solvers {
 namespace {
-
-// Check for the failure of libstdc++ 4.9's std::is_convertible if used to
-// check From = std::unique_ptr<T>, To = std::shared_ptr<U>
-template <typename From, typename To>
-struct check_ptr_convertible {
-  typedef std::unique_ptr<From> FromPtr;
-  typedef std::shared_ptr<To> ToPtr;
-  // static constexpr bool std_value =
-  //    std::is_convertible<FromPtr, ToPtr>::value;
-  static constexpr bool workaround_value =
-      is_convertible_workaround<FromPtr, ToPtr>::value;
-};
-
-struct A {};
-struct B {};
-struct C : B {};
-
-GTEST_TEST(testCost, testIsConvertibleWorkaround) {
-  EXPECT_TRUE((is_convertible_workaround<C*, B*>::value));
-  EXPECT_TRUE((is_convertible_workaround<shared_ptr<C>, shared_ptr<B>>::value));
-  EXPECT_TRUE((is_convertible_workaround<unique_ptr<C>, unique_ptr<B>>::value));
-  EXPECT_TRUE((is_convertible_workaround<Binding<LinearConstraint>,
-                                         Binding<Constraint>>::value));
-  EXPECT_FALSE((is_convertible_workaround<Binding<LinearConstraint>,
-                                          Binding<Cost>>::value));
-
-  // TODO(eric.cousineau): Determine exact conditions for failure in GCC.
-  // Difficult to pinpoint in a multi-platform fashion via __GLIBCXX__ or
-  // __GNUC_* version macros
-  EXPECT_FALSE((check_ptr_convertible<A, B>::workaround_value));
-}
 
 // For a given Constraint, return the equivalent Cost type
 template <typename C>
@@ -386,6 +359,77 @@ GTEST_TEST(testCost, testFunctionCost) {
   VerifyFunctionCost(obj_const, x);
   VerifyFunctionCost(make_shared<GenericTrivialCost2>(), x);
   VerifyFunctionCost(make_unique<GenericTrivialCost2>(), x);
+}
+
+GTEST_TEST(TestL2NormCost, Eval) {
+  Matrix<double, 2, 4> A;
+  // clang-format off
+  A << .32,  2.0, 1.3, -4.,
+       2.3, -2.0, 7.1, 1.3;
+  // clang-format on
+  const Vector2d b{.42, -3.2};
+
+  L2NormCost cost(A, b);
+  EXPECT_TRUE(CompareMatrices(A, cost.A()));
+  EXPECT_TRUE(CompareMatrices(b, cost.b()));
+
+  const Vector4d x0{5.2, 3.4, -1.3, 2.1};
+  const Vector2d z = A*x0 + b;
+
+  // Test double.
+  {
+    VectorXd y;
+    cost.Eval(x0, &y);
+    EXPECT_NEAR(std::sqrt(z.dot(z)), y[0], 1e-16);
+  }
+
+  // Test AutoDiffXd.
+  {
+    const Vector4<AutoDiffXd> x = math::initializeAutoDiff(x0);
+    VectorX<AutoDiffXd> y;
+    cost.Eval(x, &y);
+    EXPECT_NEAR(z.norm(), math::autoDiffToValueMatrix(y)[0], 1e-16);
+    const Matrix<double, 1, 4> grad_expected =
+        (x0.transpose() * A.transpose() * A + b.transpose() * A) / (z.norm());
+    EXPECT_TRUE(CompareMatrices(math::autoDiffToGradientMatrix(y),
+                                grad_expected, 1e-15));
+  }
+
+  // Test Symbolic.
+  {
+    auto x = symbolic::MakeVectorVariable(4, "x");
+    VectorX<Expression> y;
+    cost.Eval(x, &y);
+    symbolic::Environment env;
+    env.insert(x, x0);
+    EXPECT_NEAR(z.norm(), y[0].Evaluate(env), 1e-15);
+  }
+}
+
+GTEST_TEST(TestL2NormCost, UpdateCoefficients) {
+  L2NormCost cost(Matrix2d::Identity(), Vector2d::Zero());
+
+  cost.UpdateCoefficients(Matrix<double, 4, 2>::Identity(), Vector4d::Zero());
+  EXPECT_EQ(cost.A().rows(), 4);
+  EXPECT_EQ(cost.b().rows(), 4);
+
+  // Can't change the number of variables.
+  EXPECT_THROW(
+      cost.UpdateCoefficients(Matrix3d::Identity(), Vector3d::Zero()),
+      std::exception);
+
+  // A and b must have the same number of rows.
+  EXPECT_THROW(
+      cost.UpdateCoefficients(Matrix3d::Identity(), Vector4d::Zero()),
+      std::exception);
+}
+
+GTEST_TEST(TestL2NormCost, Display) {
+  L2NormCost cost(Matrix2d::Identity(), Vector2d::Ones());
+  std::ostringstream os;
+  cost.Display(os, symbolic::MakeVectorContinuousVariable(2, "x"));
+  EXPECT_EQ(fmt::format("{}", os.str()),
+            "L2NormCost sqrt((pow((1 + x(0)), 2) + pow((1 + x(1)), 2)))");
 }
 
 }  // anonymous namespace

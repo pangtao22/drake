@@ -3,6 +3,7 @@ import unittest
 
 import numpy as np
 
+from pydrake.autodiffutils import AutoDiffXd
 import pydrake.common as mut
 import pydrake.common._module_py._testing as mut_testing
 from pydrake.common.test_utilities.deprecation import catch_drake_warnings
@@ -40,15 +41,6 @@ class TestCommon(unittest.TestCase):
         # Simply test the spelling
         mut.ToleranceType.kAbsolute
         mut.ToleranceType.kRelative
-        with catch_drake_warnings(expected_count=2):
-            self.assertEqual(
-                mut.ToleranceType.absolute,
-                mut.ToleranceType.kAbsolute,
-            )
-            self.assertEqual(
-                mut.ToleranceType.relative,
-                mut.ToleranceType.kRelative,
-            )
 
     def test_random_distribution(self):
         # Simply test the spelling
@@ -76,6 +68,14 @@ class TestCommon(unittest.TestCase):
         rs1.randint(100)  # discard one
         rs2 = np.random.RandomState(seed=g())
         self.assertNotEqual(rs1.randint(100), rs2.randint(100))
+
+    def test_calc_probability_density(self):
+        density_val = mut.CalcProbabilityDensity(
+            distribution=mut.RandomDistribution.kGaussian,
+            x=np.array([0.5, 1.]))
+        density_ad = mut.CalcProbabilityDensity(
+            distribution=mut.RandomDistribution.kGaussian,
+            x=np.array([AutoDiffXd(1), AutoDiffXd(2)]))
 
     def test_assert_is_armed(self):
         self.assertIsInstance(mut.kDrakeAssertIsArmed, bool)

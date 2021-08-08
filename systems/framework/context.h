@@ -25,8 +25,9 @@ namespace systems {
 /// DiagramContext and are discouraged from subclassing LeafContext.
 ///
 /// A %Context is designed to be used only with the System that created it.
-/// State and Parameter data can be copied between contexts for compatible
-/// systems as necessary.
+/// Data encapsulated with State and Parameter objects can be copied between
+/// contexts for compatible systems with some restrictions. For details, see
+/// @ref system_compatibility.
 ///
 /// @tparam_default_scalar
 template <typename T>
@@ -94,7 +95,7 @@ class Context : public ContextBase {
 
   /// Returns the total dimension of all of the basic vector states (as if they
   /// were muxed).
-  /// @throws std::runtime_error if the system contains any abstract state.
+  /// @throws std::exception if the system contains any abstract state.
   int num_total_states() const {
     DRAKE_THROW_UNLESS(num_abstract_states() == 0);
     int count = num_continuous_states();
@@ -330,7 +331,7 @@ class Context : public ContextBase {
   /// time-dependent computations (at least if the time has actually changed).
   /// Time must have the same value in every subcontext within the same Diagram
   /// context tree so may only be modified at the root context of the tree.
-  /// @throws std::logic_error if this is not the root context.
+  /// @throws std::exception if this is not the root context.
   void SetTime(const T& time_sec);
 
   // TODO(sherm1) Add more-specific state "set" methods for smaller
@@ -349,7 +350,7 @@ class Context : public ContextBase {
   /// Sets time to @p time_sec and continuous state to @p xc. Performs a single
   /// notification sweep to avoid duplicate notifications for computations that
   /// depend on both time and state.
-  /// @throws std::logic_error if this is not the root context.
+  /// @throws std::exception if this is not the root context.
   void SetTimeAndContinuousState(const T& time_sec,
                                  const Eigen::Ref<const VectorX<T>>& xc) {
     VectorBase<T>& xc_vector =
@@ -497,7 +498,7 @@ class Context : public ContextBase {
   /// - it allows us to notify accuracy-dependent cached results that they are
   ///   out of date when the accuracy setting changes.
   ///
-  /// @throws std::logic_error if this is not the root context.
+  /// @throws std::exception if this is not the root context.
   void SetAccuracy(const std::optional<double>& accuracy);
 
   //@}
@@ -616,7 +617,7 @@ class Context : public ContextBase {
   /// state xc (including q, v, z) as a VectorBase. Performs a single
   /// notification sweep to avoid duplicate notifications for computations that
   /// depend on both time and state.
-  /// @throws std::logic_error if this is not the root context.
+  /// @throws std::exception if this is not the root context.
   /// @see SetTimeAndNoteContinuousStateChange()
   /// @see SetTimeAndGetMutableContinuousState()
   VectorBase<T>& SetTimeAndGetMutableContinuousStateVector(const T& time_sec) {
@@ -628,7 +629,7 @@ class Context : public ContextBase {
   /// continuous state partition q from xc. Performs a single notification sweep
   /// to avoid duplicate notifications for computations that depend on both time
   /// and q.
-  /// @throws std::logic_error if this is not the root context.
+  /// @throws std::exception if this is not the root context.
   /// @see GetMutableVZVectors()
   /// @see SetTimeAndGetMutableContinuousStateVector()
   VectorBase<T>& SetTimeAndGetMutableQVector(const T& time_sec);
@@ -646,7 +647,7 @@ class Context : public ContextBase {
   /// mutable reference to xc which they are going to modify. Performs a single
   /// notification sweep to avoid duplicate notifications for computations that
   /// depend on both time and state.
-  /// @throws std::logic_error if this is not the root context.
+  /// @throws std::exception if this is not the root context.
   /// @see SetTimeAndGetMutableContinuousStateVector()
   void SetTimeAndNoteContinuousStateChange(const T& time_sec) {
     SetTimeAndNoteContinuousStateChangeHelper(__func__, time_sec);
@@ -671,7 +672,7 @@ class Context : public ContextBase {
   //@{
 
   /// Returns a deep copy of this Context.
-  /// @throws std::logic_error if this is not the root context.
+  /// @throws std::exception if this is not the root context.
   // This is just an intentional shadowing of the base class method to return
   // a more convenient type.
   std::unique_ptr<Context<T>> Clone() const;
@@ -734,7 +735,7 @@ class Context : public ContextBase {
   /// invalidation notifications. Use get_mutable_parameters() instead for
   /// normal access.
   static Parameters<T>& access_mutable_parameters(Context<T>* context) {
-    DRAKE_ASSERT(context);
+    DRAKE_ASSERT(context != nullptr);
     return *context->parameters_;
   }
 
@@ -742,7 +743,7 @@ class Context : public ContextBase {
   /// invalidation notifications. Use get_mutable_state() instead for normal
   /// access.
   static State<T>& access_mutable_state(Context<T>* context) {
-    DRAKE_ASSERT(context);
+    DRAKE_ASSERT(context != nullptr);
     return context->do_access_mutable_state();
   }
 

@@ -246,27 +246,27 @@ GTEST_TEST(CopyableUniquePtrTest, PolymorphicCopyability) {
 
   // Case 1) Child with *only* Clone method.
   EXPECT_TRUE(is_cloneable<CloneOnlyChildWithClone>::value);
-  EXPECT_FALSE(std::is_copy_constructible<CloneOnlyChildWithClone>::value);
+  EXPECT_FALSE(std::is_copy_constructible_v<CloneOnlyChildWithClone>);
   copyable_unique_ptr<CloneOnlyChildWithClone> ptr_1;
 
   // Case 2) Child with *only* Copy method but virtual DoClone().
   EXPECT_FALSE(is_cloneable<CloneOnlyChildWithCopyVClone>::value);
-  EXPECT_TRUE(std::is_copy_constructible<CloneOnlyChildWithCopyVClone>::value);
+  EXPECT_TRUE(std::is_copy_constructible_v<CloneOnlyChildWithCopyVClone>);
   copyable_unique_ptr<CloneOnlyChildWithCopyVClone> ptr_2;
 
   // Case 3) Child with *only* Copy method.
   EXPECT_FALSE(is_cloneable<CloneOnlyChildWithCopy>::value);
-  EXPECT_TRUE(std::is_copy_constructible<CloneOnlyChildWithCopy>::value);
+  EXPECT_TRUE(std::is_copy_constructible_v<CloneOnlyChildWithCopy>);
   copyable_unique_ptr<CloneOnlyChildWithCopy> ptr_3;
 
   // Case 4) Child with no copy and no clone.
   EXPECT_FALSE(is_cloneable<CloneOnlyChildUncopyable>::value);
-  EXPECT_FALSE(std::is_copy_constructible<CloneOnlyChildUncopyable>::value);
+  EXPECT_FALSE(std::is_copy_constructible_v<CloneOnlyChildUncopyable>);
   // Can't make a cloneable_unique_ptr<CloneOnlyChildUncopyable>.
 
   // Case 5) Child with copy, derived from base with copy.
   EXPECT_FALSE(is_cloneable<CopyChild>::value);
-  EXPECT_TRUE(std::is_copy_constructible<CopyChild>::value);
+  EXPECT_TRUE(std::is_copy_constructible_v<CopyChild>);
   copyable_unique_ptr<CopyChild> ptr_4;
 
   unused(ptr_1, ptr_2, ptr_3, ptr_4);
@@ -277,7 +277,7 @@ GTEST_TEST(CopyableUniquePtrTest, PolymorphicCopyability) {
 // copies that slice the type back to CloneOnly.
 template <typename T>
 void TestPolymorphicCopy(bool copy_success) {
-  static_assert(std::is_convertible<T*, CloneOnly*>::value,
+  static_assert(std::is_convertible_v<T*, CloneOnly*>,
                 "This utility method can only be used with classes derived "
                 "from CloneOnly.");
   cup<CloneOnly> src(new T(1));
@@ -288,7 +288,7 @@ void TestPolymorphicCopy(bool copy_success) {
   if (copy_success) {
     EXPECT_TRUE(is_dynamic_castable<T>(tgt.get()));
   } else {
-    EXPECT_TRUE((std::is_same<const CloneOnly*, decltype(tgt.get())>::value));
+    EXPECT_TRUE((std::is_same_v<const CloneOnly*, decltype(tgt.get())>));
     EXPECT_FALSE(is_dynamic_castable<T>(tgt.get()));
   }
 }
@@ -312,7 +312,7 @@ GTEST_TEST(CopyableUniquePtrTest, CopyTypeSlicing) {
   tgt = src;    // Triggers a copy
   EXPECT_NE(tgt.get(), nullptr);    // Confirm actual object assigned.
   EXPECT_NE(tgt.get(), src.get());  // Confirm different objects.
-  EXPECT_TRUE((std::is_same<const FullyCopyable*, decltype(tgt.get())>::value));
+  EXPECT_TRUE((std::is_same_v<const FullyCopyable*, decltype(tgt.get())>));
   EXPECT_FALSE(is_dynamic_castable<CopyChild>(tgt.get()));
 }
 
@@ -342,19 +342,19 @@ GTEST_TEST(CopyableUniquePtrTest, CopyableAsExpected) {
 
   // Case 1) True || True --> True
   EXPECT_TRUE(is_cloneable<FullyCopyable>::value);
-  EXPECT_TRUE(std::is_copy_constructible<FullyCopyable>::value);
+  EXPECT_TRUE(std::is_copy_constructible_v<FullyCopyable>);
 
   // Case 2) True || False --> True
   EXPECT_TRUE(is_cloneable<CloneOnly>::value);
-  EXPECT_FALSE(std::is_copy_constructible<CloneOnly>::value);
+  EXPECT_FALSE(std::is_copy_constructible_v<CloneOnly>);
 
   // Case 3) False || True --> True
   EXPECT_FALSE(is_cloneable<CopyOnly>::value);
-  EXPECT_TRUE(std::is_copy_constructible<CopyOnly>::value);
+  EXPECT_TRUE(std::is_copy_constructible_v<CopyOnly>);
 
   // Case 4) False || False --> False
   EXPECT_FALSE(is_cloneable<Base>::value);
-  EXPECT_FALSE(std::is_copy_constructible<Base>::value);
+  EXPECT_FALSE(std::is_copy_constructible_v<Base>);
 }
 
 // ------------------------ Constructor Tests ------------------------------
@@ -540,6 +540,21 @@ GTEST_TEST(CopyableUniquePtrTest, MoveConstructFromUnique) {
   EXPECT_EQ(u_ptr3.get(), nullptr);
   EXPECT_EQ(cup_ptr3.get(), co_ptr3);
   EXPECT_TRUE(is_dynamic_castable<CloneOnlyChildWithClone>(cup_ptr3.get()));
+}
+
+// Test the construction from a sample model value. We don't test all varieties
+// of cloneable types because we know that the model construction uses the same
+// underlying mechanism as has been tested by all the other constructors.
+GTEST_TEST(CopyableUniquePtrTest, ConstructByValue) {
+  CloneOnly clone_only(17);
+  cup<CloneOnly> clone_ptr(clone_only);
+  EXPECT_NE(&clone_only, clone_ptr.get());
+  EXPECT_EQ(clone_only.value, clone_ptr->value);
+
+  CopyOnly copy_only(2);
+  cup<CopyOnly> copy_ptr(copy_only);
+  EXPECT_NE(&copy_only, copy_ptr.get());
+  EXPECT_EQ(copy_only.value, copy_ptr->value);
 }
 
 // ------------------------ Destructor Tests ------------------------------
@@ -942,18 +957,28 @@ GTEST_TEST(CopyableUniquePtrTest, PointerAccessConstSemantics) {
 
   // The extra parentheses prevent the macro from getting confused.
   // get is const pointer
-  EXPECT_TRUE(
-      (std::is_same<const CloneOnly*, decltype(ptr.get())>::value));
+  EXPECT_TRUE((std::is_same_v<const CloneOnly*, decltype(ptr.get())>));
   // NOTE: is_assignable uses declval<T> to create the lhs. declval<T> creates
   // an r-value reference (which will *always* fail assignability tests. By
   // taking an l-value reference of the object, the resulting type becomes
   // l-value.
-  EXPECT_FALSE((std::is_assignable<CloneOnly*&, decltype(ptr.get())>::value));
+  EXPECT_FALSE((std::is_assignable_v<CloneOnly*&, decltype(ptr.get())>));
 
   // get_mutable is non-const
-  EXPECT_TRUE((std::is_same<CloneOnly*, decltype(ptr.get_mutable())>::value));
+  EXPECT_TRUE((std::is_same_v<CloneOnly*, decltype(ptr.get_mutable())>));
+  EXPECT_TRUE((std::is_assignable_v<CloneOnly*&, decltype(ptr.get_mutable())>));
+
+  // Constness of dereferenced result depends on the constness of the smart
+  // pointer.
+  EXPECT_TRUE((std::is_same_v<CloneOnly&, decltype(*ptr)>));
+  const cup<CloneOnly>& const_ptr_ref = ptr;
+  EXPECT_TRUE((std::is_same_v<const CloneOnly&, decltype(*const_ptr_ref)>));
+
+  // Constness of T cannot be undone by non-const pointer container.
+  cup<const CloneOnly> ptr_to_const(new CloneOnly(2));
   EXPECT_TRUE(
-      (std::is_assignable<CloneOnly*&, decltype(ptr.get_mutable())>::value));
+      (std::is_same_v<const CloneOnly*, decltype(ptr_to_const.get_mutable())>));
+  EXPECT_TRUE((std::is_same_v<const CloneOnly&, decltype(*ptr_to_const)>));
 }
 
 // ------------------------ Core unique_ptr Tests ------------------------------
@@ -967,7 +992,7 @@ GTEST_TEST(CopyableUniquePtrTest, ConstSpecializationHasNoMutableAccess) {
   cup<const CloneOnly> ptr(new CloneOnly(2));
   // Being the same as a 'const' type, precludes the possibility of being the
   // "same" as a non-const type.
-  EXPECT_TRUE((std::is_same<const CloneOnly*, decltype(ptr.get())>::value));
+  EXPECT_TRUE((std::is_same_v<const CloneOnly*, decltype(ptr.get())>));
 }
 
 // This tests the implicit conversion of the pointer to a boolean. It does *not*

@@ -24,7 +24,6 @@ namespace systems {
 namespace {
 
 typedef Eigen::Matrix<double, 5, 1> Vector5d;
-typedef Eigen::Matrix<double, 6, 1> Vector6d;
 
 constexpr int kPositionLength = 2;
 constexpr int kVelocityLength = 1;
@@ -156,7 +155,7 @@ TEST_F(ContinuousStateTest, SetFrom) {
   unbound_symbolic->get_mutable_vector()[0] = symbolic::Variable("q");
   DRAKE_EXPECT_THROWS_MESSAGE(
       actual_double->SetFrom(*unbound_symbolic),
-      std::exception, ".*variable q.*\n*");
+      ".*variable q.*\n*");
 
   // Check ContinuousState<AutoDiff>::SetFrom<U> for U=double and U=Expression.
   actual_autodiff = MakeNanState<AutoDiffXd>();

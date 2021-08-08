@@ -70,6 +70,11 @@ GTEST_TEST(AutodiffOverloadsTest, ExtractDouble) {
   // A double still works, too.
   double y = 1.0;
   EXPECT_EQ(ExtractDoubleOrThrow(y), 1.0);
+
+  // Eigen variant.
+  Vector2<Eigen::AutoDiffScalar<Eigen::Vector2d>> v{9.0, 7.0};
+  EXPECT_TRUE(
+      CompareMatrices(ExtractDoubleOrThrow(v), Eigen::Vector2d{9.0, 7.0}));
 }
 
 // Tests correctness of nexttoward.
@@ -401,8 +406,8 @@ GTEST_TEST(AutodiffOverloadsTest, CheckEigenLiteral) {
   using Literald = typename Eigen::NumTraits<Td>::Literal;
   using Literalf = typename Eigen::NumTraits<Tf>::Literal;
 
-  static_assert(std::is_same<Literald, double>::value &&
-                    std::is_same<Literalf, float>::value,
+  static_assert(std::is_same_v<Literald, double> &&
+                    std::is_same_v<Literalf, float>,
                 "Eigen::NumTraits<T>::Literal didn't behave as expected.");
 }
 

@@ -20,8 +20,7 @@
 
 #include "drake/common/default_scalars.h"
 #include "drake/common/unused.h"
-#include "drake/geometry/geometry_ids.h"
-#include "drake/geometry/proximity/collision_filter_legacy.h"
+#include "drake/geometry/proximity/collision_filter.h"
 #include "drake/geometry/shape_specification.h"
 #include "drake/math/rigid_transform.h"
 
@@ -44,7 +43,7 @@ class DistanceCallback {
    invocation to be distinct from other invocations. */
   virtual bool Invoke(
       fcl::CollisionObjectd*, fcl::CollisionObjectd*,
-      const CollisionFilterLegacy*,
+      const CollisionFilter*,
       const std::unordered_map<GeometryId, math::RigidTransform<T>>*) = 0;
 
   /* Forces all results to be cleared. */
@@ -254,7 +253,9 @@ In other words, we transform the second plane (Q, n⃗) so Q and P are coinciden
 and m⃗ and n⃗ are anti-parallel. The notation is frameless, because we're
 not really relating two frames so much as creating a transform operator
 (although we *do* assume that all quantities are measured and expressed in a
-common frame). */
+common frame).
+
+@tparam_nonsymbolic_scalar */
 template <typename T>
 math::RigidTransform<T> AlignPlanes(const Vector3<T>& P, const Vector3<T>& m,
                                     const Vector3<T>& Q, const Vector3<T>& n);
@@ -293,7 +294,7 @@ class CharacterizeResultTest : public ::testing::Test {
   void RunCallback(
       const QueryInstance& query, fcl::CollisionObjectd* obj_A,
       fcl::CollisionObjectd* obj_B,
-      const CollisionFilterLegacy* collision_filter,
+      const CollisionFilter* collision_filter,
       const std::unordered_map<GeometryId, math::RigidTransform<T>>* X_WGs)
       const;
 
@@ -431,7 +432,7 @@ class CharacterizeResultTest : public ::testing::Test {
   //}
 
  protected:
-  CollisionFilterLegacy collision_filter_;
+  CollisionFilter collision_filter_;
   std::unique_ptr<DistanceCallback<T>> callback_;
 };
 

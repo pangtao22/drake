@@ -64,7 +64,7 @@ VectorX<double> ComputeVelocities(const RigidTransform<double>& pose_1,
 }
 
 // TODO(naveenoid) : Replace the usage of these methods eventually with
-// PoseVector or a similar future variant.
+// some struct with clearer pose semantics.
 // Sets a pose from a 7-element array whose first 3 elements are position and
 // last 4 elements are a quaternion (w, x, y, z) with w >= 0 (canonical form).
 RigidTransform<double> PoseVector7ToRigidTransform(
@@ -91,10 +91,14 @@ PoseSmoother::PoseSmoother(double desired_max_linear_velocity,
                            double desired_max_angular_velocity,
                            double period_sec, int filter_window_size)
     : smoothed_pose_output_port_(
-          this->DeclareAbstractOutputPort(&PoseSmoother::OutputSmoothedPose)
+          this->DeclareAbstractOutputPort(
+                  systems::kUseDefaultName,
+                  &PoseSmoother::OutputSmoothedPose)
               .get_index()),
       smoothed_velocity_output_port_(
-          this->DeclareAbstractOutputPort(&PoseSmoother::OutputSmoothedVelocity)
+          this->DeclareAbstractOutputPort(
+                  systems::kUseDefaultName,
+                  &PoseSmoother::OutputSmoothedVelocity)
               .get_index()),
       max_linear_velocity_(desired_max_linear_velocity),
       max_angular_velocity_(desired_max_angular_velocity),

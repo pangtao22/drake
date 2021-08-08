@@ -1,7 +1,18 @@
 #pragma once
-#include <memory>
 
+#include <memory>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "drake/geometry/geometry_ids.h"
+#include "drake/multibody/contact_solvers/contact_solver.h"
 #include "drake/multibody/contact_solvers/contact_solver_results.h"
+#include "drake/multibody/plant/contact_jacobians.h"
+#include "drake/multibody/plant/coulomb_friction.h"
+#include "drake/multibody/plant/discrete_contact_pair.h"
+#include "drake/multibody/plant/scalar_convertible_component.h"
 #include "drake/multibody/tree/multibody_tree.h"
 #include "drake/systems/framework/context.h"
 
@@ -20,18 +31,49 @@ class AccelerationKinematicsCache;
  It is an abstract base class providing an interface for MultibodyPlant to
  invoke, with the intent that a variety of concrete DiscreteUpdateManagers will
  be derived from this base class. As of today a new manager can be set with the
- experimental method MultibodyPlant::set_discrete_update_manager(). This allows
+ experimental method MultibodyPlant::SetDiscreteUpdateManager(). This allows
  Drake developers to experiment with a variety of discrete update methods.
 
  @tparam_default_scalar */
 template <typename T>
-class DiscreteUpdateManager {
+class DiscreteUpdateManager : public ScalarConvertibleComponent<T> {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(DiscreteUpdateManager);
 
   DiscreteUpdateManager() = default;
 
-  virtual ~DiscreteUpdateManager() = default;
+  ~DiscreteUpdateManager() override = default;
+
+  /* (Internal) Creates a clone of the concrete DiscreteUpdateManager object
+   with the scalar type `ScalarType`. This method is meant to be called only by
+   MultibodyPlant. MultibodyPlant guarantees the call to ExtactModelInfo() after
+   this object is scalar converted. Therefore this clone method is only
+   resposible for deep copying to a state *before* the call to
+   ExtactModelInfo().
+   @tparam_default_scalar */
+  template <typename ScalarType>
+  std::unique_ptr<DiscreteUpdateManager<ScalarType>> CloneToScalar() const {
+    if constexpr (std::is_same_v<ScalarType, double>) {
+      return CloneToDouble();
+    } else if constexpr (std::is_same_v<ScalarType, AutoDiffXd>) {
+      return CloneToAutoDiffXd();
+    } else if constexpr (std::is_same_v<ScalarType, symbolic::Expression>) {
+      return CloneToSymbolic();
+    }
+    DRAKE_UNREACHABLE();
+  }
+
+  /* Defaults to false. Derived classes that support making a clone that uses
+   double as a scalar type must override this to return true. */
+  bool is_cloneable_to_double() const override;
+
+  /* Defaults to false. Derived classes that support making a clone that uses
+   AutoDiffXd as a scalar type must override this to return true. */
+  bool is_cloneable_to_autodiff() const override;
+
+  /* Defaults to false. Derived classes that support making a clone that uses
+   symbolic::Expression as a scalar type must override this to return true. */
+  bool is_cloneable_to_symbolic() const override;
 
   /* Returns the MultibodyPlant that owns this DiscreteUpdateManager.
    @pre SetOwningMultibodyPlant() has been successfully invoked. */
@@ -42,14 +84,17 @@ class DiscreteUpdateManager {
 
   /* (Internal) Sets the given `plant` as the MultibodyPlant owning this
    DiscreteUpdateManager. This method is meant to be called by
-   MultibodyPlant::set_discrete_update_manager() only.
+   MultibodyPlant::SetDiscreteUpdateManager() only. A non-const pointer to
+   plant is passed in so that cache entries can be declared.
    @pre plant is Finalized. */
-  void SetOwningMultibodyPlant(const MultibodyPlant<T>* plant) {
+  void SetOwningMultibodyPlant(MultibodyPlant<T>* plant) {
     DRAKE_DEMAND(plant != nullptr);
     DRAKE_DEMAND(plant->is_finalized());
     plant_ = plant;
+    mutable_plant_ = plant;
     multibody_state_index_ = plant_->GetDiscreteStateIndexOrThrow();
     ExtractModelInfo();
+    DeclareCacheEntries();
   }
 
   /* Given the state of the model stored in `context`, this method performs the
@@ -85,9 +130,33 @@ class DiscreteUpdateManager {
   }
 
  protected:
+  /* Derived classes that support making a clone that uses double as a scalar
+   type must implement this so that it creates a copy of the object with double
+   as the scalar type. It should copy all members except for those overwritten
+   in `SetOwningMultibodyPlant()`. */
+  virtual std::unique_ptr<DiscreteUpdateManager<double>> CloneToDouble() const;
+
+  /* Derived classes that support making a clone that uses AutoDiffXd as a
+   scalar type must implement this so that it creates a copy of the object with
+   AutodDiffXd as the scalar type. It should copy all members except for those
+   overwritten in `SetOwningMultibodyPlant()`. */
+  virtual std::unique_ptr<DiscreteUpdateManager<AutoDiffXd>> CloneToAutoDiffXd()
+      const;
+
+  /* Derived classes that support making a clone that uses symboblic::Expression
+   as a scalar type must implement this so that it creates a copy of the object
+   with symbolic::Expression as the scalar type. It should copy all members
+   except for those overwritten in `SetOwningMultibodyPlant()`. */
+  virtual std::unique_ptr<DiscreteUpdateManager<symbolic::Expression>>
+  CloneToSymbolic() const;
+
   /* Derived DiscreteUpdateManager should override this method to extract
    information from the owning MultibodyPlant. */
   virtual void ExtractModelInfo() {}
+
+  /* Derived DiscreteUpdateManager should override this method to declare
+   cache entries in the owning MultibodyPlant. */
+  virtual void DeclareCacheEntries() {}
 
   /* Returns the discrete state index of the rigid position and velocity states
    declared by MultibodyPlant. */
@@ -95,8 +164,66 @@ class DiscreteUpdateManager {
     return multibody_state_index_;
   }
 
-  /* Exposed MultibodyPlant private/protected method. */
+  /* Exposed MultibodyPlant private/protected methods.
+   @{ */
+
+  // N.B. Keep the spelling and order of declarations here identical to the
+  // MultibodyPlantDiscreteUpdateManagerAttorney spelling and order of same.
+
   const MultibodyTree<T>& internal_tree() const;
+
+  systems::CacheEntry& DeclareCacheEntry(std::string description,
+                                         systems::ValueProducer,
+                                         std::set<systems::DependencyTicket>);
+
+  const contact_solvers::internal::ContactSolverResults<T>&
+  EvalContactSolverResults(const systems::Context<T>& context) const;
+
+  const internal::ContactJacobians<T>& EvalContactJacobians(
+      const systems::Context<T>& context) const;
+
+  const std::vector<internal::DiscreteContactPair<T>>& EvalDiscreteContactPairs(
+      const systems::Context<T>& context) const;
+
+  std::vector<CoulombFriction<double>> CalcCombinedFrictionCoefficients(
+      const systems::Context<T>& context,
+      const std::vector<internal::DiscreteContactPair<T>>& contact_pairs) const;
+
+  void CalcNonContactForces(const systems::Context<T>& context, bool discrete,
+                            MultibodyForces<T>* forces) const;
+
+  // TODO(xuchenhan-tri): Remove the following calls to MbP solvers (which only
+  //  solves for rigid-rigid contact) when the deformable-rigid two-way coupled
+  //  contact solver is implemented.
+  void CallTamsiSolver(
+      const T& time0, const VectorX<T>& v0, const MatrixX<T>& M0,
+      const VectorX<T>& minus_tau, const VectorX<T>& fn0, const MatrixX<T>& Jn,
+      const MatrixX<T>& Jt, const VectorX<T>& stiffness,
+      const VectorX<T>& damping, const VectorX<T>& mu,
+      contact_solvers::internal::ContactSolverResults<T>* results) const;
+
+  void CallContactSolver(
+      contact_solvers::internal::ContactSolver<T>* contact_solver,
+      const T& time0, const VectorX<T>& v0, const MatrixX<T>& M0,
+      const VectorX<T>& minus_tau, const VectorX<T>& phi0, const MatrixX<T>& Jc,
+      const VectorX<T>& stiffness, const VectorX<T>& damping,
+      const VectorX<T>& mu,
+      contact_solvers::internal::ContactSolverResults<T>* results) const;
+
+  void AddInForcesFromInputPorts(const drake::systems::Context<T>& context,
+                                 MultibodyForces<T>* forces) const;
+
+  // TODO(xuchenhan-tri): Remove this when SceneGraph takes control of all
+  //  geometries.
+  const std::vector<std::vector<geometry::GeometryId>>& collision_geometries()
+      const;
+
+  double default_contact_stiffness() const;
+  double default_contact_dissipation() const;
+
+  const std::unordered_map<geometry::GeometryId, BodyIndex>&
+  geometry_id_to_body_index() const;
+  /* @} */
 
   /* Concrete DiscreteUpdateManagers must override these NVI Calc methods to
    provide an implementation. The output parameters are guaranteed to be
@@ -115,6 +242,7 @@ class DiscreteUpdateManager {
 
  private:
   const MultibodyPlant<T>* plant_{nullptr};
+  MultibodyPlant<T>* mutable_plant_{nullptr};
   systems::DiscreteStateIndex multibody_state_index_;
 };
 }  // namespace internal

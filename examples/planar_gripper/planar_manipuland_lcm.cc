@@ -4,7 +4,7 @@ namespace drake {
 namespace examples {
 namespace planar_gripper {
 PlanarManipulandStatusDecoder::PlanarManipulandStatusDecoder() {
-  this->DeclareVectorOutputPort(systems::BasicVector<double>(6),
+  this->DeclareVectorOutputPort(systems::kUseDefaultName, 6,
                                 &PlanarManipulandStatusDecoder::OutputStatus);
   this->DeclareAbstractInputPort("manipuland_state",
                                  Value<lcmt_planar_manipuland_status>{});
@@ -25,8 +25,7 @@ systems::EventStatus PlanarManipulandStatusDecoder::UpdateDiscreteState(
   DRAKE_ASSERT(input != nullptr);
   const auto& status = input->get_value<lcmt_planar_manipuland_status>();
 
-  systems::BasicVector<double>& state = discrete_state->get_mutable_vector(0);
-  auto state_value = state.get_mutable_value();
+  auto state_value = discrete_state->get_mutable_value(0);
 
   state_value(0) = status.position[0];
   state_value(1) = status.position[1];
@@ -46,17 +45,10 @@ void PlanarManipulandStatusDecoder::OutputStatus(
 }
 
 PlanarManipulandStatusEncoder::PlanarManipulandStatusEncoder() {
-  this->DeclareInputPort(systems::kVectorValued, 6);
+  this->DeclareInputPort(systems::kUseDefaultName, systems::kVectorValued, 6);
   this->DeclareAbstractOutputPort(
-      &PlanarManipulandStatusEncoder::MakeOutputStatus,
+      systems::kUseDefaultName,
       &PlanarManipulandStatusEncoder::OutputStatus);
-}
-
-lcmt_planar_manipuland_status PlanarManipulandStatusEncoder::MakeOutputStatus()
-    const {
-  lcmt_planar_manipuland_status msg{};
-  msg.utime = 0;
-  return msg;
 }
 
 void PlanarManipulandStatusEncoder::OutputStatus(

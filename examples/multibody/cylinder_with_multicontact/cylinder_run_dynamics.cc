@@ -86,7 +86,7 @@ int do_main() {
   DRAKE_DEMAND(plant.num_positions() == 7);
 
   // Sanity check on the availability of the optional source id before using it.
-  DRAKE_DEMAND(!!plant.get_source_id());
+  DRAKE_DEMAND(plant.get_source_id().has_value());
 
   builder.Connect(scene_graph.get_query_output_port(),
                   plant.get_geometry_query_input_port());
@@ -107,7 +107,6 @@ int do_main() {
   // Create a context for this system:
   std::unique_ptr<systems::Context<double>> diagram_context =
       diagram->CreateDefaultContext();
-  diagram_context->EnableCaching();
   systems::Context<double>& plant_context =
       diagram->GetMutableSubsystemContext(plant, diagram_context.get());
 

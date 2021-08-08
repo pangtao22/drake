@@ -22,7 +22,6 @@ from pydrake.geometry import (
 from pydrake.lcm import DrakeLcm, Subscriber
 from pydrake.math import RigidTransform, RotationMatrix
 from pydrake.systems.framework import LeafSystem, PublishEvent, TriggerType
-from pydrake.systems.rendering import PoseBundle
 from pydrake.multibody.plant import ContactResults
 import pydrake.perception as mut
 
@@ -331,7 +330,7 @@ class MeshcatVisualizer(LeafSystem):
         vis = self.vis[self.prefix]
         # Make a fixed-seed generator for random colors for bodies.
         color_generator = np.random.RandomState(seed=42)
-        for frame_id in inspector.all_frame_ids():
+        for frame_id in inspector.GetAllFrameIds():
             count = inspector.NumGeometriesForFrameWithRole(
                 frame_id, self._role)
             if count == 0:
@@ -439,6 +438,14 @@ class MeshcatVisualizer(LeafSystem):
             continue
 
     def DoPublish(self, context, event):
+        # TODO(SeanCurtis-TRI) We want to be able to use this visualizer to
+        # draw without having it part of a Simulator. That means we'd like
+        # vis.Publish(context) to work. Currently, pydrake offers no mechanism
+        # to declare a forced event. However, by overriding DoPublish and
+        # putting the forced event callback code in the override, we can
+        # simulate it.
+        # We need to bind a mechanism for declaring forced events so we don't
+        # have to resort to overriding the dispatcher.
 
         LeafSystem.DoPublish(self, context, event)
 
@@ -546,6 +553,15 @@ class MeshcatContactVisualizer(LeafSystem):
         vis.delete()
 
     def DoPublish(self, context, event):
+        # TODO(SeanCurtis-TRI) We want to be able to use this visualizer to
+        # draw without having it part of a Simulator. That means we'd like
+        # vis.Publish(context) to work. Currently, pydrake offers no mechanism
+        # to declare a forced event. However, by overriding DoPublish and
+        # putting the forced event callback code in the override, we can
+        # simulate it.
+        # We need to bind a mechanism for declaring forced events so we don't
+        # have to resort to overriding the dispatcher.
+
         LeafSystem.DoPublish(self, context, event)
 
         contact_results = self.EvalAbstractInput(context, 0).get_value()
@@ -683,6 +699,15 @@ class MeshcatPointCloudVisualizer(LeafSystem):
                                       AbstractValue.Make(mut.PointCloud()))
 
     def DoPublish(self, context, event):
+        # TODO(SeanCurtis-TRI) We want to be able to use this visualizer to
+        # draw without having it part of a Simulator. That means we'd like
+        # vis.Publish(context) to work. Currently, pydrake offers no mechanism
+        # to declare a forced event. However, by overriding DoPublish and
+        # putting the forced event callback code in the override, we can
+        # simulate it.
+        # We need to bind a mechanism for declaring forced events so we don't
+        # have to resort to overriding the dispatcher.
+
         LeafSystem.DoPublish(self, context, event)
         point_cloud_P = self.EvalAbstractInput(context, 0).get_value()
 

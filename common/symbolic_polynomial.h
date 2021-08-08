@@ -94,7 +94,7 @@ class Polynomial {
   /// Constructs a polynomial from an expression @p e. Note that all variables
   /// in `e` are considered as indeterminates.
   ///
-  /// @throws std::runtime_error if @p e is not a polynomial.
+  /// @throws std::exception if @p e is not a polynomial.
   explicit Polynomial(const Expression& e);
 
   /// Constructs a polynomial from an expression @p e by decomposing it with
@@ -103,7 +103,7 @@ class Polynomial {
   /// @note It collects the intersection of the variables appeared in `e` and
   /// the provided @p indeterminates.
   ///
-  /// @throws std::runtime_error if @p e is not a polynomial in @p
+  /// @throws std::exception if @p e is not a polynomial in @p
   /// indeterminates.
   Polynomial(const Expression& e, Variables indeterminates);
 
@@ -154,7 +154,7 @@ class Polynomial {
   template <typename Derived>
   Eigen::Matrix<Polynomial, 1, Derived::RowsAtCompileTime> Jacobian(
       const Eigen::MatrixBase<Derived>& vars) const {
-    static_assert(std::is_same<typename Derived::Scalar, Variable>::value &&
+    static_assert(std::is_same_v<typename Derived::Scalar, Variable> &&
                       (Derived::ColsAtCompileTime == 1),
                   "The argument of Polynomial::Jacobian should be a vector of "
                   "symbolic variables.");
@@ -183,18 +183,18 @@ class Polynomial {
 
   /// Evaluates this polynomial under a given environment @p env.
   ///
-  /// @throws std::out_of_range if there is a variable in this polynomial whose
+  /// @throws std::exception if there is a variable in this polynomial whose
   /// assignment is not provided by @p env.
   double Evaluate(const Environment& env) const;
 
   /// Partially evaluates this polynomial using an environment @p env.
   ///
-  /// @throws std::runtime_error if NaN is detected during evaluation.
+  /// @throws std::exception if NaN is detected during evaluation.
   Polynomial EvaluatePartial(const Environment& env) const;
 
   /// Partially evaluates this polynomial by substituting @p var with @p c.
   ///
-  /// @throws std::runtime_error if NaN is detected at any point during
+  /// @throws std::exception if NaN is detected at any point during
   /// evaluation.
   Polynomial EvaluatePartial(const Variable& var, double c) const;
 
@@ -259,7 +259,7 @@ class Polynomial {
   friend Polynomial operator/(Polynomial p, double v);
 
  private:
-  // Throws std::runtime_error if there is a variable appeared in both of
+  // Throws std::exception if there is a variable appeared in both of
   // decision_variables() and indeterminates().
   void CheckInvariant() const;
 
@@ -334,26 +334,26 @@ Eigen::Matrix<Polynomial, MatrixL::RowsAtCompileTime,
 operator*(const MatrixL& lhs, const MatrixR& rhs);
 #else
 template <typename MatrixL, typename MatrixR>
-typename std::enable_if<
-    std::is_base_of<Eigen::MatrixBase<MatrixL>, MatrixL>::value &&
-        std::is_base_of<Eigen::MatrixBase<MatrixR>, MatrixR>::value &&
+typename std::enable_if_t<
+    std::is_base_of_v<Eigen::MatrixBase<MatrixL>, MatrixL> &&
+        std::is_base_of_v<Eigen::MatrixBase<MatrixR>, MatrixR> &&
         // {Polynomial, Monomial, double} x {Polynomial, Monomial, double}
-        (std::is_same<typename MatrixL::Scalar, Polynomial>::value ||
-         std::is_same<typename MatrixL::Scalar, Monomial>::value ||
-         std::is_same<typename MatrixL::Scalar, double>::value) &&
-        (std::is_same<typename MatrixR::Scalar, Polynomial>::value ||
-         std::is_same<typename MatrixR::Scalar, Monomial>::value ||
-         std::is_same<typename MatrixR::Scalar, double>::value) &&
+        (std::is_same_v<typename MatrixL::Scalar, Polynomial> ||
+         std::is_same_v<typename MatrixL::Scalar, Monomial> ||
+         std::is_same_v<typename MatrixL::Scalar, double>) &&
+        (std::is_same_v<typename MatrixR::Scalar, Polynomial> ||
+         std::is_same_v<typename MatrixR::Scalar, Monomial> ||
+         std::is_same_v<typename MatrixR::Scalar, double>) &&
         // Exclude Polynomial x Polynomial case (because the other seven
         // operations call this case. If we include this case here, we will have
         // self-recursion).
-        !(std::is_same<typename MatrixL::Scalar, Polynomial>::value &&
-          std::is_same<typename MatrixR::Scalar, Polynomial>::value) &&
+        !(std::is_same_v<typename MatrixL::Scalar, Polynomial> &&
+          std::is_same_v<typename MatrixR::Scalar, Polynomial>) &&
         // Exclude double x double case.
-        !(std::is_same<typename MatrixL::Scalar, double>::value &&
-          std::is_same<typename MatrixR::Scalar, double>::value),
+        !(std::is_same_v<typename MatrixL::Scalar, double> &&
+          std::is_same_v<typename MatrixR::Scalar, double>),
     Eigen::Matrix<Polynomial, MatrixL::RowsAtCompileTime,
-                  MatrixR::ColsAtCompileTime>>::type
+                  MatrixR::ColsAtCompileTime>>
 operator*(const MatrixL& lhs, const MatrixR& rhs) {
   // "foo.template cast<Polynomial>()" is redundant if foo is of Polynomial.
   // However, we have checked that `-O2` compiler optimization reduces it into a
@@ -476,11 +476,11 @@ namespace symbolic {
 /// Evaluates a matrix `m` of symbolic polynomials using `env`.
 ///
 /// @returns a matrix of double whose size is the size of @p m.
-/// @throws std::runtime_error if NaN is detected during evaluation.
+/// @throws std::exception if NaN is detected during evaluation.
 /// @pydrake_mkdoc_identifier{polynomial}
 template <typename Derived>
 std::enable_if_t<
-    std::is_same<typename Derived::Scalar, Polynomial>::value,
+    std::is_same_v<typename Derived::Scalar, Polynomial>,
     Eigen::Matrix<double, Derived::RowsAtCompileTime,
                   Derived::ColsAtCompileTime, 0, Derived::MaxRowsAtCompileTime,
                   Derived::MaxColsAtCompileTime>>

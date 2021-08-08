@@ -4,6 +4,7 @@
 #include <limits>
 #include <utility>
 
+#include "drake/common/default_scalars.h"
 #include "drake/geometry/proximity/distance_to_point_callback.h"
 #include "drake/math/rotation_matrix.h"
 
@@ -55,10 +56,6 @@ void DistancePairGeometry<T>::SphereShapeDistance(const fcl::Sphered& sphere_A,
   // p_BCb is the witness point on ∂B measured and expressed in B.
   result_->p_BCb = shape_B_to_point_Ao.p_GN;
   result_->nhat_BA_W = shape_B_to_point_Ao.grad_W;
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  result_->is_nhat_BA_W_unique = shape_B_to_point_Ao.is_grad_W_unique;
-#pragma GCC diagnostic pop
   // p_ACa is the witness point on ∂A measured and expressed in A.
   const math::RotationMatrix<T> R_AW = X_WA_.rotation().transpose();
   result_->p_ACa = -sphere_A.radius * (R_AW * shape_B_to_point_Ao.grad_W);
@@ -92,20 +89,11 @@ void CalcDistanceFallback<double>(const fcl::CollisionObjectd& a,
 
   // Returns NaN in nhat when min_distance is 0 or almost 0.
   // TODO(DamrongGuoy): In the future, we should return nhat_BA_W as the
-  //  outward face normal when the two objects are touching and set
-  //  is_nhat_BA_W_unique to true.
+  //  outward face normal when the two objects are touching.
   if (std::abs(result.min_distance) < kEps) {
     pair_data->nhat_BA_W = Eigen::Vector3d(kNan, kNan, kNan);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    pair_data->is_nhat_BA_W_unique = false;
-#pragma GCC diagnostic pop
   } else {
     pair_data->nhat_BA_W = (p_WCa - p_WCb) / result.min_distance;
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    pair_data->is_nhat_BA_W_unique = true;
-#pragma GCC diagnostic pop
   }
 }
 
@@ -249,7 +237,7 @@ bool Callback(fcl::CollisionObjectd* object_A_ptr,
   const EncodedData encoding_b(*object_B_ptr);
 
   const bool can_collide = data.collision_filter.CanCollideWith(
-      encoding_a.encoding(), encoding_b.encoding());
+      encoding_a.id(), encoding_b.id());
 
   if (can_collide) {
     // Throw if the geometry-pair isn't supported.
@@ -297,19 +285,10 @@ bool Callback(fcl::CollisionObjectd* object_A_ptr,
   return false;
 }
 
-template void ComputeNarrowPhaseDistance<double>(
-    const fcl::CollisionObjectd&, const math::RigidTransform<double>&,
-    const fcl::CollisionObjectd&, const math::RigidTransform<double>&,
-    const fcl::DistanceRequestd&, SignedDistancePair<double>*);
-template void ComputeNarrowPhaseDistance<AutoDiffXd>(
-    const fcl::CollisionObjectd&, const math::RigidTransform<AutoDiffXd>&,
-    const fcl::CollisionObjectd&, const math::RigidTransform<AutoDiffXd>&,
-    const fcl::DistanceRequestd&, SignedDistancePair<AutoDiffXd>*);
-
-template bool Callback<double>(fcl::CollisionObjectd*, fcl::CollisionObjectd*,
-                               void*, double&);
-template bool Callback<AutoDiffXd>(fcl::CollisionObjectd*,
-                                   fcl::CollisionObjectd*, void*, double&);
+DRAKE_DEFINE_FUNCTION_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_NONSYMBOLIC_SCALARS((
+    &ComputeNarrowPhaseDistance<T>,
+    &Callback<T>
+))
 
 }  // namespace shape_distance
 }  // namespace internal

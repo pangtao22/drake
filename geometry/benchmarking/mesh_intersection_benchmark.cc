@@ -231,15 +231,16 @@ BENCHMARK_DEFINE_F(MeshIntersectionBenchmark, RigidSoftMesh)
 // NOLINTNEXTLINE(runtime/references)
 (benchmark::State& state) {
   SetupMeshes(state);
-  const auto bvh_S = Bvh<VolumeMesh<double>>(mesh_S_);
-  const auto bvh_R = Bvh<SurfaceMesh<double>>(mesh_R_);
+  const auto bvh_S = Bvh<Obb, VolumeMesh<double>>(mesh_S_);
+  const auto bvh_R = Bvh<Obb, SurfaceMesh<double>>(mesh_R_);
   std::unique_ptr<SurfaceMesh<double>> surface_SR;
   std::unique_ptr<SurfaceMeshFieldLinear<double, double>> e_SR;
   std::vector<Vector3<double>> grad_eM_Ms;
   for (auto _ : state) {
     SurfaceVolumeIntersector<double>().SampleVolumeFieldOnSurface(
-        field_S_, bvh_S, mesh_R_, bvh_R, X_SR_, &surface_SR, &e_SR,
-        &grad_eM_Ms);
+        field_S_, bvh_S, mesh_R_, bvh_R, X_SR_,
+        ContactPolygonRepresentation::kCentroidSubdivision,
+        &surface_SR, &e_SR, &grad_eM_Ms);
   }
   RecordContactSurfaceResult(surface_SR.get(), "RigidSoftMesh", state);
 }

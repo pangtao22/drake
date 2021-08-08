@@ -55,9 +55,9 @@ struct CallbackData {
         p_WQ_W(p_WQ_W_in),
         X_WGs(*X_WGs_in),
         distances(*distances_in) {
-    DRAKE_DEMAND(query_in);
-    DRAKE_DEMAND(X_WGs_in);
-    DRAKE_DEMAND(distances_in);
+    DRAKE_DEMAND(query_in != nullptr);
+    DRAKE_DEMAND(X_WGs_in != nullptr);
+    DRAKE_DEMAND(distances_in != nullptr);
   }
 
   /* The query fcl object.  */
@@ -94,8 +94,7 @@ struct CallbackData {
                               is expressed in the world frame. Where grad_W is
                               not unique, then an arbitrary value is
                               assigned (as documented in
-                              QueryObject::ComputeSignedDistanceToPoint().
- @param is_grad_w_unique[out] True if the value in `grad_W` is unique.  */
+                              QueryObject::ComputeSignedDistanceToPoint().  */
 //@{
 
 /* Computes distance from point to sphere with the understanding that all
@@ -104,32 +103,28 @@ struct CallbackData {
 template <typename T>
 void SphereDistanceInSphereFrame(const fcl::Sphered& sphere,
                                  const Vector3<T>& p_SQ, Vector3<T>* p_SN,
-                                 T* distance, Vector3<T>* grad_S,
-                                 bool* is_grad_W_unique);
+                                 T* distance, Vector3<T>* grad_S);
 
 /* Overload of ComputeDistanceToPrimitive() for sphere primitive. */
 template <typename T>
 void ComputeDistanceToPrimitive(const fcl::Sphered& sphere,
                                 const math::RigidTransform<T>& X_WG,
                                 const Vector3<T>& p_WQ, Vector3<T>* p_GN,
-                                T* distance, Vector3<T>* grad_W,
-                                bool* is_grad_W_unique);
+                                T* distance, Vector3<T>* grad_W);
 
 /* Overload of ComputeDistanceToPrimitive() for halfspace primitive. */
 template <typename T>
 void ComputeDistanceToPrimitive(const fcl::Halfspaced& halfspace,
                                 const math::RigidTransform<T>& X_WG,
                                 const Vector3<T>& p_WQ, Vector3<T>* p_GN,
-                                T* distance, Vector3<T>* grad_W,
-                                bool* is_grad_W_unique);
+                                T* distance, Vector3<T>* grad_W);
 
 /* Overload of ComputeDistanceToPrimitive() for capsule primitive. */
 template <typename T>
 void ComputeDistanceToPrimitive(const fcl::Capsuled& capsule,
                                 const math::RigidTransform<T>& X_WG,
                                 const Vector3<T>& p_WQ, Vector3<T>* p_GN,
-                                T* distance, Vector3<T>* grad_W,
-                                bool* is_grad_W_unique);
+                                T* distance, Vector3<T>* grad_W);
 
 // TODO(DamrongGuoy): Add overloads for all supported geometries.
 
@@ -155,20 +150,23 @@ class DistanceToPoint {
   // TODO(DamrongGuoy): Revisit computation over operator() overloads as per
   //  issue: https://github.com/RobotLocomotion/drake/issues/11227
 
-  /* Overload to compute distance to a sphere.  */
-  SignedDistanceToPoint<T> operator()(const fcl::Sphered& sphere);
-
-  /* Overload to compute distance to a halfspace.  */
-  SignedDistanceToPoint<T> operator()(const fcl::Halfspaced& halfspace);
+  /* Overload to compute distance to a box.  */
+  SignedDistanceToPoint<T> operator()(const fcl::Boxd& box);
 
   /* Overload to compute distance to a capsule.  */
   SignedDistanceToPoint<T> operator()(const fcl::Capsuled& capsule);
 
-  /* Overload to compute distance to a box.  */
-  SignedDistanceToPoint<T> operator()(const fcl::Boxd& box);
-
   /* Overload to compute distance to a cylinder.  */
   SignedDistanceToPoint<T> operator()(const fcl::Cylinderd& cylinder);
+
+  /* Overload to compute distance to an ellipsoid.  */
+  SignedDistanceToPoint<T> operator()(const fcl::Ellipsoidd& ellipsoid);
+
+  /* Overload to compute distance to a halfspace.  */
+  SignedDistanceToPoint<T> operator()(const fcl::Halfspaced& halfspace);
+
+  /* Overload to compute distance to a sphere.  */
+  SignedDistanceToPoint<T> operator()(const fcl::Sphered& sphere);
 
   /* Reports the "sign" of x with a small modification; Sign(0) --> 1.
    @tparam U  Templated to allow DistanceToPoint<AutoDiffXd> to still compute

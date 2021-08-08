@@ -81,14 +81,19 @@ GTEST_TEST(FileParserTest, BasicStringTest) {
   }
 }
 
-GTEST_TEST(FileParserTest, MultiModelTest) {
+// Try loading a file with two <model> elements, but without a <world>.
+// This should always result in an error. For an example of a valid <world>
+// with two <model> elements, refer to MultiModelViaWorldIncludesTest.
+GTEST_TEST(FileParserTest, MultiModelErrorsTest) {
   const std::string sdf_name = FindResourceOrThrow(
       "drake/multibody/parsing/test/sdf_parser_test/two_models.sdf");
 
-  // Check that the plural method loads two models.
+  // Check the plural method.
   {
     MultibodyPlant<double> plant(0.0);
-    EXPECT_EQ(Parser(&plant).AddAllModelsFromFile(sdf_name).size(), 2);
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        Parser(&plant).AddAllModelsFromFile(sdf_name),
+        ".*has 2 models and 0 worlds.*");
   }
 
   // The singular method cannot load a two-model file.
@@ -100,7 +105,7 @@ GTEST_TEST(FileParserTest, MultiModelTest) {
     MultibodyPlant<double> plant(0.0);
     DRAKE_EXPECT_THROWS_MESSAGE(
         Parser(&plant).AddModelFromFile(sdf_name),
-        std::exception, expected_error);
+        expected_error);
   }
 
   // Check the singular method with empty model_name.
@@ -108,7 +113,7 @@ GTEST_TEST(FileParserTest, MultiModelTest) {
     MultibodyPlant<double> plant(0.0);
     DRAKE_EXPECT_THROWS_MESSAGE(
         Parser(&plant).AddModelFromFile(sdf_name, ""),
-        std::exception, expected_error);
+        expected_error);
   }
 
   // Check the singular method with non-empty model_name.
@@ -116,8 +121,35 @@ GTEST_TEST(FileParserTest, MultiModelTest) {
     MultibodyPlant<double> plant(0.0);
     DRAKE_EXPECT_THROWS_MESSAGE(
         Parser(&plant).AddModelFromFile(sdf_name, "foo"),
-        std::exception, expected_error);
+        expected_error);
   }
+}
+
+std::vector<std::string> GetModelInstanceNames(
+    const MultibodyPlant<double>& plant,
+    const std::vector<ModelInstanceIndex>& models) {
+  std::vector<std::string> names;
+  for (auto model : models) {
+    names.push_back(plant.GetModelInstanceName(model));
+  }
+  return names;
+}
+
+GTEST_TEST(FileParserTest, MultiModelViaWorldIncludesTest) {
+  const std::string sdf_name = FindResourceOrThrow(
+      "drake/multibody/parsing/test/sdf_parser_test/"
+      "world_with_directly_nested_models.sdf");
+  MultibodyPlant<double> plant(0.0);
+  const std::vector<ModelInstanceIndex> models =
+      Parser(&plant).AddAllModelsFromFile(sdf_name);
+  const std::vector<std::string> model_names_actual =
+      GetModelInstanceNames(plant, models);
+  const std::vector<std::string> model_names_expected = {
+      "parent_model",
+      "parent_model::robot1",
+      "parent_model::robot2",
+  };
+  EXPECT_EQ(model_names_actual, model_names_expected);
 }
 
 GTEST_TEST(FileParserTest, ExtensionMatchTest) {
@@ -126,22 +158,18 @@ GTEST_TEST(FileParserTest, ExtensionMatchTest) {
   MultibodyPlant<double> plant(0.0);
   DRAKE_EXPECT_THROWS_MESSAGE(
       Parser(&plant).AddModelFromFile("acrobot.foo"),
-      std::exception,
       ".*file type '\\.foo' is not supported .*");
   DRAKE_EXPECT_THROWS_MESSAGE(
       Parser(&plant).AddAllModelsFromFile("acrobot.foo"),
-      std::exception,
       ".*file type '\\.foo' is not supported .*");
 
   // Uppercase extensions are accepted (i.e., still call the underlying SDF or
   // URDF parser, shown here by it generating a different exception message).
   DRAKE_EXPECT_THROWS_MESSAGE(
       Parser(&plant).AddModelFromFile("acrobot.SDF"),
-      std::exception,
       ".*does not exist.*");
   DRAKE_EXPECT_THROWS_MESSAGE(
       Parser(&plant).AddModelFromFile("acrobot.URDF"),
-      std::exception,
       ".*does not exist.*");
 }
 
@@ -150,19 +178,16 @@ GTEST_TEST(FileParserTest, BadStringTest) {
   MultibodyPlant<double> plant(0.0);
   DRAKE_EXPECT_THROWS_MESSAGE(
       Parser(&plant).AddModelFromString("bad", "sdf"),
-      std::exception,
       ".*\n.*Unable to read SDF string.*");
 
   // Malformed URDF string is an error.
   DRAKE_EXPECT_THROWS_MESSAGE(
       Parser(&plant).AddModelFromString("bad", "urdf"),
-      std::exception,
       "Failed to parse XML string: XML_ERROR_PARSING_TEXT");
 
   // Unknown extension is an error.
   DRAKE_EXPECT_THROWS_MESSAGE(
       Parser(&plant).AddModelFromString("<bad/>", "weird-ext"),
-      std::exception,
       ".*file type '\\.weird-ext' is not supported .*");
 }
 

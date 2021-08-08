@@ -35,11 +35,9 @@ const double kEps = std::numeric_limits<double>::epsilon();
 template <typename Derived>
 Eigen::Matrix<double, Derived::RowsAtCompileTime, Derived::ColsAtCompileTime>
 ExtractMatrixValue(const Derived& v) {
-  if constexpr (std::is_same<typename Derived::Scalar, double>::value) {
+  if constexpr (std::is_same_v<typename Derived::Scalar, double>) {
     return v;
-    // NOLINTNEXTLINE
-  } else if constexpr (std::is_same<typename Derived::Scalar,
-                                    AutoDiffXd>::value) {
+  } else if constexpr (std::is_same_v<typename Derived::Scalar, AutoDiffXd>) {
     return math::autoDiffToValueMatrix(v);
   } else {
     static_assert("Unsupported type T");
@@ -88,7 +86,7 @@ class PenetrationAsPointPairCallbackTest : public ::testing::Test {
     auto encode_data = [this](GeometryId id, CollisionObjectd* shape) {
       const EncodedData data(id, true);
       data.write_to(shape);
-      this->collision_filter_.AddGeometry(data.encoding());
+      this->collision_filter_.AddGeometry(data.id());
     };
     encode_data(id_A_, &sphere_A_);
     encode_data(id_B_, &sphere_B_);
@@ -130,7 +128,7 @@ class PenetrationAsPointPairCallbackTest : public ::testing::Test {
     const double target_depth = 0.1;
     const double center_distance = kRadius * 2 - target_depth;
     Vector3<T> p_WBo;
-    if constexpr (std::is_same<T, AutoDiffXd>::value) {
+    if constexpr (std::is_same_v<T, AutoDiffXd>) {
       p_WBo = math::initializeAutoDiff(
           (Vector3d{1, -2, 3}.normalized() * center_distance));
     } else {
@@ -177,12 +175,15 @@ class PenetrationAsPointPairCallbackTest : public ::testing::Test {
     ASSERT_TRUE(CompareMatrices(ExtractMatrixValue(first_result.p_WCb),
                                 ExtractMatrixValue(second_result.p_WCb)));
 
-    // Now filter the geometries.
-    const int common_clique = 1;
-    collision_filter_.AddToCollisionClique(EncodedData(id_A_, true).encoding(),
-                                           common_clique);
-    collision_filter_.AddToCollisionClique(EncodedData(id_B_, true).encoding(),
-                                           common_clique);
+    // Filter the pair (A, B); we'll put the ids in a set and simply return that
+    // set for the extract ids function.
+    std::unordered_set<GeometryId> ids{id_A_, id_B_};
+    CollisionFilter::ExtractIds extract = [&ids](const GeometrySet&) {
+      return ids;
+    };
+    collision_filter_.Apply(
+        CollisionFilterDeclaration().ExcludeWithin(GeometrySet{id_A_, id_B_}),
+        extract, false /* is_permanent */);
 
     EXPECT_FALSE(Callback<T>(&sphere_A_, &sphere_B_, &callback_data));
     EXPECT_EQ(point_pairs.size(), 0u);
@@ -228,7 +229,7 @@ class PenetrationAsPointPairCallbackTest : public ::testing::Test {
     EXPECT_TRUE(CompareMatrices(ExtractMatrixValue(first_result.nhat_BA_W),
                                 ExtractMatrixValue(second_result.nhat_BA_W)));
 
-    if constexpr (std::is_same<T, AutoDiffXd>::value) {
+    if constexpr (std::is_same_v<T, AutoDiffXd>) {
       // Make sure that callback with T=AutoDiffXd and T=double produces the
       // same result.
       const RigidTransform<double> X_WA_double =
@@ -265,7 +266,7 @@ class PenetrationAsPointPairCallbackTest : public ::testing::Test {
     const double center_distance = kRadius + box_size_[0] / 2 - target_depth;
     Vector3<T> p_WBo;
     const RotationMatrix<T> R_WB = RotationMatrix<T>::MakeZRotation(0.2);
-    if constexpr (std::is_same<T, AutoDiffXd>::value) {
+    if constexpr (std::is_same_v<T, AutoDiffXd>) {
       p_WBo =
           R_WB * math::initializeAutoDiff(Vector3d::UnitX() * center_distance);
     } else {
@@ -282,7 +283,7 @@ class PenetrationAsPointPairCallbackTest : public ::testing::Test {
     const double center_distance = kRadius + cylinder_size_[0] - target_depth;
     Vector3<T> p_WBo;
     const RotationMatrix<T> R_WB = RotationMatrix<T>::MakeZRotation(0.2);
-    if constexpr (std::is_same<T, AutoDiffXd>::value) {
+    if constexpr (std::is_same_v<T, AutoDiffXd>) {
       p_WBo =
           R_WB * math::initializeAutoDiff(Vector3d::UnitX() * center_distance);
     } else {
@@ -297,7 +298,7 @@ class PenetrationAsPointPairCallbackTest : public ::testing::Test {
     const RotationMatrix<T> R_WB = RotationMatrix<T>::MakeZRotation(0.1) *
                                    RotationMatrix<T>::MakeXRotation(0.5);
     Vector3<T> p_WBo;
-    if constexpr (std::is_same<T, AutoDiffXd>::value) {
+    if constexpr (std::is_same_v<T, AutoDiffXd>) {
       p_WBo = math::initializeAutoDiff(Eigen::Vector3d(0.5, -0.2, 0.9));
     } else {
       p_WBo = Eigen::Vector3d(0.5, -0.2, 0.9);
@@ -317,7 +318,7 @@ class PenetrationAsPointPairCallbackTest : public ::testing::Test {
     const double center_distance = kRadius + capsule_size_[0] - target_depth;
     Vector3<T> p_WBo;
     const RotationMatrix<T> R_WB = RotationMatrix<T>::MakeZRotation(0.2);
-    if constexpr (std::is_same<T, AutoDiffXd>::value) {
+    if constexpr (std::is_same_v<T, AutoDiffXd>) {
       p_WBo =
           R_WB * math::initializeAutoDiff(Vector3d::UnitX() * center_distance);
     } else {
@@ -360,7 +361,7 @@ class PenetrationAsPointPairCallbackTest : public ::testing::Test {
   GeometryId id_cylinder_;
   GeometryId id_halfspace_;
   GeometryId id_capsule_;
-  CollisionFilterLegacy collision_filter_;
+  CollisionFilter collision_filter_;
 };
 
 // TODO(SeanCurtis-TRI): Make this static constexpr when our gcc version doesn't
@@ -512,7 +513,7 @@ TEST_F(PenetrationAsPointPairCallbackTest, UnsupportedHalfSpaceHalfSpace) {
   const GeometryId hs2_id = GeometryId::get_new_id();
   const EncodedData data(hs2_id, true);
   data.write_to(&halfspace2);
-  this->collision_filter_.AddGeometry(data.encoding());
+  this->collision_filter_.AddGeometry(data.id());
   UnsupportedGeometry<double>(this->halfspace_, halfspace2, this->id_halfspace_,
                               hs2_id);
   UnsupportedGeometry<AutoDiffXd>(this->halfspace_, halfspace2,

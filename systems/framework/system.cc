@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <ios>
 #include <regex>
+#include <set>
 
 #include "drake/common/unused.h"
 #include "drake/systems/framework/system_visitor.h"
@@ -15,7 +16,7 @@ System<T>::~System() {}
 
 template <typename T>
 void System<T>::Accept(SystemVisitor<T>* v) const {
-  DRAKE_DEMAND(v);
+  DRAKE_DEMAND(v != nullptr);
   v->VisitSystem(*this);
 }
 
@@ -284,6 +285,7 @@ void System<T>::CalcDiscreteVariableUpdates(
     const EventCollection<DiscreteUpdateEvent<T>>& events,
     DiscreteValues<T>* discrete_state) const {
   ValidateContext(context);
+  ValidateCreatedForThisSystem(discrete_state);
 
   DispatchDiscreteVariableUpdateHandler(context, events, discrete_state);
 }
@@ -293,6 +295,7 @@ void System<T>::ApplyDiscreteVariableUpdate(
     const EventCollection<DiscreteUpdateEvent<T>>& events,
     DiscreteValues<T>* discrete_state, Context<T>* context) const {
   ValidateContext(context);
+  ValidateCreatedForThisSystem(discrete_state);
   DoApplyDiscreteVariableUpdate(events, discrete_state, context);
 }
 
@@ -310,6 +313,7 @@ void System<T>::CalcUnrestrictedUpdate(
     const EventCollection<UnrestrictedUpdateEvent<T>>& events,
     State<T>* state) const {
   ValidateContext(context);
+  ValidateCreatedForThisSystem(state);
   const int continuous_state_dim = state->get_continuous_state().size();
   const int discrete_state_dim = state->get_discrete_state().num_groups();
   const int abstract_state_dim = state->get_abstract_state().size();
@@ -329,6 +333,7 @@ void System<T>::ApplyUnrestrictedUpdate(
     const EventCollection<UnrestrictedUpdateEvent<T>>& events,
     State<T>* state, Context<T>* context) const {
   ValidateContext(context);
+  ValidateCreatedForThisSystem(state);
   DoApplyUnrestrictedUpdate(events, state, context);
 }
 
@@ -343,6 +348,7 @@ template <typename T>
 T System<T>::CalcNextUpdateTime(const Context<T>& context,
                                 CompositeEventCollection<T>* events) const {
   ValidateContext(context);
+  ValidateCreatedForThisSystem(events);
   DRAKE_DEMAND(events != nullptr);
   events->Clear();
   T time{NAN};
@@ -384,7 +390,7 @@ template <typename T>
 void System<T>::GetPerStepEvents(const Context<T>& context,
                                  CompositeEventCollection<T>* events) const {
   ValidateContext(context);
-  DRAKE_DEMAND(events != nullptr);
+  ValidateCreatedForThisSystem(events);
   events->Clear();
   DoGetPerStepEvents(context, events);
 }
@@ -394,7 +400,7 @@ void System<T>::GetInitializationEvents(
     const Context<T>& context,
     CompositeEventCollection<T>* events) const {
   ValidateContext(context);
-  DRAKE_DEMAND(events != nullptr);
+  ValidateCreatedForThisSystem(events);
   events->Clear();
   DoGetInitializationEvents(context, events);
 }
@@ -865,7 +871,7 @@ template <typename T>
 void System<T>::GetWitnessFunctions(
     const Context<T>& context,
     std::vector<const WitnessFunction<T>*>* w) const {
-  DRAKE_DEMAND(w);
+  DRAKE_DEMAND(w != nullptr);
   DRAKE_DEMAND(w->empty());
   ValidateContext(context);
   DoGetWitnessFunctions(context, w);
@@ -896,24 +902,27 @@ System<T>::System(SystemScalarConverter converter)
   // EvalConservativePower() to see why.
 
   // TODO(sherm1) Due to issue #9171 we cannot always recognize which
-  // variables contribute to configuration so we'll invalidate on all changes.
-  // Use configuration, kinematics, and mass tickets when #9171 is resolved.
+  // variables contribute to configuration so we'll invalidate on all changes
+  // except for time and inputs.  Once #9171 is resolved, we should use the
+  // more specific configuration, kinematics, and mass tickets.
+  const std::set<DependencyTicket> energy_prereqs_for_9171{
+      accuracy_ticket(), all_state_ticket(), all_parameters_ticket()};
   potential_energy_cache_index_ =
       DeclareCacheEntry("potential energy",
-          &System<T>::CalcPotentialEnergy,
-          {all_sources_ticket()})  // After #9171: configuration + mass.
+          ValueProducer(this, &System<T>::CalcPotentialEnergy),
+          energy_prereqs_for_9171)  // After #9171: configuration + mass.
           .cache_index();
 
   kinetic_energy_cache_index_ =
       DeclareCacheEntry("kinetic energy",
-          &System<T>::CalcKineticEnergy,
-          {all_sources_ticket()})  // After #9171: kinematics + mass.
+          ValueProducer(this, &System<T>::CalcKineticEnergy),
+          energy_prereqs_for_9171)  // After #9171: kinematics + mass.
           .cache_index();
 
   conservative_power_cache_index_ =
       DeclareCacheEntry("conservative power",
-          &System<T>::CalcConservativePower,
-          {all_sources_ticket()})  // After #9171: kinematics + mass.
+          ValueProducer(this, &System<T>::CalcConservativePower),
+          energy_prereqs_for_9171)  // After #9171: kinematics + mass.
           .cache_index();
 
   // Only non-conservative power can have an explicit time or input
@@ -921,31 +930,18 @@ System<T>::System(SystemScalarConverter converter)
   // EvalNonConservativePower() to see why.
   nonconservative_power_cache_index_ =
       DeclareCacheEntry("non-conservative power",
-                        &System<T>::CalcNonConservativePower,
-                        {all_sources_ticket()})  // This is correct.
+          ValueProducer(this, &System<T>::CalcNonConservativePower),
+          {all_sources_ticket()})  // This is correct.
           .cache_index();
-
-  // For the time derivative cache we need to use the general form for
-  // cache creation because we're dealing with pre-defined allocator and
-  // calculator method signatures.
-  CacheEntry::AllocCallback alloc_derivatives = [this]() {
-    return std::make_unique<Value<ContinuousState<T>>>(
-        this->AllocateTimeDerivatives());
-  };
-  CacheEntry::CalcCallback calc_derivatives = [this](
-      const ContextBase& context_base, AbstractValue* result) {
-    DRAKE_DEMAND(result != nullptr);
-    ContinuousState<T>& state =
-        result->get_mutable_value<ContinuousState<T>>();
-    const Context<T>& context = dynamic_cast<const Context<T>&>(context_base);
-    CalcTimeDerivatives(context, &state);
-  };
 
   // We must assume that time derivatives can depend on *any* context source.
   time_derivatives_cache_index_ =
       this->DeclareCacheEntryWithKnownTicket(
               xcdot_ticket(), "time derivatives",
-              std::move(alloc_derivatives), std::move(calc_derivatives),
+              ValueProducer(
+                  this,
+                  &System<T>::AllocateTimeDerivatives,
+                  &System<T>::CalcTimeDerivatives),
               {all_sources_ticket()})
           .cache_index();
 
@@ -963,13 +959,14 @@ InputPort<T>& System<T>::DeclareInputPort(
     return this->EvalAbstractInput(context_base, port_index);
   };
   auto port = internal::FrameworkFactory::Make<InputPort<T>>(
-      this, this, NextInputPortName(std::move(name)), port_index, port_ticket,
-      type, size, random_type, std::move(eval));
+      this, this, get_system_id(), NextInputPortName(std::move(name)),
+      port_index, port_ticket, type, size, random_type, std::move(eval));
   InputPort<T>* port_ptr = port.get();
   this->AddInputPort(std::move(port));
   return *port_ptr;
 }
 
+// (This function is deprecated.)
 template <typename T>
 InputPort<T>& System<T>::DeclareInputPort(
     PortDataType type, int size,
@@ -989,6 +986,7 @@ SystemConstraintIndex System<T>::AddConstraint(
         GetSystemName(), constraint->description(),
         external_constraints_.front().description()));
   }
+  constraint->set_system_id(this->get_system_id());
   constraints_.push_back(std::move(constraint));
   return SystemConstraintIndex(constraints_.size() - 1);
 }

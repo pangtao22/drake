@@ -40,7 +40,7 @@ JacoCommandReceiver::JacoCommandReceiver(int num_joints, int num_fingers)
       {all_input_ports_ticket(), numeric_parameter_ticket(arm_param), });
 
   DeclareVectorOutputPort(
-      "state", BasicVector<double>((num_joints + num_fingers) * 2),
+      "state", (num_joints + num_fingers) * 2,
       [this](const Context<double>& context, BasicVector<double>* output) {
         output->SetFromVector(this->input_state(context));
       });
@@ -54,7 +54,7 @@ void JacoCommandReceiver::set_initial_position(
 
 // Returns (in "result") the command message input, or if a message has not
 // been received yet returns the initial command (as optionally set by the
-// user).  The result will always have have num_joints_ positions and torques.
+// user).  The result will always have num_joints_ positions and torques.
 void JacoCommandReceiver::CalcInput(
   const Context<double>& context, lcmt_jaco_command* result) const {
   if (!get_input_port().HasValue(context)) {
@@ -75,10 +75,15 @@ void JacoCommandReceiver::CalcInput(
     result->joint_velocity.resize(num_joints_, 0);
 
     result->num_fingers = num_fingers_;
-    result->finger_position =
-        {arm_param.data() + num_joints_,
-         arm_param.data() + num_joints_ + num_fingers_};
-    result->finger_velocity.resize(num_fingers_, 0);
+    if (num_fingers_) {
+      result->finger_position =
+          {arm_param.data() + num_joints_,
+           arm_param.data() + num_joints_ + num_fingers_};
+      result->finger_velocity.resize(num_fingers_, 0);
+    } else {
+      result->finger_position.clear();
+      result->finger_velocity.clear();
+    }
   } else {
     for (int i = 0; i < result->num_fingers; ++i) {
       result->finger_position[i] *= kFingerSdkToUrdf;
@@ -106,13 +111,17 @@ Eigen::VectorXd JacoCommandReceiver::input_state(
   Eigen::VectorXd state((num_joints_ + num_fingers_) * 2);
   state.head(num_joints_) = Eigen::Map<const VectorXd>(
       message.joint_position.data(), message.joint_position.size());
-  state.segment(num_joints_, num_fingers_) = Eigen::Map<const VectorXd>(
-      message.finger_position.data(), message.finger_position.size());
+  if (num_fingers_) {
+    state.segment(num_joints_, num_fingers_) = Eigen::Map<const VectorXd>(
+        message.finger_position.data(), message.finger_position.size());
+  }
   state.segment(num_joints_ + num_fingers_, num_joints_) =
       Eigen::Map<const VectorXd>(
           message.joint_velocity.data(), message.joint_velocity.size());
-  state.tail(num_fingers_) = Eigen::Map<const VectorXd>(
+  if (num_fingers_) {
+    state.tail(num_fingers_) = Eigen::Map<const VectorXd>(
       message.finger_velocity.data(), message.finger_velocity.size());
+  }
   return state;
 }
 
