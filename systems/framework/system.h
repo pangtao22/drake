@@ -1693,32 +1693,6 @@ class System : public SystemBase {
     return system_scalar_converter_;
   }
 
-  /** Checks whether the given object was created for this system.
-  @note This method is sufficiently fast for performance sensitive code. */
-  template <template <typename> class Clazz>
-  void ValidateCreatedForThisSystem(const Clazz<T>* object) const {
-    DRAKE_THROW_UNLESS(object != nullptr);
-    if (!object->get_system_id().is_valid()) {
-      throw std::logic_error(fmt::format(
-          "{} lacks a system_id so was not created for {} system {}",
-          NiceTypeName::Get<Clazz<T>>(), this->GetSystemType(),
-          this->GetSystemPathname()));
-    }
-    if (object->get_system_id() != this->get_system_id()) {
-      throw std::logic_error(fmt::format(
-          "{} was not created for {} system {}",
-          NiceTypeName::Get<Clazz<T>>(), this->GetSystemType(),
-          this->GetSystemPathname()));
-    }
-  }
-
-  template <template <typename> class Clazz>
-  DRAKE_DEPRECATED("2021-09-01",
-                   "Please use ValidateCreatedForThisSystem instead.")
-  void ValidateChildOfContext(const Clazz<T>* object) const {
-    ValidateCreatedForThisSystem(object);
-  }
-
  private:
   // For any T1 & T2, System<T1> considers System<T2> a friend, so that System
   // can safely and efficiently convert scalar types. See for example

@@ -14,6 +14,11 @@ load(
 )
 load("//tools/lint:lint.bzl", "add_lint_tests")
 
+exports_files([
+    # For use by @drake//geometry:meshcat.
+    "favicon.ico",
+])
+
 drake_py_library(
     name = "defs",
     srcs = ["defs.py"],

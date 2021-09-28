@@ -303,6 +303,11 @@ const auto& GetElementByName(
 }  // namespace
 
 template <typename T>
+int MultibodyTree<T>::NumBodiesWithName(std::string_view name) const {
+  return static_cast<int>(body_name_to_index_.count(name));
+}
+
+template <typename T>
 bool MultibodyTree<T>::HasBodyNamed(std::string_view name) const {
   return HasElementNamed(*this, name, std::nullopt, body_name_to_index_);
 }
@@ -737,18 +742,11 @@ void MultibodyTree<T>::SetRandomState(const systems::Context<T>& context,
 }
 
 template <typename T>
-Eigen::VectorBlock<const VectorX<T>>
-MultibodyTree<T>::GetPositionsAndVelocities(
-    const systems::Context<T>& context) const {
-  return get_state_vector(context);
-}
-
-template <typename T>
 VectorX<T> MultibodyTree<T>::GetPositionsAndVelocities(
     const systems::Context<T>& context,
     ModelInstanceIndex model_instance) const {
   Eigen::VectorBlock<const VectorX<T>> state_vector =
-      get_state_vector(context);
+      get_positions_and_velocities(context);
 
   VectorX<T> instance_state_vector(num_states(model_instance));
   instance_state_vector.head(num_positions(model_instance)) =
@@ -762,24 +760,16 @@ VectorX<T> MultibodyTree<T>::GetPositionsAndVelocities(
 }
 
 template <typename T>
-Eigen::VectorBlock<VectorX<T>>
-MultibodyTree<T>::GetMutablePositionsAndVelocities(
-    const systems::Context<T>&, systems::State<T>* state) const {
-  DRAKE_DEMAND(state != nullptr);
-  return get_mutable_state_vector(state);
-}
-
-template <typename T>
 void MultibodyTree<T>::SetPositionsAndVelocities(
     ModelInstanceIndex model_instance,
     const Eigen::Ref<const VectorX<T>>& instance_state,
     systems::Context<T>* context) const {
   Eigen::VectorBlock<VectorX<T>> state_vector =
       GetMutablePositionsAndVelocities(context);
-  Eigen::VectorBlock<VectorX<T>> q = state_vector.nestedExpression().head(
-      num_positions());
-  Eigen::VectorBlock<VectorX<T>> v = state_vector.nestedExpression().tail(
-      num_velocities());
+  Eigen::VectorBlock<VectorX<T>> q = make_mutable_block_segment(&state_vector,
+      0, num_positions());
+  Eigen::VectorBlock<VectorX<T>> v = make_mutable_block_segment(&state_vector,
+      num_positions(), num_velocities());
   SetPositionsInArray(model_instance,
                       instance_state.head(num_positions(model_instance)), &q);
   SetVelocitiesInArray(model_instance,
@@ -2750,8 +2740,7 @@ T MultibodyTree<T>::CalcKineticEnergy(
 
   // Account for reflected inertia.
   // See JointActuator::reflected_inertia().
-  const Eigen::VectorBlock<const VectorX<T>> v =
-      get_state_vector(context).nestedExpression().tail(num_velocities());
+  const Eigen::VectorBlock<const VectorX<T>> v = get_velocities(context);
 
   twice_kinetic_energy_W +=
       (v.array() * reflected_inertia.array() * v.array()).sum();

@@ -81,9 +81,14 @@ symbolic::Formula Constraint::DoCheckSatisfied(
   DoEval(x, &y);
   symbolic::Formula f{symbolic::Formula::True()};
   for (int i = 0; i < num_constraints(); ++i) {
-    // Add lbᵢ ≤ yᵢ ≤ ubᵢ.
-    f = f && MakeLowerBound(lower_bound_[i], y[i]) &&
-        MakeUpperBound(y[i], upper_bound_[i]);
+    if (lower_bound_[i] == upper_bound_[i]) {
+      // Add 'lbᵢ = yᵢ' to f.
+      f = f && lower_bound_[i] == y[i];
+    } else {
+      // Add 'lbᵢ ≤ yᵢ ≤ ubᵢ' to f.
+      f = f && MakeLowerBound(lower_bound_[i], y[i]) &&
+          MakeUpperBound(y[i], upper_bound_[i]);
+    }
   }
   return f;
 }
@@ -144,7 +149,7 @@ template <typename DerivedX>
 void LorentzConeConstraintEvalConvex2Autodiff(
     const Eigen::MatrixXd& A_dense, const Eigen::VectorXd& b,
     const Eigen::MatrixBase<DerivedX>& x, VectorX<AutoDiffXd>* y) {
-  const Eigen::VectorXd x_val = math::autoDiffToValueMatrix(x);
+  const Eigen::VectorXd x_val = math::ExtractValue(x);
   const Eigen::VectorXd z_val = A_dense * x_val + b;
   const double z_tail_squared_norm = z_val.tail(z_val.rows() - 1).squaredNorm();
   Vector1d y_val(z_val(0) - std::sqrt(z_tail_squared_norm));
@@ -155,8 +160,8 @@ void LorentzConeConstraintEvalConvex2Autodiff(
   const double eps = 1E-12;
   dy_dz.tail(z_val.rows() - 1) =
       -z_val.tail(z_val.rows() - 1) / std::sqrt(z_tail_squared_norm + eps);
-  Eigen::RowVectorXd dy = dy_dz * A_dense * math::autoDiffToGradientMatrix(x);
-  (*y) = math::initializeAutoDiffGivenGradientMatrix(y_val, dy);
+  Eigen::RowVectorXd dy = dy_dz * A_dense * math::ExtractGradient(x);
+  (*y) = math::InitializeAutoDiff(y_val, dy);
 }
 }  // namespace
 

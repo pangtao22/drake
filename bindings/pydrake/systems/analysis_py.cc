@@ -206,11 +206,26 @@ PYBIND11_MODULE(analysis, m) {
           // Keep alive, reference: `return` keeps `simulator` alive.
           py::keep_alive<0, 1>(),
           pydrake_doc.drake.systems.ResetIntegratorFromFlags.doc)
+      .def(
+          "ResetIntegratorFromFlags",
+          [](Simulator<AutoDiffXd>* simulator, const std::string& scheme,
+              const AutoDiffXd& max_step_size) {
+            IntegratorBase<AutoDiffXd>& result =
+                ResetIntegratorFromFlags(simulator, scheme, max_step_size);
+            return &result;
+          },
+          py::arg("simulator"), py::arg("scheme"), py::arg("max_step_size"),
+          py_rvp::reference,
+          // Keep alive, reference: `return` keeps `simulator` alive.
+          py::keep_alive<0, 1>(),
+          pydrake_doc.drake.systems.ResetIntegratorFromFlags.doc)
       .def("GetIntegrationSchemes", &GetIntegrationSchemes,
           pydrake_doc.drake.systems.GetIntegrationSchemes.doc);
   // Print Simulator Statistics
   m  // BR
-      .def("PrintSimulatorStatistics", &PrintSimulatorStatistics,
+      .def("PrintSimulatorStatistics", &PrintSimulatorStatistics<double>,
+          pydrake_doc.drake.systems.PrintSimulatorStatistics.doc)
+      .def("PrintSimulatorStatistics", &PrintSimulatorStatistics<AutoDiffXd>,
           pydrake_doc.drake.systems.PrintSimulatorStatistics.doc);
 
   // Monte Carlo Testing
@@ -233,17 +248,20 @@ PYBIND11_MODULE(analysis, m) {
         m, "RandomSimulationResult", doc.RandomSimulationResult.doc)
         .def_readwrite("output", &RandomSimulationResult::output,
             doc.RandomSimulationResult.output.doc)
-        .def_readonly("generator_snapshot",
+        .def_readwrite("generator_snapshot",
             &RandomSimulationResult::generator_snapshot,
             doc.RandomSimulationResult.generator_snapshot.doc);
 
+    // Note: parallel simulation must be disabled in the binding via
+    // num_parallel_executions=kNoConcurrency, since parallel execution of
+    // Python systems in multiple threads is not supported.
     m.def("MonteCarloSimulation",
         WrapCallbacks([](const SimulatorFactory make_simulator,
                           const ScalarSystemFunction& output, double final_time,
                           int num_samples, RandomGenerator* generator)
                           -> std::vector<RandomSimulationResult> {
-          return MonteCarloSimulation(
-              make_simulator, output, final_time, num_samples, generator);
+          return MonteCarloSimulation(make_simulator, output, final_time,
+              num_samples, generator, kNoConcurrency);
         }),
         py::arg("make_simulator"), py::arg("output"), py::arg("final_time"),
         py::arg("num_samples"), py::arg("generator"),

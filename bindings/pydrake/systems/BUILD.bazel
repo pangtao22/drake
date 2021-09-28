@@ -91,6 +91,7 @@ drake_pybind_library(
         "//bindings/pydrake:documentation_pybind",
         "//bindings/pydrake/common:cpp_template_pybind",
         "//bindings/pydrake/common:default_scalars_pybind",
+        "//bindings/pydrake/common:deprecation_pybind",
     ],
     cc_srcs = ["primitives_py.cc"],
     package_info = PACKAGE_INFO,
@@ -259,7 +260,6 @@ drake_py_library(
         "//bindings/pydrake:lcm_py",
         "//bindings/pydrake:math_py",
         "//bindings/pydrake/common:eigen_geometry_py",
-        "//lcmtypes:lcmtypes_drake_py",
         "@meshcat_python//:meshcat",
         "@meshcat_python//:meshcat-server",
     ],
@@ -558,6 +558,7 @@ drake_py_unittest(
         ":primitives_py",
         ":pyplot_visualizer_py",
         "//bindings/pydrake:trajectories_py",
+        "//bindings/pydrake/common/test_utilities:deprecation_py",
     ],
 )
 

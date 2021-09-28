@@ -53,7 +53,7 @@ class HydroelasticContactResultsOutputTester : public ::testing::Test {
             0.0 /* mbp_dt */, radius, mass, elastic_modulus, dissipation,
             friction, gravity_W, false /* rigid_sphere */,
             false /* soft_ground */, &scene_graph));
-    plant_->set_contact_model(ContactModel::kHydroelasticsOnly);
+    plant_->set_contact_model(ContactModel::kHydroelastic);
     plant_->Finalize();
 
     // Sanity check on the availability of the optional source id before using
@@ -257,7 +257,7 @@ TEST_F(HydroelasticContactResultsOutputTester, AutoDiffXdSupport) {
   // We'll leave a zero velocity.
   const double z0 = 0.95;
   const Vector3d p_WBo{0, 0, z0};
-  const math::RigidTransform<AutoDiffXd> X_WB(math::initializeAutoDiff(p_WBo));
+  const math::RigidTransform<AutoDiffXd> X_WB(math::InitializeAutoDiff(p_WBo));
   plant_ad.SetFreeBodyPose(&plant_context_ad, plant_ad.GetBodyByName("Ball"),
                            X_WB);
 

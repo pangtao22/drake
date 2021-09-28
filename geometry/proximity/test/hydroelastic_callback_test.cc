@@ -151,7 +151,7 @@ class TestScene {
     if constexpr (std::is_same_v<T, double>) {
       return RotationMatrix<T>(RollPitchYaw<T>(rpy));
     } else {
-      const Vector3<T> rpy_ad = math::initializeAutoDiff(rpy);
+      const Vector3<T> rpy_ad = math::InitializeAutoDiff(rpy);
       return RotationMatrix<T>(RollPitchYaw<T>(rpy_ad));
     }
   }
@@ -217,7 +217,7 @@ class TestScene {
     };
     collision_filter_.Apply(CollisionFilterDeclaration().ExcludeWithin(
                                 GeometrySet{data_A.id(), data_B.id()}),
-                            extract, false /* is_permanent */);
+                            extract, false /* is_invariant */);
   }
 
   // Note: these are non const because the callback takes non-const pointers

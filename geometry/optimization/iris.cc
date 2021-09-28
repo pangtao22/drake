@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "drake/geometry/optimization/cartesian_product.h"
 #include "drake/geometry/optimization/convex_set.h"
 #include "drake/geometry/optimization/minkowski_sum.h"
 #include "drake/multibody/plant/multibody_plant.h"
@@ -130,6 +131,13 @@ class IrisConvexSetMaker final : public ShapeReifier {
     set = std::make_unique<Hyperellipsoid>(query_, geom_id_, reference_frame_);
   }
 
+  void ImplementGeometry(const Cylinder&, void* data) {
+    DRAKE_DEMAND(geom_id_.is_valid());
+    auto& set = *static_cast<copyable_unique_ptr<ConvexSet>*>(data);
+    set =
+        std::make_unique<CartesianProduct>(query_, geom_id_, reference_frame_);
+  }
+
   void ImplementGeometry(const HalfSpace&, void* data) {
     DRAKE_DEMAND(geom_id_.is_valid());
     auto& set = *static_cast<copyable_unique_ptr<ConvexSet>*>(data);
@@ -222,7 +230,7 @@ bool FindClosestCollision(const multibody::MultibodyPlant<Expression>& plant,
   setA.AddPointInSetConstraints(&prog, p_AA);
   setB.AddPointInSetConstraints(&prog, p_BB);
 
-  plant.SetPositions(context, q);
+  plant.SetPositions(context, q.cast<Expression>());
   const math::RigidTransform<Expression>& X_WA =
       plant.EvalBodyPoseInWorld(*context, bodyA);
   const math::RigidTransform<Expression>& X_WB =

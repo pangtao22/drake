@@ -24,6 +24,7 @@ liblapack3
 libldl2
 liblz4-1
 liblzma5
+libmsgpackc2
 libmumps-seq-5.1.2
 libnetcdf13
 libnlopt0
@@ -50,6 +51,7 @@ python3-ipywidgets
 python3-lxml
 python3-matplotlib
 python3-numpy
+python3-pil
 python3-pydot
 python3-scipy
 python3-tk

@@ -343,66 +343,63 @@ GTEST_TEST(MultibodyPlantUrdfParserTest, JointParsingTagMismatchTest) {
       "and should be a <drake:joint>");
 }
 
-GTEST_TEST(MultibodyPlantUrdfParserTest, CollisionFilterGroupParsingTest) {
-  const std::string full_name = FindResourceOrThrow(
-      "drake/multibody/parsing/test/urdf_parser_test/"
-      "collision_filter_group_parsing_test.urdf");
-  PackageMap package_map;
-  package_map.PopulateUpstreamToDrake(full_name);
+// We allow users to declare the "world" link for the purpose of declaring
+// "anchored" geometry (visual and collision). Specifying inertial properties
+// is not *strictly* an error -- a warning will be written to the console.
+// We can't test the warning, but we'll confirm there's no error.
+//
+// As for the geometry, we'll simply confirm that the expected numbers of
+// geometries get instantiated (with expected roles). We'll assume that because
+// the geometry parsing got triggered, it is correct and ignore the other
+// details.
+GTEST_TEST(MultibodyPlantUrdfParserTest, AddingGeometriesToWorldLink) {
+  const std::string test_urdf = R"""(
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="joint_parsing_test">
+  <link name="world">
+    <!-- Declaring mass properties on the "world" link is bad. But it won't
+     cause the parser to throw. -->
+    <inertial>
+      <mass value="1.0"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <box size="0.1 0.2 0.3"/>
+        <material>
+          <color rgba="0.8 0.7 0.6 0.5"/>
+        </material>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <sphere radius="0.25"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>
+)""";
+  DataSource source;
+  source.file_contents = &test_urdf;
 
   MultibodyPlant<double> plant(0.0);
   SceneGraph<double> scene_graph;
-  AddModelFromUrdfFile(full_name, "", package_map, &plant, &scene_graph);
+  AddModelFromUrdf(source, "urdf", {}, {}, &plant, &scene_graph);
 
-  // Get geometry ids for all the bodies.
-  const geometry::SceneGraphInspector<double>& inspector =
-      scene_graph.model_inspector();
-  const auto geometry_id_link1 = inspector.GetGeometryIdByName(
-      plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("link1").index()),
-      geometry::Role::kProximity,
-      "collision_filter_group_parsing_test::link1_sphere");
-  const auto geometry_id_link2 = inspector.GetGeometryIdByName(
-      plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("link2").index()),
-      geometry::Role::kProximity,
-      "collision_filter_group_parsing_test::link2_sphere");
-  const auto geometry_id_link3 = inspector.GetGeometryIdByName(
-      plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("link3").index()),
-      geometry::Role::kProximity,
-      "collision_filter_group_parsing_test::link3_sphere");
-  const auto geometry_id_link4 = inspector.GetGeometryIdByName(
-      plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("link4").index()),
-      geometry::Role::kProximity,
-      "collision_filter_group_parsing_test::link4_sphere");
-
-  // Make sure the plant is not finalized such that the adjacent joint filter
-  // has not taken into effect yet. This guarantees that the collision filtering
-  // is applied due to the collision filter group parsing.
-  ASSERT_FALSE(plant.is_finalized());
-
-  // We have four geometries and six possible pairs, each with a particular
-  // disposition.
-  // (1, 2) - unfiltered
-  // (1, 3) - filtered by group_link_3 ignores group_link_14
-  // (1, 4) - filtered by group_link_14 ignores itself
-  // (2, 3) - filtered by group_link_2 ignores group_link_3
-  // (2, 4) - unfiltered (although declared in an *ignored* self-filtering
-  // group_link_24).
-  // (3, 4) - filtered by group_link_3 ignores group_link_14
-  EXPECT_FALSE(
-      inspector.CollisionFiltered(geometry_id_link1, geometry_id_link2));
-  EXPECT_TRUE(
-      inspector.CollisionFiltered(geometry_id_link1, geometry_id_link3));
-  EXPECT_TRUE(
-      inspector.CollisionFiltered(geometry_id_link1, geometry_id_link4));
-  EXPECT_TRUE(
-      inspector.CollisionFiltered(geometry_id_link2, geometry_id_link3));
-  EXPECT_FALSE(
-      inspector.CollisionFiltered(geometry_id_link2, geometry_id_link4));
-  EXPECT_TRUE(
-      inspector.CollisionFiltered(geometry_id_link3, geometry_id_link4));
-
-  // Make sure we can add the model a second time.
-  AddModelFromUrdfFile(full_name, "model2", package_map, &plant, &scene_graph);
+  const auto& inspector = scene_graph.model_inspector();
+  EXPECT_EQ(inspector.num_geometries(), 2);
+  EXPECT_EQ(inspector.NumGeometriesForFrame(scene_graph.world_frame_id()), 2);
+  EXPECT_EQ(inspector.NumGeometriesForFrameWithRole(
+                scene_graph.world_frame_id(), geometry::Role::kProximity),
+            1);
+  // This does not total three geometries; the sphere has two roles,
+  EXPECT_EQ(inspector.NumGeometriesForFrameWithRole(
+                scene_graph.world_frame_id(), geometry::Role::kIllustration),
+            1);
+  EXPECT_EQ(inspector.NumGeometriesForFrameWithRole(
+                scene_graph.world_frame_id(), geometry::Role::kPerception),
+            1);
 }
 
 // Reports if the frame with the given id has a geometry with the given role
@@ -809,6 +806,112 @@ GTEST_TEST(MultibodyPlantUrdfParserTest, ReflectedInertiaParametersParsing) {
     EXPECT_EQ(actuator.default_rotor_inertia(), 0.0);
     EXPECT_EQ(actuator.default_gear_ratio(), 300.0);
   }
+}
+
+// TODO(SeanCurtis-TRI) The logic testing for collision filter group parsing
+// belongs in detail_common_test.cc. Urdf and Sdf parsing just need enough
+// testing to indicate that the method is being invoked correctly.
+GTEST_TEST(MultibodyPlantUrdfParserTest, CollisionFilterGroupParsingTest) {
+  const std::string full_name = FindResourceOrThrow(
+      "drake/multibody/parsing/test/urdf_parser_test/"
+      "collision_filter_group_parsing_test.urdf");
+  PackageMap package_map;
+  package_map.PopulateUpstreamToDrake(full_name);
+
+  MultibodyPlant<double> plant(0.0);
+  SceneGraph<double> scene_graph;
+  AddModelFromUrdfFile(full_name, "", package_map, &plant, &scene_graph);
+
+  // Get geometry ids for all the bodies.
+  const geometry::SceneGraphInspector<double>& inspector =
+      scene_graph.model_inspector();
+  const auto geometry_id_link1 = inspector.GetGeometryIdByName(
+      plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("link1").index()),
+      geometry::Role::kProximity,
+      "collision_filter_group_parsing_test::link1_sphere");
+  const auto geometry_id_link2 = inspector.GetGeometryIdByName(
+      plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("link2").index()),
+      geometry::Role::kProximity,
+      "collision_filter_group_parsing_test::link2_sphere");
+  const auto geometry_id_link3 = inspector.GetGeometryIdByName(
+      plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("link3").index()),
+      geometry::Role::kProximity,
+      "collision_filter_group_parsing_test::link3_sphere");
+  const auto geometry_id_link4 = inspector.GetGeometryIdByName(
+      plant.GetBodyFrameIdOrThrow(plant.GetBodyByName("link4").index()),
+      geometry::Role::kProximity,
+      "collision_filter_group_parsing_test::link4_sphere");
+
+  // Make sure the plant is not finalized such that the adjacent joint filter
+  // has not taken into effect yet. This guarantees that the collision filtering
+  // is applied due to the collision filter group parsing.
+  ASSERT_FALSE(plant.is_finalized());
+
+  // We have four geometries and six possible pairs, each with a particular
+  // disposition.
+  // (1, 2) - unfiltered
+  // (1, 3) - filtered by group_link_3 ignores group_link_14
+  // (1, 4) - filtered by group_link_14 ignores itself
+  // (2, 3) - filtered by group_link_2 ignores group_link_3
+  // (2, 4) - unfiltered (although declared in an *ignored* self-filtering
+  // group_link_24).
+  // (3, 4) - filtered by group_link_3 ignores group_link_14
+  EXPECT_FALSE(
+      inspector.CollisionFiltered(geometry_id_link1, geometry_id_link2));
+  EXPECT_TRUE(
+      inspector.CollisionFiltered(geometry_id_link1, geometry_id_link3));
+  EXPECT_TRUE(
+      inspector.CollisionFiltered(geometry_id_link1, geometry_id_link4));
+  EXPECT_TRUE(
+      inspector.CollisionFiltered(geometry_id_link2, geometry_id_link3));
+  EXPECT_FALSE(
+      inspector.CollisionFiltered(geometry_id_link2, geometry_id_link4));
+  EXPECT_TRUE(
+      inspector.CollisionFiltered(geometry_id_link3, geometry_id_link4));
+
+  // Make sure we can add the model a second time.
+  AddModelFromUrdfFile(full_name, "model2", package_map, &plant, &scene_graph);
+}
+
+// TODO(marcoag) We might want to add some form of feedback for:
+// - ignore_collision_filter_groups with non-existing group names.
+// - Empty collision_filter_groups.
+GTEST_TEST(MultibodyPlantUrdfParserTest,
+           CollisionFilterGroupParsingErrorsTest) {
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      ParseTestString(R"""(
+<robot name='robot'>
+  <link name='a'/>
+  <drake:collision_filter_group>
+  </drake:collision_filter_group>
+</robot>)"""),
+      std::runtime_error,
+      ".*The tag <drake:collision_filter_group> does not specify the required "
+      "attribute \"name\" at line 5..*");
+
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      ParseTestString(R"""(
+<robot name='robot'>
+  <link name='a'/>
+  <drake:collision_filter_group name="group_a">
+    <drake:member/>
+  </drake:collision_filter_group>
+</robot>)"""),
+      std::runtime_error,
+      ".*The tag <drake:member> does not specify the required "
+      "attribute \"link\" at line 6..*");
+
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      ParseTestString(R"""(
+<robot name='robot'>
+  <link name='a'/>
+  <drake:collision_filter_group name="group_a">
+    <drake:ignored_collision_filter_group/>
+  </drake:collision_filter_group>
+</robot>)"""),
+      std::runtime_error,
+      ".*The tag <drake:ignored_collision_filter_group> does not specify the "
+      "required attribute \"name\" at line 6..*");
 }
 
 }  // namespace

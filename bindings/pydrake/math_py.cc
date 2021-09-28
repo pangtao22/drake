@@ -101,8 +101,12 @@ void DoScalarDependentDefinitions(py::module m, T) {
         .def("GetAsIsometry3", &Class::GetAsIsometry3,
             cls_doc.GetAsIsometry3.doc)
         .def("SetIdentity", &Class::SetIdentity, cls_doc.SetIdentity.doc)
-        // .def("IsExactlyIdentity", ...)
-        // .def("IsIdentityToEpsilon", ...)
+        .def("IsExactlyIdentity", &Class::IsExactlyIdentity,
+            cls_doc.IsExactlyIdentity.doc)
+        .def("IsIdentityToEpsilon", &Class::IsIdentityToEpsilon,
+            py::arg("translation_tolerance"), cls_doc.IsIdentityToEpsilon.doc)
+        .def("IsNearlyEqualTo", &Class::IsNearlyEqualTo, py::arg("other"),
+            py::arg("tolerance"), cls_doc.IsNearlyEqualTo.doc)
         .def("inverse", &Class::inverse, cls_doc.inverse.doc)
         .def(
             "multiply",
@@ -504,6 +508,7 @@ void DoScalarIndependentDefinitions(py::module m) {
 PYBIND11_MODULE(math, m) {
   // N.B. Docstring contained in `_math_extra.py`.
 
+  py::module::import("pydrake.common");
   py::module::import("pydrake.autodiffutils");
   py::module::import("pydrake.common.eigen_geometry");
   py::module::import("pydrake.symbolic");

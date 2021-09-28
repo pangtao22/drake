@@ -11,6 +11,7 @@
 #include "drake/geometry/proximity/surface_mesh.h"
 #include "drake/geometry/proximity/volume_mesh.h"
 #include "drake/math/rigid_transform.h"
+#include "drake/math/rotation_matrix.h"
 #include "drake/multibody/fixed_fem/dev/deformable_contact_data.h"
 #include "drake/multibody/fixed_fem/dev/deformable_rigid_contact_pair.h"
 #include "drake/multibody/fixed_fem/dev/mesh_utilities.h"
@@ -254,28 +255,45 @@ GTEST_TEST(DeformableContactTest, NonTriangleContactPolygon) {
   EXPECT_TRUE(CompareMatrices(data.centroid, Vector3d(0, 0, 0), kTol));
 }
 
+
+const DeformableBodyIndex kDeformableBodyIndex(2);
 /* Makes a DeformableContactData with a single contact pair using the given
  `contact_surface`. Unused parameters are set to arbitrary values. */
 internal::DeformableContactData<double> MakeDeformableContactData(
     DeformableContactSurface<double> contact_surface,
     internal::ReferenceDeformableGeometry<double> deformable_geometry) {
   const geometry::GeometryId dummy_rigid_id;
-  const DeformableBodyIndex dummy_deformable_id;
   const double dummy_stiffness = 0;
   const double dummy_dissipation = 0;
   const double dummy_friction = 0;
   const internal::DeformableRigidContactPair<double> contact_pair(
-      std::move(contact_surface), dummy_rigid_id, dummy_deformable_id,
+      std::move(contact_surface), dummy_rigid_id, kDeformableBodyIndex,
       dummy_stiffness, dummy_dissipation, dummy_friction);
   return internal::DeformableContactData<double>({contact_pair},
                                                  deformable_geometry);
 }
 
 GTEST_TEST(DeformableContactTest, DeformableContactData) {
-  /* Move the rigid pyramid down, so only its square base intersects the top
-   pyramidal region of the deformable octahedron. As a result, all vertices
-   except v5 are participating in contact. */
-  const auto X_DR = math::RigidTransformd(Vector3<double>(0, 0, -1.5));
+  /* Recall that the octahedron looks like.
+                  +Z   -X
+                   |   /
+                v5 ●  ● v3
+                   | /
+         v4     v0 |/
+    -Y----●--------●------●----+Y
+                  /|      v2
+                 / |
+             v1 ●  ● v6
+               /   |
+             +X    |
+                  -Z
+   Rotate the the rigid pyramid around x-axis by -90 degrees (right-handed) and
+   then shift it along the positive y-axis so that only its square base
+   intersects the right pyramidal region of the deformable octahedron. As a
+   result, all vertices except v4 are participating in contact. */
+  const auto X_DR = math::RigidTransformd(
+      math::RotationMatrix<double>::MakeXRotation(-M_PI / 2),
+      Vector3<double>(0, 0.5, 0));
   DeformableContactSurface<double> contact_surface =
       MakeDeformableContactSurface<double>(X_DR);
   const internal::DeformableContactData<double> contact_data =
@@ -283,10 +301,10 @@ GTEST_TEST(DeformableContactTest, DeformableContactData) {
                                 MakeOctahedronDeformableGeometry<double>());
 
   EXPECT_EQ(contact_data.num_contact_pairs(), 1);
-  /* v0, v1, v2, v3, v4, v6 are participating in contact so they get new indexes
-   0, 1, 2, 3, 4, 5. v5 is not participating in contact and gets new index 6. */
+  /* v0, v1, v2, v3, v5, v6 are participating in contact so they get new indexes
+   0, 1, 2, 3, 4, 5. v4 is not participating in contact and gets new index 6. */
   EXPECT_EQ(contact_data.num_vertices_in_contact(), 6);
-  const std::vector<int> permuted_vertex_indexes = {0, 1, 2, 3, 4, 6, 5};
+  const std::vector<int> permuted_vertex_indexes = {0, 1, 2, 3, 6, 4, 5};
   EXPECT_EQ(contact_data.permuted_vertex_indexes(), permuted_vertex_indexes);
   /* Verify that permuted_vertex_indexes() and permuted_to_original_indexes()
    are inverses to each other. */
@@ -296,6 +314,7 @@ GTEST_TEST(DeformableContactTest, DeformableContactData) {
     EXPECT_EQ(i, permuted_vertex_indexes[permuted_to_original_indexes[i]]);
     EXPECT_EQ(i, permuted_to_original_indexes[permuted_vertex_indexes[i]]);
   }
+  EXPECT_EQ(contact_data.deformable_body_index(), kDeformableBodyIndex);
 }
 
 GTEST_TEST(DeformableContactTest, EmptyDeformableContactData) {

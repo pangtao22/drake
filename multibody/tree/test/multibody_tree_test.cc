@@ -100,8 +100,10 @@ void VerifyModelBasics(const MultibodyTree<T>& model) {
   // Query if elements exist in the model.
   for (const std::string& link_name : kLinkNames) {
     EXPECT_TRUE(model.HasBodyNamed(link_name));
+    EXPECT_EQ(model.NumBodiesWithName(link_name), 1);
   }
   EXPECT_FALSE(model.HasBodyNamed(kInvalidName));
+  EXPECT_EQ(model.NumBodiesWithName(kInvalidName), 0);
 
   for (const std::string& frame_name : kFrameNames) {
     EXPECT_TRUE(model.HasFrameNamed(frame_name));
@@ -268,6 +270,9 @@ GTEST_TEST(MultibodyTree, RetrievingAmbiguousNames) {
       model->AddRigidBody(link_name, world_model_instance(),
                           SpatialInertia<double>()));
   EXPECT_NO_THROW(model->Finalize());
+
+  // Link name is ambiguous, there are more than one bodies that use the name.
+  EXPECT_GT(model->NumBodiesWithName(link_name), 1);
 
   // Checking if the name exists throws (unfortunately), unless we specify the
   // intended model instance.
@@ -559,6 +564,90 @@ TEST_F(KukaIiwaModelTests, VerifyScalarConversionToSymbolic) {
   VerifyModelBasics(*dut);
 }
 
+TEST_F(KukaIiwaModelTests, StateAccess) {
+  ASSERT_EQ(tree().num_positions(), 7);
+  ASSERT_EQ(tree().num_velocities(), 7);
+  ASSERT_EQ(tree().num_states(), 14);
+
+  const Eigen::VectorXd qv_values = (Eigen::VectorXd(14)
+      << 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14).finished();
+
+  // Check whole-state access.
+  tree().GetMutablePositionsAndVelocities(context_.get()) = qv_values;
+  EXPECT_EQ(tree().get_positions_and_velocities(*context_), qv_values);
+
+  // Verify that position and velocity access works when whole state was set.
+  tree().get_mutable_positions_and_velocities(&context_->get_mutable_state()) =
+      2 * qv_values;
+  EXPECT_EQ(tree().get_positions_and_velocities(*context_), 2 * qv_values);
+  EXPECT_EQ(tree().get_positions(*context_), 2 * qv_values.segment(0, 7));
+  EXPECT_EQ(tree().get_velocities(*context_), 2 * qv_values.segment(7, 7));
+
+  // Check that position-only access works and that velocity doesn't change.
+  tree().GetMutablePositions(context_.get()) = qv_values.segment(0, 7);
+  EXPECT_EQ(tree().get_positions(*context_), qv_values.segment(0, 7));
+  EXPECT_EQ(tree().get_velocities(*context_), 2 * qv_values.segment(7, 7));
+  tree().get_mutable_positions(&context_->get_mutable_state()) =
+      3 * qv_values.segment(0, 7);
+  EXPECT_EQ(tree().get_positions(*context_), 3 * qv_values.segment(0, 7));
+  EXPECT_EQ(tree().get_velocities(*context_), 2 * qv_values.segment(7, 7));
+
+  // Check that velocity-only access works and that position doesn't change.
+  tree().GetMutableVelocities(context_.get()) = qv_values.segment(7, 7);
+  EXPECT_EQ(tree().get_velocities(*context_), qv_values.segment(7, 7));
+  EXPECT_EQ(tree().get_positions(*context_), 3 * qv_values.segment(0, 7));
+  tree().get_mutable_velocities(&context_->get_mutable_state()) =
+      5 * qv_values.segment(7, 7);
+  EXPECT_EQ(tree().get_velocities(*context_), 5 * qv_values.segment(7, 7));
+  EXPECT_EQ(tree().get_positions(*context_), 3 * qv_values.segment(0, 7));
+
+  // Check that setting position and velocity separately sets the whole state.
+  tree().GetMutablePositions(context_.get()) = 7 * qv_values.segment(0, 7);
+  tree().GetMutableVelocities(context_.get()) = 7 * qv_values.segment(7, 7);
+  EXPECT_EQ(tree().get_positions_and_velocities(*context_), 7 * qv_values);
+
+  // Test that the state segment methods work.
+  tree().GetMutablePositionsAndVelocities(context_.get()) = qv_values;
+  EXPECT_EQ(tree().get_state_segment<3>(*context_, 5),
+      qv_values.segment(5, 3));
+  EXPECT_EQ(tree().get_state_segment(*context_, 5, 4),
+      qv_values.segment(5, 4));
+
+  // There are four segment-mutating methods. We'll use each
+  // to make the same change, then verify with this lambda.
+  const auto check_segments = [&]() {
+    EXPECT_EQ(tree().get_positions_and_velocities(*context_).segment(8, 3),
+              Vector3d(-1, -2, -3));
+    // Nothing else should have changed.
+    EXPECT_EQ(tree().get_positions_and_velocities(*context_).segment(0, 8),
+              qv_values.segment(0, 8));
+    EXPECT_EQ(tree().get_positions_and_velocities(*context_).segment(11, 3),
+              qv_values.segment(11, 3));
+  };
+
+  // Templatized mutable-Context method.
+  tree().GetMutablePositionsAndVelocities(context_.get()) = qv_values;
+  tree().GetMutableStateSegment<3>(context_.get(), 8) << -1, -2, -3;
+  check_segments();
+
+  // Templatized mutable-State method.
+  tree().GetMutablePositionsAndVelocities(context_.get()) = qv_values;
+  tree().get_mutable_state_segment<3>(&context_->get_mutable_state(), 8) << -1,
+      -2, -3;
+  check_segments();
+
+  // Runtime mutable-Context method.
+  tree().GetMutablePositionsAndVelocities(context_.get()) = qv_values;
+  tree().GetMutableStateSegment(context_.get(), 8, 3) << -1, -2, -3;
+  check_segments();
+
+  // Runtime mutable-State method.
+  tree().GetMutablePositionsAndVelocities(context_.get()) = qv_values;
+  tree().get_mutable_state_segment(&context_->get_mutable_state(), 8, 3) << -1,
+      -2, -3;
+  check_segments();
+}
+
 // This test helps verify MultibodyTree::CalcJacobianTranslationalVelocity()
 // with two methods to calculate Jv_WEo_W, which is Eo's (end effector origin's)
 // translational velocity Jacobian with respect to v (generalized velocities)
@@ -606,16 +695,15 @@ TEST_F(KukaIiwaModelTests, CalcJacobianTranslationalVelocityA) {
   // Initialize v_autodiff to have values v and so that it is the independent
   // variable of the problem.
   VectorX<AutoDiffXd> v_autodiff(kNumPositions);
-  math::initializeAutoDiff(v, v_autodiff);
+  math::InitializeAutoDiff(v, &v_autodiff);
   context_autodiff_->get_mutable_continuous_state().
       get_mutable_generalized_velocity().SetFromVector(v_autodiff);
 
   const Vector3<AutoDiffXd> v_WE_autodiff =
       CalcEndEffectorVelocity(tree_autodiff(), *context_autodiff_);
 
-  const Vector3<double> v_WE_value = math::autoDiffToValueMatrix(v_WE_autodiff);
-  const MatrixX<double> v_WE_derivs =
-      math::autoDiffToGradientMatrix(v_WE_autodiff);
+  const Vector3<double> v_WE_value = math::ExtractValue(v_WE_autodiff);
+  const MatrixX<double> v_WE_derivs = math::ExtractGradient(v_WE_autodiff);
 
   // Values obtained with <AutoDiffXd> should match those computed with
   // <double>.
@@ -666,9 +754,9 @@ TEST_F(KukaIiwaModelTests, CalcJacobianTranslationalVelocityA) {
 
   // The derivative with respect to time should equal v_WE.
   const VectorX<AutoDiffXd> q_autodiff =
-      // For reasons beyond my understanding, we need to pass MatrixXd to
-      // math::initializeAutoDiffGivenGradientMatrix().
-      math::initializeAutoDiffGivenGradientMatrix(MatrixXd(q), MatrixXd(v));
+      // For reasons beyond my understanding, we need to pass a MatrixXd as the
+      // gradient for math::InitializeAutoDiff(). Eigen complains otherwise.
+      math::InitializeAutoDiff(q, MatrixXd(v));
   v_autodiff = v.cast<AutoDiffXd>();
   context_autodiff_->get_mutable_continuous_state().
       get_mutable_generalized_position().SetFromVector(q_autodiff);
@@ -727,7 +815,7 @@ TEST_F(KukaIiwaModelTests, CalcJacobianTranslationalVelocityB) {
 
   // Initialize v_autodiff to have values v and so that v is the independent
   // variable of the problem.
-  VectorX<AutoDiffXd> v_autodiff = drake::math::initializeAutoDiff(v);
+  VectorX<AutoDiffXd> v_autodiff = drake::math::InitializeAutoDiff(v);
   context_autodiff_->get_mutable_continuous_state()
       .get_mutable_generalized_velocity()
       .SetFromVector(v_autodiff);
@@ -735,9 +823,8 @@ TEST_F(KukaIiwaModelTests, CalcJacobianTranslationalVelocityB) {
   const Vector3<AutoDiffXd> v_WE_autodiff =
       CalcEndEffectorVelocity(tree_autodiff(), *context_autodiff_);
 
-  const Vector3<double> v_WE_value = math::autoDiffToValueMatrix(v_WE_autodiff);
-  const MatrixX<double> v_WE_derivs =
-      math::autoDiffToGradientMatrix(v_WE_autodiff);
+  const Vector3<double> v_WE_value = math::ExtractValue(v_WE_autodiff);
+  const MatrixX<double> v_WE_derivs = math::ExtractGradient(v_WE_autodiff);
 
   // Values from <AutoDiffXd> should match those computed with <double>.
   EXPECT_TRUE(CompareMatrices(v_WE_value, v_WE, kTolerance,
@@ -786,7 +873,7 @@ TEST_F(KukaIiwaModelTests, CalcJacobianTranslationalVelocityB) {
 
   // The derivative with respect to time should equal v_WE.
   const VectorX<AutoDiffXd> q_autodiff =
-      math::initializeAutoDiffGivenGradientMatrix(q, MatrixXd(v));
+      math::InitializeAutoDiff(q, MatrixXd(v));
   v_autodiff = v.cast<AutoDiffXd>();
   tree_autodiff().GetMutablePositionsAndVelocities(context_autodiff_.get())
       << q_autodiff, v_autodiff;
@@ -840,9 +927,8 @@ TEST_F(KukaIiwaModelTests, CalcBiasForJacobianTranslationalVelocity) {
   // Note: here we pass MatrixXd(v) so that the return gradient uses AutoDiffXd
   // (for which we do have explicit instantiations) instead of
   // AutoDiffScalar<Matrix1d>.
-  auto q_autodiff = math::initializeAutoDiffGivenGradientMatrix(q, MatrixXd(v));
-  auto v_autodiff =
-      math::initializeAutoDiffGivenGradientMatrix(v, MatrixXd(vdot));
+  auto q_autodiff = math::InitializeAutoDiff(q, MatrixXd(v));
+  auto v_autodiff = math::InitializeAutoDiff(v, MatrixXd(vdot));
 
   VectorX<AutoDiffXd> x_autodiff(2 * kNumPositions);
   x_autodiff << q_autodiff, v_autodiff;
@@ -870,8 +956,7 @@ TEST_F(KukaIiwaModelTests, CalcBiasForJacobianTranslationalVelocity) {
       &p_WPi_autodiff, &Jv_WHp_autodiff);
 
   // Extract time derivatives:
-  MatrixX<double> Jv_WHp_derivs =
-      math::autoDiffToGradientMatrix(Jv_WHp_autodiff);
+  MatrixX<double> Jv_WHp_derivs = math::ExtractGradient(Jv_WHp_autodiff);
   Jv_WHp_derivs.resize(3 * kNumPoints, kNumPositions);
 
   // Compute the expected value of the bias terms using the time derivatives
@@ -975,7 +1060,7 @@ TEST_F(KukaIiwaModelTests, CalcJacobianTranslationalVelocityC) {
   // Initialize q to have values qvalue and so that it is the independent
   // variable of the problem.
   VectorX<AutoDiffXd> q_autodiff(kNumPositions);
-  math::initializeAutoDiff(q0, q_autodiff);
+  math::InitializeAutoDiff(q0, &q_autodiff);
   context_autodiff_->get_mutable_continuous_state().
       get_mutable_generalized_position().SetFromVector(q_autodiff);
 
@@ -988,10 +1073,8 @@ TEST_F(KukaIiwaModelTests, CalcJacobianTranslationalVelocityC) {
       p_EPi_autodiff, &p_WPi_autodiff, &Jq_WPi_autodiff);
 
   // Extract values and derivatives:
-  const Matrix3X<double> p_WPi_value =
-      math::autoDiffToValueMatrix(p_WPi_autodiff);
-  const MatrixX<double> p_WPi_derivs =
-      math::autoDiffToGradientMatrix(p_WPi_autodiff);
+  const Matrix3X<double> p_WPi_value = math::ExtractValue(p_WPi_autodiff);
+  const MatrixX<double> p_WPi_derivs = math::ExtractGradient(p_WPi_autodiff);
 
   // Some sanity checks:
   // Values obtained with <AutoDiffXd> should match those computed with
@@ -1153,9 +1236,8 @@ TEST_F(KukaIiwaModelTests, CalcBiasForJacobianSpatialVelocity) {
   // Note: here we pass MatrixXd(v) so that the return gradient uses AutoDiffXd
   // (for which we do have explicit instantiations) instead of
   // AutoDiffScalar<Matrix1d>.
-  auto q_autodiff = math::initializeAutoDiffGivenGradientMatrix(q, MatrixXd(v));
-  auto v_autodiff =
-      math::initializeAutoDiffGivenGradientMatrix(v, MatrixXd(vdot));
+  auto q_autodiff = math::InitializeAutoDiff(q, MatrixXd(v));
+  auto v_autodiff = math::InitializeAutoDiff(v, MatrixXd(vdot));
 
   VectorX<AutoDiffXd> x_autodiff(2 * kNumVelocities);
   x_autodiff << q_autodiff, v_autodiff;
@@ -1180,8 +1262,7 @@ TEST_F(KukaIiwaModelTests, CalcBiasForJacobianSpatialVelocity) {
       tree_autodiff(), *context_autodiff_, p_HPo_autodiff, &Jv_WHp_autodiff);
 
   // Extract time derivatives:
-  MatrixX<double> Jv_WHp_derivs =
-      math::autoDiffToGradientMatrix(Jv_WHp_autodiff);
+  MatrixX<double> Jv_WHp_derivs = math::ExtractGradient(Jv_WHp_autodiff);
   Jv_WHp_derivs.resize(6, kNumVelocities);
 
   // Compute the expected value of the bias terms using the time derivatives

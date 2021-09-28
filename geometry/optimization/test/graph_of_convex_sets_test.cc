@@ -341,7 +341,7 @@ TEST_F(ThreePoints, QuadraticCost2) {
   env.insert(e_on_->xu(), p_source_.x());
   env.insert(e_on_->xv(), p_target_.x());
   EXPECT_NEAR(e_on_->GetSolutionCost(result), cost.Evaluate(env), 1e-5);
-  EXPECT_NEAR(e_off_->GetSolutionCost(result), 0.0, 1e-6);
+  EXPECT_NEAR(e_off_->GetSolutionCost(result), 0.0, 4e-6);
 }
 
 TEST_F(ThreePoints, QuadraticCost3) {
@@ -355,15 +355,12 @@ TEST_F(ThreePoints, QuadraticCost3) {
   e_on_->AddCost(cost);
   e_off_->AddCost(cost.Substitute(subs_on_off_));
   auto result = g_.SolveShortestPath(*source_, *target_, true);
-  if (result.get_solver_id() == solvers::IpoptSolver::id()) {
-    return;  // See IpoptTest for details.
-  }
   ASSERT_TRUE(result.is_success());
   Environment env{};
   env.insert(e_on_->xu(), p_source_.x());
   env.insert(e_on_->xv(), p_target_.x());
   EXPECT_NEAR(e_on_->GetSolutionCost(result), cost.Evaluate(env), 1e-5);
-  EXPECT_NEAR(e_off_->GetSolutionCost(result), 0.0, 1e-6);
+  EXPECT_NEAR(e_off_->GetSolutionCost(result), 0.0, 4e-6);
 }
 
 TEST_F(ThreePoints, QuadraticCost4) {
@@ -637,8 +634,8 @@ GTEST_TEST(ShortestPathTest, TobiasToyExample) {
   Vertex* p5 = spp.AddVertex(VPolytope(vertices), "p5");
   Vertex* target = spp.AddVertex(Point(Vector2d(9, 0)), "target");
 
-  spp.AddEdge(*source, *p1);
-  spp.AddEdge(*source, *p2);
+  Edge* source_to_p1 = spp.AddEdge(*source, *p1);
+  Edge* source_to_p2 = spp.AddEdge(*source, *p2);
   spp.AddEdge(*source, *p3);
   spp.AddEdge(*p1, *e2);
   spp.AddEdge(*p2, *p3);
@@ -685,6 +682,53 @@ GTEST_TEST(ShortestPathTest, TobiasToyExample) {
     } else {
       EXPECT_NEAR(e->GetSolutionCost(result), 0.0, 1e-5);
     }
+  }
+
+  // Test that forcing an edge not on the shortest path to be active yields a
+  // higher cost.
+  source_to_p2->AddPhiConstraint(true);
+  {
+    auto new_result = spp.SolveShortestPath(source->id(), target->id(), false);
+    ASSERT_TRUE(new_result.is_success());
+
+    const std::forward_list<Vertex*> new_shortest_path{source, p2, e2, target};
+    for (const auto& e : spp.Edges()) {
+      auto iter = std::find(new_shortest_path.begin(), new_shortest_path.end(),
+                            &e->u());
+      // All costs should be non-negative.
+      EXPECT_GT(e->GetSolutionCost(new_result), -1e-6);
+      if (iter != new_shortest_path.end() && &e->v() == *(++iter)) {
+        // Then it's on the shortest path; phi should be 1.
+        EXPECT_NEAR(new_result.GetSolution(e->phi()), 1.0, 1e-5);
+      } else {
+        EXPECT_NEAR(new_result.GetSolution(e->phi()), 0.0, 1e-5);
+      }
+    }
+    EXPECT_GT(new_result.get_optimal_cost(), result.get_optimal_cost());
+  }
+  source_to_p2->ClearPhiConstraints();
+
+  // Test that forcing an edge on the shortest path to be in-active yields a
+  // higher cost.
+  source_to_p1->AddPhiConstraint(false);
+  {
+    auto new_result = spp.SolveShortestPath(source->id(), target->id(), false);
+    ASSERT_TRUE(new_result.is_success());
+
+    const std::forward_list<Vertex*> new_shortest_path{source, p2, e2, target};
+    for (const auto& e : spp.Edges()) {
+      auto iter = std::find(new_shortest_path.begin(), new_shortest_path.end(),
+                            &e->u());
+      // All costs should be non-negative (to within optimizer tolerance).
+      EXPECT_GT(e->GetSolutionCost(new_result), -1e-6);
+      if (iter != new_shortest_path.end() && &e->v() == *(++iter)) {
+        // Then it's on the shortest path; phi should be 1.
+        EXPECT_NEAR(new_result.GetSolution(e->phi()), 1.0, 1e-5);
+      } else {
+        EXPECT_NEAR(new_result.GetSolution(e->phi()), 0.0, 1e-5);
+      }
+    }
+    EXPECT_GT(new_result.get_optimal_cost(), result.get_optimal_cost());
   }
 }
 

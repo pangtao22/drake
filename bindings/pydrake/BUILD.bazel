@@ -10,6 +10,7 @@ load(
     "@drake//tools/skylark:drake_py.bzl",
     "drake_py_binary",
     "drake_py_library",
+    "drake_py_test",
     "drake_py_unittest",
 )
 load(
@@ -124,12 +125,14 @@ drake_pybind_library(
         "//bindings/pydrake/common:default_scalars_pybind",
         "//bindings/pydrake/common:deprecation_pybind",
         "//bindings/pydrake/common:type_pack",
+        "//bindings/pydrake/common:type_safe_index_pybind",
         "//bindings/pydrake/common:value_pybind",
         "//lcmtypes:viewer",
     ],
     cc_srcs = ["geometry_py.cc"],
     package_info = PACKAGE_INFO,
     py_deps = [
+        ":math_py",
         ":module_py",
         "//bindings/pydrake/systems:framework_py",
         "//bindings/pydrake/systems:lcm_py",
@@ -479,6 +482,7 @@ drake_py_unittest(
     deps = [
         ":geometry_py",
         "//bindings/pydrake/common/test_utilities",
+        "//bindings/pydrake/multibody:plant_py",
         "//bindings/pydrake/solvers:mathematicalprogram_py",
         "//bindings/pydrake/systems:analysis_py",
         "//bindings/pydrake/systems:sensors_py",
@@ -525,6 +529,14 @@ drake_py_unittest(
         ":autodiffutils_py",
         ":math_py",
         ":symbolic_py",
+    ],
+)
+
+drake_py_test(
+    name = "minimal_import_test",
+    allow_import_unittest = True,
+    deps = [
+        "//bindings/pydrake",
     ],
 )
 

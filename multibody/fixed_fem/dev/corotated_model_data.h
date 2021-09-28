@@ -4,7 +4,6 @@
 
 #include "drake/common/eigen_types.h"
 #include "drake/multibody/fem/deformation_gradient_data.h"
-#include "drake/multibody/fixed_fem/dev/fem_indexes.h"
 #include "drake/multibody/fixed_fem/dev/matrix_utilities.h"
 
 namespace drake {
@@ -23,9 +22,6 @@ class CorotatedModelData
     : public DeformationGradientData<
           CorotatedModelData<T, num_locations>> {
  public:
-  using Base =
-      DeformationGradientData<CorotatedModelData<T, num_locations>>;
-
   DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(CorotatedModelData);
 
   /* Constructs a CorotatedModelData with no deformation. */
@@ -47,7 +43,7 @@ class CorotatedModelData
   }
 
  private:
-  friend Base;
+  friend DeformationGradientData<CorotatedModelData<T, num_locations>>;
 
   /* Shadows DeformationGradientData::UpdateFromDeformationGradient() as
    required by the CRTP base class. */

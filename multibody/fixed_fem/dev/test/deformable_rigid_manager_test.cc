@@ -4,7 +4,6 @@
 
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
-#include "drake/examples/multibody/rolling_sphere/make_rolling_sphere_plant.h"
 #include "drake/geometry/proximity/make_box_mesh.h"
 #include "drake/math/rotation_matrix.h"
 #include "drake/multibody/contact_solvers/pgs_solver.h"
@@ -49,6 +48,7 @@ using geometry::VolumeMesh;
 using geometry::VolumeMeshFieldLinear;
 using math::RigidTransformd;
 using multibody::contact_solvers::internal::BlockSparseMatrix;
+using multibody::contact_solvers::internal::PgsSolver;
 using multibody::internal::DiscreteContactPair;
 using systems::Context;
 
@@ -123,23 +123,29 @@ class DeformableRigidManagerTest : public ::testing::Test {
    MultibodyPlant. Then sets a DeformableRigidManager as the discrete update
    manager for the MultibodyPlant. */
   void SetUp() override {
-    auto deformable_model = std::make_unique<DeformableModel<double>>(&plant_);
+    systems::DiagramBuilder<double> builder;
+    std::tie(plant_, scene_graph_) = AddMultibodyPlantSceneGraph(&builder, kDt);
+    auto deformable_model = std::make_unique<DeformableModel<double>>(plant_);
     deformable_model->RegisterDeformableBody(MakeUnitCubeDeformableGeometry(),
                                              "box", MakeDeformableBodyConfig(),
                                              MakeDefaultProximityProperties());
     deformable_model_ = deformable_model.get();
-    plant_.AddPhysicalModel(std::move(deformable_model));
-    /* Add a collision geometry. */
-    plant_.RegisterAsSourceForSceneGraph(&scene_graph_);
-    plant_.RegisterCollisionGeometry(
-        plant_.world_body(), math::RigidTransform<double>(), MakeUnitCube(),
-        "collision", MakeDefaultProximityProperties());
-    plant_.Finalize();
+    plant_->AddPhysicalModel(std::move(deformable_model));
+    /* Add a collision geometry. Make sure it is *not* in contact with the
+     deformable cube. */
+    plant_->RegisterCollisionGeometry(
+        plant_->world_body(), math::RigidTransform<double>(Vector3d(0, -2, 0)),
+        MakeUnitCube(), "collision", MakeDefaultProximityProperties());
+    plant_->Finalize();
     auto deformable_rigid_manager =
-        std::make_unique<DeformableRigidManager<double>>();
+        std::make_unique<DeformableRigidManager<double>>(
+            std::make_unique<PgsSolver<double>>());
     deformable_rigid_manager_ = deformable_rigid_manager.get();
-    plant_.SetDiscreteUpdateManager(std::move(deformable_rigid_manager));
-    deformable_rigid_manager_->RegisterCollisionObjects(scene_graph_);
+    plant_->SetDiscreteUpdateManager(std::move(deformable_rigid_manager));
+    deformable_rigid_manager_->RegisterCollisionObjects(*scene_graph_);
+
+    diagram_ = builder.Build();
+    diagram_context_ = diagram_->CreateDefaultContext();
   }
 
   /* Verifies that there exists one and only one collision object registered
@@ -180,37 +186,38 @@ class DeformableRigidManagerTest : public ::testing::Test {
         id, pose_in_world);
   }
 
-  SceneGraph<double> scene_graph_;
-  MultibodyPlant<double> plant_{kDt};
+  SceneGraph<double>* scene_graph_{nullptr};
+  MultibodyPlant<double>* plant_{nullptr};
   const DeformableModel<double>* deformable_model_;
   DeformableRigidManager<double>* deformable_rigid_manager_;
+  std::unique_ptr<systems::Diagram<double>> diagram_{nullptr};
+  std::unique_ptr<Context<double>> diagram_context_{nullptr};
 };
 
 namespace {
 /* Verifies that the DeformableRigidManager calculates the expected
  displacement for a deformable object under free fall over one time step. */
 TEST_F(DeformableRigidManagerTest, CalcDiscreteValue) {
-  auto context = plant_.CreateDefaultContext();
-  auto simulator = systems::Simulator<double>(plant_, std::move(context));
+  auto simulator =
+      systems::Simulator<double>(*diagram_, std::move(diagram_context_));
+  const auto& plant_context =
+      plant_->GetMyContextFromRoot(simulator.get_context());
   const auto initial_positions =
       deformable_model_->get_vertex_positions_output_port()
-          .Eval<std::vector<VectorXd>>(simulator.get_context());
+          .Eval<std::vector<VectorXd>>(plant_context);
   EXPECT_EQ(initial_positions.size(), 1);
   EXPECT_EQ(initial_positions[0].size(), kNumVertices * 3);
   simulator.AdvanceTo(kDt);
   const auto current_positions =
       deformable_model_->get_vertex_positions_output_port()
-          .Eval<std::vector<VectorXd>>(simulator.get_context());
+          .Eval<std::vector<VectorXd>>(plant_context);
   EXPECT_EQ(current_positions.size(), 1);
   EXPECT_EQ(current_positions[0].size(), kNumVertices * 3);
 
-  /* The factor of 0.25 seems strange but is correct. For the default
-   mid-point rule used by DynamicElasticityModel,
-       x = xₙ + dt ⋅ vₙ + dt² ⋅ (0.25 ⋅ a + 0.25 ⋅ aₙ).
-   In this test case vₙ and aₙ are both 0, so x - xₙ is given by 0.25 ⋅ a ⋅ dt².
-  */
-  const Vector3<double> expected_displacement(0, 0,
-                                              0.25 * kGravity * kDt * kDt);
+  /* For the default Newmark scheme used by DynamicElasticityModel,
+       x = xₙ + dt ⋅ vₙ + dt² ⋅ 0.5 ⋅ a.
+   In this test case vₙ is 0, so x - xₙ is given by 0.5 ⋅ a ⋅ dt². */
+  const Vector3<double> expected_displacement(0, 0, 0.5 * kGravity * kDt * kDt);
   const double kTol = 1e-14;
   for (int i = 0; i < kNumVertices; ++i) {
     const Vector3<double> displacement =
@@ -223,128 +230,10 @@ TEST_F(DeformableRigidManagerTest, CalcDiscreteValue) {
 // TODO(xuchenhan-tri): Update the unit test once the
 //  CalcAccelerationKinematicsCache() method is implemented.
 TEST_F(DeformableRigidManagerTest, CalcAccelerationKinematicsCache) {
-  auto context = plant_.CreateDefaultContext();
-  EXPECT_THROW(plant_.get_generalized_acceleration_output_port().Eval(*context),
-               std::exception);
-}
-
-/* Makes a finalized MultibodyPlant model of a ball falling into a plane. Sets a
- DiscreteUpdateManager for the plant if the `use_manager` flag is on. The
- given `scene_graph` is used to manage geometries and must be non-null. */
-std::unique_ptr<MultibodyPlant<double>> MakePlant(
-    std::unique_ptr<contact_solvers::internal::ContactSolver<double>>
-        contact_solver,
-    bool use_manager, SceneGraph<double>* scene_graph) {
-  EXPECT_NE(scene_graph, nullptr);
-  constexpr double kBouncingBallDt = 1e-3;  // s
-  constexpr double kBallRadius = 0.05;      // m
-  constexpr double kBallMass = 0.1;         // kg
-  constexpr double kElasticModulus = 5e4;   // Pa
-  constexpr double kDissipation = 5;        // s/m
-  const CoulombFriction<double> kFriction(0.3, 0.3);
-  std::unique_ptr<MultibodyPlant<double>> plant =
-      examples::multibody::bouncing_ball::MakeBouncingBallPlant(
-          kBouncingBallDt, kBallRadius, kBallMass, kElasticModulus,
-          kDissipation, kFriction, kGravity * Vector3d::UnitZ(), true, false,
-          scene_graph);
-  if (use_manager) {
-    auto deformable_model =
-        std::make_unique<DeformableModel<double>>(plant.get());
-    plant->AddPhysicalModel(std::move(deformable_model));
-  }
-  plant->Finalize();
-  if (use_manager) {
-    auto deformable_rigid_manager =
-        std::make_unique<DeformableRigidManager<double>>();
-    DeformableRigidManager<double>* deformable_rigid_manager_ptr =
-        deformable_rigid_manager.get();
-    plant->SetDiscreteUpdateManager(std::move(deformable_rigid_manager));
-    if (contact_solver != nullptr) {
-      deformable_rigid_manager_ptr->SetContactSolver(std::move(contact_solver));
-    }
-  } else {
-    if (contact_solver != nullptr) {
-      plant->SetContactSolver(std::move(contact_solver));
-    }
-  }
-  return plant;
-}
-
-/* Sets up a discrete simulation with a rigid sphere in contact with a rigid
- ground and runs the simulation until `kFinalTime` and returns the final
- discrete states. The given `contact_solver` is used to solve the rigid
- contacts. If `contact_solver == nullptr`, then the TAMSI solver is used. If
- `use_manager` is true, use DiscreteUpdateManager to perform the discrete
- updates. Otherwise, use the MultibodyPlant discrete updates. */
-VectorXd CalcFinalState(
-    std::unique_ptr<contact_solvers::internal::ContactSolver<double>>
-        contact_solver,
-    bool use_manager) {
-  systems::DiagramBuilder<double> builder;
-  SceneGraph<double>& scene_graph = *builder.AddSystem<SceneGraph<double>>();
-  scene_graph.set_name("scene_graph");
-  MultibodyPlant<double>& plant = *builder.AddSystem(
-      MakePlant(std::move(contact_solver), use_manager, &scene_graph));
-  DRAKE_DEMAND(plant.num_velocities() == 6);
-  DRAKE_DEMAND(plant.num_positions() == 7);
-
-  /* Wire up the plant and the scene graph. */
-  DRAKE_DEMAND(plant.get_source_id().has_value());
-  builder.Connect(scene_graph.get_query_output_port(),
-                  plant.get_geometry_query_input_port());
-  builder.Connect(
-      plant.get_geometry_poses_output_port(),
-      scene_graph.get_source_pose_port(plant.get_source_id().value()));
-  auto diagram = builder.Build();
-
-  std::unique_ptr<Context<double>> diagram_context =
-      diagram->CreateDefaultContext();
-  Context<double>& plant_context =
-      diagram->GetMutableSubsystemContext(plant, diagram_context.get());
-
-  /* Set non-trivial initial pose and velocity. */
-  const math::RotationMatrixd R_WB(
-      math::RollPitchYawd(Vector3<double>{100, 200, 300}));
-  constexpr double kZ0 = 0.05;  // Initial ball height [m].
-  const math::RigidTransformd X_WB(R_WB, Vector3d(0.0, 0.0, kZ0));
-  plant.SetFreeBodyPose(&plant_context, plant.GetBodyByName("Ball"), X_WB);
-  const SpatialVelocity<double> V_WB(Vector3d(100, 200, 300),
-                                     Vector3d(1.5, 1.6, 1.7));
-  plant.SetFreeBodySpatialVelocity(&plant_context, plant.GetBodyByName("Ball"),
-                                   V_WB);
-
-  /* Builds the simulator and simulate to final time. */
-  systems::Simulator<double> simulator(*diagram, std::move(diagram_context));
-  constexpr double kFinalTime = 0.1;
-  simulator.AdvanceTo(kFinalTime);
-  const Context<double>& final_plant_context =
-      plant.GetMyContextFromRoot(simulator.get_context());
-  return final_plant_context.get_discrete_state().get_vector().get_value();
-}
-
-/* Given a scene with no deformable body, verify that the simulation results
- obtained through the DeformableRigidManager is the same as the one obtained
- without when no contact solver is assigned. */
-GTEST_TEST(RigidUpdateTest, TamsiSolver) {
-  const VectorXd final_state_with_manager = CalcFinalState(nullptr, true);
-  const VectorXd final_state_without_manager = CalcFinalState(nullptr, false);
-  EXPECT_TRUE(
-      CompareMatrices(final_state_with_manager, final_state_without_manager));
-  /* Sanity check that the final state is not NaN. */
-  EXPECT_FALSE(final_state_with_manager.hasNaN());
-}
-
-/* Similar to the test above but uses a contact solver instead of the TAMSI
- solver to solve rigid contacts. */
-GTEST_TEST(RigidUpdateTest, ContactSolver) {
-  const VectorXd final_state_with_manager = CalcFinalState(
-      std::make_unique<contact_solvers::internal::PgsSolver<double>>(), true);
-  const VectorXd final_state_without_manager = CalcFinalState(
-      std::make_unique<contact_solvers::internal::PgsSolver<double>>(), false);
-  EXPECT_TRUE(
-      CompareMatrices(final_state_with_manager, final_state_without_manager));
-  /* Sanity check that the final state is not NaN. */
-  EXPECT_FALSE(final_state_with_manager.hasNaN());
+  const auto& plant_context = plant_->GetMyContextFromRoot(*diagram_context_);
+  EXPECT_THROW(
+      plant_->get_generalized_acceleration_output_port().Eval(plant_context),
+      std::exception);
 }
 
 /* Verifies that RegisterCollisionGeometry registers the rigid objects from
@@ -356,7 +245,7 @@ TEST_F(DeformableRigidManagerTest, RegisterCollisionGeometry) {
   get_collision_geometry(&id);
   /* Verify the surface mesh is as expected. */
   const SurfaceMesh<double> expected_surface_mesh =
-      geometry::internal::ConvertVolumeToSurfaceMesh(MakeUnitCubeTetMesh());
+      geometry::ConvertVolumeToSurfaceMesh(MakeUnitCubeTetMesh());
   EXPECT_TRUE(expected_surface_mesh.Equal(collision_objects.mesh(id)));
   /* Verify proximity property is as expected. */
   const CoulombFriction<double> mu = collision_objects.proximity_properties(id)
@@ -371,15 +260,17 @@ TEST_F(DeformableRigidManagerTest, RegisterCollisionGeometry) {
 
 /* Verifies that deformable vertex positions gets updated as expected. */
 TEST_F(DeformableRigidManagerTest, UpdateDeformableVertexPositions) {
-  auto context = plant_.CreateDefaultContext();
-  auto simulator = systems::Simulator<double>(plant_, std::move(context));
+  auto simulator =
+      systems::Simulator<double>(*diagram_, std::move(diagram_context_));
+  const auto& plant_context =
+      plant_->GetMyContextFromRoot(simulator.get_context());
   simulator.AdvanceTo(kDt);
   const std::vector<internal::ReferenceDeformableGeometry<double>>&
       reference_configuration_geometries =
           deformable_model_->reference_configuration_geometries();
   DRAKE_DEMAND(reference_configuration_geometries.size() == 1);
   const std::vector<geometry::internal::DeformableVolumeMesh<double>>&
-      deformed_meshes = EvalDeformableMeshes(simulator.get_context());
+      deformed_meshes = EvalDeformableMeshes(plant_context);
   DRAKE_DEMAND(deformed_meshes.size() == 1);
   DRAKE_DEMAND(deformed_meshes[0].mesh().num_vertices() ==
                reference_configuration_geometries[0].mesh().num_vertices());
@@ -396,7 +287,7 @@ TEST_F(DeformableRigidManagerTest, UpdateDeformableVertexPositions) {
   /* Verify that the vertices of the mesh is as expected. */
   const auto current_positions =
       deformable_model_->get_vertex_positions_output_port()
-          .Eval<std::vector<VectorXd>>(simulator.get_context());
+          .Eval<std::vector<VectorXd>>(plant_context);
   EXPECT_EQ(current_positions.size(), 1);
   EXPECT_EQ(current_positions[0].size(),
             deformed_meshes[0].mesh().num_vertices() * 3);
@@ -516,13 +407,32 @@ class DeformableRigidContactDataTest : public ::testing::Test {
   /* Set up a scene with three rigid boxes and one deforamble cube.
    In particular, unit cube A is deformable and boxes B, C, and D are rigid and
    have size (2, 0.5, 2). */
-  void SetUp() override {
+  void SetUp() override { Initialize(false); }
+
+  void Initialize(bool add_dirichlet_bc) {
     systems::DiagramBuilder<double> builder;
     std::tie(plant_, scene_graph_) = AddMultibodyPlantSceneGraph(&builder, kDt);
     auto deformable_model = std::make_unique<DeformableModel<double>>(plant_);
     A_ = deformable_model->RegisterDeformableBody(
         MakeUnitCubeDeformableGeometry(), "box_A", MakeDeformableBodyConfig(),
         MakeProximityProperties(kStiffnessA, kDampingA, kFrictionA));
+    if (add_dirichlet_bc) {
+      /* Set up the boundary condition so that one and only one vertex (at
+       position (-0.5, -0.5, -0.5)) is under dirichlet boundary conditions. */
+      deformable_model->SetWallBoundaryCondition(A_, Vector3d(-0.5, -0.5, -0.5),
+                                                 Vector3d(1, 1, 1));
+      /* Verify our clear box knowledge that the vertex at position (-0.5,
+       -0.5, -0.5) has vertex index 0 and thus dof index 0, 1, 2. */
+      const FemModelBase<double>& fem_model = deformable_model->fem_model(A_);
+      const DirichletBoundaryCondition<double>* dirichlet_bc =
+          fem_model.dirichlet_boundary_condition();
+      ASSERT_NE(dirichlet_bc, nullptr);
+      const std::map<DofIndex, VectorXd>& bc_map = dirichlet_bc->get_bcs();
+      ASSERT_EQ(bc_map.size(), 3);
+      for (DofIndex dof_index(0); dof_index < 3; ++dof_index) {
+        ASSERT_NE(bc_map.find(dof_index), bc_map.end());
+      }
+    }
     plant_->AddPhysicalModel(std::move(deformable_model));
     /* Add the rigid bodies. */
     const UnitInertia<double> G_Rcm =
@@ -548,7 +458,8 @@ class DeformableRigidContactDataTest : public ::testing::Test {
     plant_->Finalize();
 
     auto deformable_rigid_manager =
-        std::make_unique<DeformableRigidManager<double>>();
+        std::make_unique<DeformableRigidManager<double>>(
+            std::make_unique<PgsSolver<double>>());
     deformable_rigid_manager_ = deformable_rigid_manager.get();
     plant_->SetDiscreteUpdateManager(std::move(deformable_rigid_manager));
     deformable_rigid_manager_->RegisterCollisionObjects(*scene_graph_);
@@ -572,9 +483,9 @@ class DeformableRigidContactDataTest : public ::testing::Test {
 
   /* Forwards the call to DeformableRigidManager::CalcContactPointData() and
    returns the result as a return value. */
-  DeformableRigidManager<double>::ContactPointData CalcContactPointData(
+  internal::ContactPointData<double> CalcContactPointData(
       const Context<double>& context) const {
-    DeformableRigidManager<double>::ContactPointData data;
+    internal::ContactPointData<double> data;
     deformable_rigid_manager_->CalcContactPointData(context, &data);
     return data;
   }
@@ -811,6 +722,49 @@ TEST_F(DeformableRigidContactDataTest, ContactJacobian) {
   }
 }
 
+/* Verify that the contact jacobian with Dirichlet boundary condition present is
+ the same as that when there is no boundary condition except with appropriate
+ columns zeroed out. */
+TEST_F(DeformableRigidContactDataTest, ContactJacobianWithBoundaryCondition) {
+  /* Calculate the contact jacobian *without* boundary condition. */
+  Initialize(false);
+  Context<double>& plant_without_bc_context =
+      plant_->GetMyMutableContextFromRoot(diagram_context_.get());
+  /* Set poses of the rigid bodies. */
+  const Vector3d p_WB(0, -0.5, 0);
+  const Vector3d p_WC(0, 0.5, 0);
+  const Vector3d p_WD(0, 0, -1);
+  const math::RigidTransformd X_WB(p_WB);
+  const math::RigidTransformd X_WC(p_WC);
+  const math::RigidTransformd X_WD(p_WD);
+  plant_->SetFreeBodyPose(&plant_without_bc_context, plant_->get_body(B_),
+                          X_WB);
+  plant_->SetFreeBodyPose(&plant_without_bc_context, plant_->get_body(C_),
+                          X_WC);
+  plant_->SetFreeBodyPose(&plant_without_bc_context, plant_->get_body(D_),
+                          X_WD);
+  MatrixXd Jc_without_bc = CalcContactJacobian(plant_without_bc_context);
+
+  /* Calculate the contact jacobian *with* boundary condition. */
+  Initialize(true);
+  Context<double>& plant_with_bc_context =
+      plant_->GetMyMutableContextFromRoot(diagram_context_.get());
+  plant_->SetFreeBodyPose(&plant_with_bc_context, plant_->get_body(B_), X_WB);
+  plant_->SetFreeBodyPose(&plant_with_bc_context, plant_->get_body(C_), X_WC);
+  plant_->SetFreeBodyPose(&plant_with_bc_context, plant_->get_body(D_), X_WD);
+  const MatrixXd Jc_with_bc = CalcContactJacobian(plant_with_bc_context);
+
+  /* Jc_without_bc should be the same as Jc_with_bc except that the columns
+   corresponding to the deformable dofs under bc (the 0th, 1st, and 2nd
+   deformable dofs) are zeroed out. */
+  EXPECT_FALSE(CompareMatrices(Jc_with_bc, Jc_without_bc));
+  const int nv_rigid = plant_->num_velocities();
+  for (int deformable_dof = 0; deformable_dof < 3; ++deformable_dof) {
+    Jc_without_bc.col(nv_rigid + deformable_dof).setZero();
+  }
+  EXPECT_TRUE(CompareMatrices(Jc_with_bc, Jc_without_bc));
+}
+
 /* Uses the same set up as the ContactJacobian test and verifies that
  CalcContactPointData correctly assembles the data from both rigid-rigid
  contacts and deformable-rigid contacts. Note that in this test, we exploit our
@@ -845,7 +799,8 @@ TEST_F(DeformableRigidContactDataTest, ContactData) {
   ASSERT_GT(nc_rigid_deformable, 0);
 
   /* Verifies that the contact point data is as expected. */
-  const auto contact_point_data = CalcContactPointData(plant_context);
+  const internal::ContactPointData<double> contact_point_data =
+      CalcContactPointData(plant_context);
   const VectorXd& mu = contact_point_data.mu;
   const VectorXd& phi0 = contact_point_data.phi0;
   const VectorXd& stiffness = contact_point_data.stiffness;
@@ -982,7 +937,8 @@ TEST_F(DeformableRigidContactDataTest, NoContact) {
   EXPECT_EQ(Jc.cols(), 0);
 
   /* Verify that the contact point data is empty. */
-  const auto contact_point_data = CalcContactPointData(plant_context);
+  const internal::ContactPointData<double> contact_point_data =
+      CalcContactPointData(plant_context);
   EXPECT_EQ(contact_point_data.mu.size(), 0);
   EXPECT_EQ(contact_point_data.phi0.size(), 0);
   EXPECT_EQ(contact_point_data.stiffness.size(), 0);
@@ -1021,7 +977,8 @@ class DeformableRigidDynamicsDataTest : public ::testing::Test {
     plant_->Finalize();
 
     auto owned_deformable_rigid_manager =
-        std::make_unique<DeformableRigidManager<double>>();
+        std::make_unique<DeformableRigidManager<double>>(
+            std::make_unique<PgsSolver<double>>());
     deformable_rigid_manager_ = owned_deformable_rigid_manager.get();
     plant_->SetDiscreteUpdateManager(std::move(owned_deformable_rigid_manager));
     deformable_rigid_manager_->RegisterCollisionObjects(*scene_graph_);
@@ -1072,11 +1029,17 @@ class DeformableRigidDynamicsDataTest : public ::testing::Test {
     return deformable_rigid_manager_->EvalFreeMotionRigidVelocities(context);
   }
 
-  /* Calls DeformableRigidManager::EvalParticipatingFreeMotionVelocities(). */
-  const VectorX<double>& EvalParticipatingFreeMotionVelocities(
+  /* Calls DeformableRigidManager::EvalFreeMotionParticipatingVelocities(). */
+  const VectorX<double>& EvalFreeMotionParticipatingVelocities(
       const systems::Context<double>& context) const {
-    return deformable_rigid_manager_->EvalParticipatingFreeMotionVelocities(
+    return deformable_rigid_manager_->EvalFreeMotionParticipatingVelocities(
         context);
+  }
+
+  /* Calls DeformableRigidManager::EvalParticipatingVelocities(). */
+  const VectorX<double>& EvalParticipatingVelocities(
+      const systems::Context<double>& context) const {
+    return deformable_rigid_manager_->EvalParticipatingVelocities(context);
   }
 
   /* Calls DeformableRigidManager::EvalFreeMotionFemStateBase(). */
@@ -1176,8 +1139,11 @@ TEST_F(DeformableRigidDynamicsDataTest, NoContact) {
   EXPECT_EQ(tangent_matrix.rows(), 0);
   EXPECT_EQ(tangent_matrix.cols(), 0);
   const VectorX<double>& participating_v_star =
-      EvalParticipatingFreeMotionVelocities(plant_context);
+      EvalFreeMotionParticipatingVelocities(plant_context);
   EXPECT_EQ(participating_v_star.size(), 0);
+  const VectorX<double>& participating_v0 =
+      EvalParticipatingVelocities(plant_context);
+  EXPECT_EQ(participating_v0.size(), 0);
 }
 
 /* Verifies that the contact tangent matrix matches expectation. */
@@ -1264,7 +1230,7 @@ TEST_F(DeformableRigidDynamicsDataTest, ParticipatingFreeMotionVelocities) {
             7 /* number of vertices in the octehedral mesh */ * 3);
 
   const VectorXd& participating_v_star =
-      EvalParticipatingFreeMotionVelocities(plant_context);
+      EvalFreeMotionParticipatingVelocities(plant_context);
   /* v0-v4, and v6 are participating in contact. */
   constexpr int kNumParticipatingVertices = 6;
   constexpr int kNumParticipatingDofs = 3 * kNumParticipatingVertices;
@@ -1285,6 +1251,10 @@ TEST_F(DeformableRigidDynamicsDataTest, ParticipatingFreeMotionVelocities) {
   EXPECT_TRUE(
       CompareMatrices(participating_v_star.tail<kNumParticipatingDofs>(),
                       expected_participating_deformable_v_star));
+
+  const VectorXd& participating_v0 = EvalParticipatingVelocities(plant_context);
+  EXPECT_TRUE(CompareMatrices(
+      participating_v0, VectorXd::Zero(kNumRigidDofs + kNumParticipatingDofs)));
 }
 
 // TODO(xuchenhan-tri): This unit test can be strengthened by leveraging

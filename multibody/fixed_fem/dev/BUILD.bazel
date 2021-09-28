@@ -12,6 +12,20 @@ package(
 )
 
 drake_cc_library(
+    name = "acceleration_newmark_scheme",
+    srcs = [
+        "acceleration_newmark_scheme.cc",
+    ],
+    hdrs = [
+        "acceleration_newmark_scheme.h",
+    ],
+    deps = [
+        ":newmark_scheme",
+        "//common:default_scalars",
+    ],
+)
+
+drake_cc_library(
     name = "collision_objects",
     srcs = [
         "collision_objects.cc",
@@ -35,36 +49,33 @@ drake_cc_library(
 )
 
 drake_cc_library(
-    name = "constitutive_model",
+    name = "calc_lame_parameters",
+    srcs = [
+        "calc_lame_parameters.cc",
+    ],
     hdrs = [
-        "constitutive_model.h",
+        "calc_lame_parameters.h",
     ],
     deps = [
-        ":fem_indexes",
-        "//common:essential",
-        "//multibody/fem:deformation_gradient_data",
-    ],
-)
-
-drake_cc_library(
-    name = "constitutive_model_utilities",
-    hdrs = [
-        "constitutive_model_utilities.h",
+        "//common:default_scalars",
     ],
 )
 
 drake_cc_library(
     name = "corotated_model",
+    srcs = [
+        "corotated_model.cc",
+    ],
     hdrs = [
         "corotated_model.h",
     ],
     deps = [
-        ":constitutive_model",
-        ":constitutive_model_utilities",
+        ":calc_lame_parameters",
         ":corotated_model_data",
         ":matrix_utilities",
-        "//common:default_scalars",
+        "//common:autodiff",
         "//common:essential",
+        "//multibody/fem:constitutive_model",
     ],
 )
 
@@ -75,7 +86,7 @@ drake_cc_library(
     ],
     deps = [
         ":matrix_utilities",
-        "//common:default_scalars",
+        "//common:autodiff",
         "//common:essential",
         "//multibody/fem:deformation_gradient_data",
     ],
@@ -187,9 +198,12 @@ drake_cc_library(
         ":deformable_model",
         ":deformable_rigid_contact_pair",
         ":fem_solver",
-        ":permute_block_sparse_matrix",
+        ":inverse_spd_operator",
+        ":matrix_utilities",
         ":schur_complement",
+        ":velocity_newmark_scheme",
         "//common:essential",
+        "//multibody/contact_solvers:block_sparse_linear_operator",
         "//multibody/contact_solvers:block_sparse_matrix",
         "//multibody/plant",
     ],
@@ -238,9 +252,9 @@ drake_cc_library(
         "dynamic_elasticity_model.h",
     ],
     deps = [
+        ":acceleration_newmark_scheme",
         ":damping_model",
         ":elasticity_model",
-        ":newmark_scheme",
         "//geometry/proximity:volume_mesh",
     ],
 )
@@ -262,10 +276,10 @@ drake_cc_library(
         "elasticity_element.h",
     ],
     deps = [
-        ":constitutive_model",
         ":fem_element",
         "//common:essential",
         "//common:unused",
+        "//multibody/fem:constitutive_model",
         "//multibody/fem:isoparametric_element",
         "//multibody/fem:quadrature",
     ],
@@ -389,30 +403,30 @@ drake_cc_library(
 )
 
 drake_cc_library(
-    name = "linear_constitutive_model",
-    hdrs = [
-        "linear_constitutive_model.h",
-    ],
+    name = "inverse_spd_operator",
+    srcs = ["inverse_spd_operator.cc"],
+    hdrs = ["inverse_spd_operator.h"],
     deps = [
-        ":constitutive_model",
-        ":constitutive_model_utilities",
-        ":linear_constitutive_model_data",
         "//common:default_scalars",
         "//common:essential",
+        "//multibody/contact_solvers:linear_operator",
     ],
 )
 
 drake_cc_library(
-    name = "linear_constitutive_model_data",
+    name = "linear_constitutive_model",
     srcs = [
-        "linear_constitutive_model_data.cc",
+        "linear_constitutive_model.cc",
     ],
     hdrs = [
-        "linear_constitutive_model_data.h",
+        "linear_constitutive_model.h",
     ],
     deps = [
+        ":calc_lame_parameters",
+        "//common:autodiff",
         "//common:essential",
-        "//multibody/fem:deformation_gradient_data",
+        "//multibody/fem:constitutive_model",
+        "//multibody/fem:linear_constitutive_model_data",
     ],
 )
 
@@ -429,10 +443,14 @@ drake_cc_library(
 
 drake_cc_library(
     name = "matrix_utilities",
+    srcs = [
+        "matrix_utilities.cc",
+    ],
     hdrs = [
         "matrix_utilities.h",
     ],
     deps = [
+        "//common:default_scalars",
         "//common:essential",
     ],
 )
@@ -466,20 +484,6 @@ drake_cc_library(
     ],
 )
 
-drake_cc_library(
-    name = "permute_block_sparse_matrix",
-    srcs = [
-        "permute_block_sparse_matrix.cc",
-    ],
-    hdrs = [
-        "permute_block_sparse_matrix.h",
-    ],
-    deps = [
-        "//common:default_scalars",
-        "//common:essential",
-    ],
-)
-
 drake_cc_binary(
     name = "run_scripted_deformable_motion",
     srcs = [
@@ -506,8 +510,35 @@ drake_cc_binary(
         ":mesh_utilities",
         "//common:add_text_logging_gflags",
         "//math:geometric_transform",
+        "//multibody/contact_solvers:pgs_solver",
         "//systems/analysis:simulator_gflags",
         "//systems/framework:diagram_builder",
+    ],
+)
+
+drake_cc_binary(
+    name = "run_simple_gripper",
+    srcs = [
+        "run_simple_gripper.cc",
+    ],
+    data = [
+        "//examples/simple_gripper:simple_gripper_models",
+    ],
+    deps = [
+        ":deformable_model",
+        ":deformable_rigid_manager",
+        ":deformable_visualizer",
+        ":mesh_utilities",
+        "//common:add_text_logging_gflags",
+        "//geometry:drake_visualizer",
+        "//math:geometric_transform",
+        "//multibody/contact_solvers:pgs_solver",
+        "//multibody/parsing:parser",
+        "//systems/analysis:simulator_gflags",
+        "//systems/framework:diagram_builder",
+        "//systems/primitives:adder",
+        "//systems/primitives:constant_vector_source",
+        "//systems/primitives:sine",
     ],
 )
 
@@ -559,6 +590,20 @@ drake_cc_library(
 )
 
 drake_cc_library(
+    name = "velocity_newmark_scheme",
+    srcs = [
+        "velocity_newmark_scheme.cc",
+    ],
+    hdrs = [
+        "velocity_newmark_scheme.h",
+    ],
+    deps = [
+        ":newmark_scheme",
+        "//common:default_scalars",
+    ],
+)
+
+drake_cc_library(
     name = "zeroth_order_state_updater",
     hdrs = [
         "zeroth_order_state_updater.h",
@@ -572,9 +617,21 @@ drake_cc_library(
 drake_cc_library(
     name = "test_utilities",
     testonly = 1,
+    srcs = ["test/test_utilities.cc"],
     hdrs = ["test/test_utilities.h"],
     deps = [
+        "//common:default_scalars",
         "//common:essential",
+    ],
+)
+
+drake_cc_googletest(
+    name = "acceleration_newmark_scheme_test",
+    deps = [
+        ":acceleration_newmark_scheme",
+        ":dummy_element",
+        ":velocity_newmark_scheme",
+        "//common/test_utilities:eigen_matrix_compare",
     ],
 )
 
@@ -585,6 +642,43 @@ drake_cc_googletest(
         ":collision_objects",
         "//common:find_resource",
         "//common/test_utilities:expect_throws_message",
+    ],
+)
+
+drake_cc_library(
+    name = "constitutive_model_test_utilities",
+    testonly = 1,
+    srcs = ["test/constitutive_model_test_utilities.cc"],
+    hdrs = ["test/constitutive_model_test_utilities.h"],
+    deps = [
+        ":corotated_model",
+        ":linear_constitutive_model",
+        ":test_utilities",
+        "//common:autodiff",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
+        "//math:gradient",
+        "//multibody/fem:constitutive_model",
+    ],
+)
+
+drake_cc_googletest(
+    name = "corotated_model_test",
+    deps = [
+        ":constitutive_model_test_utilities",
+        ":corotated_model",
+    ],
+)
+
+drake_cc_googletest(
+    name = "deformable_box_test",
+    deps = [
+        ":deformable_rigid_manager",
+        ":deformable_visualizer",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//geometry:drake_visualizer",
+        "//multibody/contact_solvers:pgs_solver",
+        "//systems/analysis:simulator",
     ],
 )
 
@@ -611,12 +705,21 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
+    name = "deformable_rigid_contact_solver_test",
+    deps = [
+        ":deformable_rigid_manager",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//multibody/contact_solvers:contact_solver_utils",
+        "//multibody/contact_solvers:pgs_solver",
+    ],
+)
+
+drake_cc_googletest(
     name = "deformable_rigid_manager_test",
     deps = [
         ":deformable_rigid_manager",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
-        "//examples/multibody/rolling_sphere:make_rolling_sphere_plant",
         "//geometry/proximity:make_box_mesh",
         "//multibody/contact_solvers:pgs_solver",
         "//systems/analysis:simulator",
@@ -732,21 +835,17 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
-    name = "hyperelastic_constitutive_model_test",
+    name = "linear_constitutive_model_test",
     deps = [
-        ":corotated_model",
+        ":constitutive_model_test_utilities",
         ":linear_constitutive_model",
-        ":test_utilities",
-        "//common/test_utilities:eigen_matrix_compare",
-        "//common/test_utilities:expect_throws_message",
-        "//math:gradient",
     ],
 )
 
 drake_cc_googletest(
-    name = "linear_constitutive_model_data_test",
+    name = "inverse_spd_operator_test",
     deps = [
-        ":linear_constitutive_model_data",
+        ":inverse_spd_operator",
         "//common/test_utilities:eigen_matrix_compare",
     ],
 )
@@ -767,24 +866,23 @@ drake_cc_googletest(
     name = "mesh_utilities_test",
     deps = [
         ":mesh_utilities",
+        "//geometry/proximity:make_box_field",
+        "//geometry/proximity:make_box_mesh",
+        "//geometry/proximity:mesh_to_vtk",
         "//geometry/proximity:proximity_utilities",
     ],
 )
 
 drake_cc_googletest(
-    name = "newmark_scheme_test",
+    name = "rigid_update_test",
     deps = [
-        ":dummy_element",
-        ":newmark_scheme",
+        ":deformable_rigid_manager",
         "//common/test_utilities:eigen_matrix_compare",
-    ],
-)
-
-drake_cc_googletest(
-    name = "permute_block_sparse_matrix_test",
-    deps = [
-        ":permute_block_sparse_matrix",
-        "//common/test_utilities:eigen_matrix_compare",
+        "//examples/multibody/rolling_sphere:make_rolling_sphere_plant",
+        "//math:geometric_transform",
+        "//multibody/contact_solvers:pgs_solver",
+        "//multibody/plant",
+        "//systems/analysis:simulator",
     ],
 )
 
@@ -835,6 +933,16 @@ drake_cc_googletest(
         "//geometry/proximity:make_box_mesh",
         "//multibody/fem:linear_simplex_element",
         "//multibody/fem:simplex_gaussian_quadrature",
+    ],
+)
+
+drake_cc_googletest(
+    name = "velocity_newmark_scheme_test",
+    deps = [
+        ":acceleration_newmark_scheme",
+        ":dummy_element",
+        ":velocity_newmark_scheme",
+        "//common/test_utilities:eigen_matrix_compare",
     ],
 )
 

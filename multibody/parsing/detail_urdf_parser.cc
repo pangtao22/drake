@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 
 #include <Eigen/Dense>
 #include <fmt/format.h>
@@ -115,24 +116,40 @@ void ParseBody(const multibody::PackageMap& package_map,
         "ERROR: link tag is missing name attribute.");
   }
 
+  const RigidBody<double>* body_pointer{};
   if (body_name == kWorldName) {
-    return;
-  }
-
-  SpatialInertia<double> M_BBo_B;
-  XMLElement* inertial_node = node->FirstChildElement("inertial");
-  if (!inertial_node) {
-    M_BBo_B = SpatialInertia<double>(
-        0, Vector3d::Zero(), UnitInertia<double>(0, 0, 0));
+    // TODO(SeanCurtis-TRI): We have no documentation about what our parsers
+    //  support and not. The fact that we allow this behavior should be
+    //  discoverable *somewhere*. But this function is in an anonymous
+    //  namespace; where would the documentation go that supports this
+    //  implementation?
+    body_pointer = &plant->world_body();
+    if (node->FirstChildElement("inertial") != nullptr) {
+      // TODO(SeanCurtis-TRI): It would be good to report file name and line
+      //  number in this error.
+      static const logging::Warn log_once(
+          "A URDF file declared the \"world\" link and then attempted to "
+          "assign mass properties (via the <inertial> tag). Only geometries, "
+          "<collision> and <visual>, can be assigned to the world link. The "
+          "<inertial> tag is being ignored.");
+    }
   } else {
-    M_BBo_B = ExtractSpatialInertiaAboutBoExpressedInB(inertial_node);
-  }
+    SpatialInertia<double> M_BBo_B;
+    XMLElement* inertial_node = node->FirstChildElement("inertial");
+    if (!inertial_node) {
+      M_BBo_B = SpatialInertia<double>(0, Vector3d::Zero(),
+                                       UnitInertia<double>(0, 0, 0));
+    } else {
+      M_BBo_B = ExtractSpatialInertiaAboutBoExpressedInB(inertial_node);
+    }
 
-  // Add a rigid body to model each link.
-  const RigidBody<double>& body =
-      plant->AddRigidBody(body_name, model_instance, M_BBo_B);
+    // Add a rigid body to model each link.
+    body_pointer = &plant->AddRigidBody(body_name, model_instance, M_BBo_B);
+  }
 
   if (plant->geometry_source_is_registered()) {
+    const RigidBody<double>& body = *body_pointer;
+
     for (XMLElement* visual_node = node->FirstChildElement("visual");
          visual_node;
          visual_node = visual_node->NextSiblingElement("visual")) {
@@ -161,88 +178,50 @@ void ParseBody(const multibody::PackageMap& package_map,
   }
 }
 
-// Parse the collision filter group tag information into the collision filter
-// groups and a set of pairs between which the collisions will be excluded.
-// @pre plant.geometry_source_is_registered() is `true`.
-void RegisterCollisionFilterGroup(
-    ModelInstanceIndex model_instance,
-    const MultibodyPlant<double>& plant, XMLElement* node,
-    std::map<std::string, geometry::GeometrySet>* collision_filter_groups,
-    std::set<SortedPair<std::string>>* collision_filter_pairs) {
-  DRAKE_DEMAND(plant.geometry_source_is_registered());
-  std::string drake_ignore;
-  if (ParseStringAttribute(node, "ignore", &drake_ignore) &&
-      drake_ignore == std::string("true")) {
-    return;
-  }
-
-  std::string group_name;
-  if (!ParseStringAttribute(node, "name", &group_name)) {
-    throw std::runtime_error("ERROR: group tag is missing name attribute.");
-  }
-
-  geometry::GeometrySet collision_filter_geometry_set;
-  for (XMLElement* member_node = node->FirstChildElement("drake:member");
-       member_node;
-       member_node = member_node->NextSiblingElement("drake:member")) {
-    const char* body_name = member_node->Attribute("link");
-    if (!body_name) {
-      throw std::runtime_error(
-          fmt::format("'{}':'{}':'{}': Collision filter group '{}' provides a "
-                      "member tag without specifying the \"link\" attribute.",
-                      __FILE__, __func__, node->GetLineNum(), group_name));
-    }
-    const auto& body = plant.GetBodyByName(body_name, model_instance);
-    collision_filter_geometry_set.Add(
-        plant.GetBodyFrameIdOrThrow(body.index()));
-  }
-  collision_filter_groups->insert({group_name, collision_filter_geometry_set});
-
-  for (XMLElement* ignore_node =
-           node->FirstChildElement("drake:ignored_collision_filter_group");
-       ignore_node; ignore_node = ignore_node->NextSiblingElement(
-                        "drake:ignored_collision_filter_group")) {
-    const char* target_name = ignore_node->Attribute("name");
-    if (!target_name) {
-      throw std::runtime_error(fmt::format(
-          "'{}':'{}':'{}': Collision filter group provides a tag specifying a "
-          "group to ignore without specifying the \"name\" attribute.",
-          __FILE__, __func__, node->GetLineNum()));
-    }
-    // These two group names are allowed to be identical, which means the bodies
-    // inside this collision filter group should be collision excluded among
-    // each other.
-    collision_filter_pairs->insert({group_name, target_name});
-  }
-}
-
-// @pre plant->geometry_source_is_registered() is `true`.
 void ParseCollisionFilterGroup(ModelInstanceIndex model_instance,
                                XMLElement* node,
                                MultibodyPlant<double>* plant) {
-  DRAKE_DEMAND(plant->geometry_source_is_registered());
-  std::map<std::string, geometry::GeometrySet> collision_filter_groups;
-  std::set<SortedPair<std::string>> collision_filter_pairs;
-  for (XMLElement* group_node =
-           node->FirstChildElement("drake:collision_filter_group");
-       group_node; group_node = group_node->NextSiblingElement(
-                       "drake:collision_filter_group")) {
-    RegisterCollisionFilterGroup(model_instance, *plant, group_node,
-                                 &collision_filter_groups,
-                                 &collision_filter_pairs);
-  }
-  for (const auto& collision_filter_pair : collision_filter_pairs) {
-    const auto collision_filter_group_a =
-        collision_filter_groups.find(collision_filter_pair.first());
-    DRAKE_DEMAND(collision_filter_group_a != collision_filter_groups.end());
-    const auto collision_filter_group_b =
-        collision_filter_groups.find(collision_filter_pair.second());
-    DRAKE_DEMAND(collision_filter_group_b != collision_filter_groups.end());
-
-    plant->ExcludeCollisionGeometriesWithCollisionFilterGroupPair(
-        {collision_filter_group_a->first, collision_filter_group_a->second},
-        {collision_filter_group_b->first, collision_filter_group_b->second});
-  }
+  auto next_child_element = [](const ElementNode& data_element,
+                               const char* element_name) {
+    return std::get<tinyxml2::XMLElement*>(data_element)
+        ->FirstChildElement(element_name);
+  };
+  auto next_sibling_element = [](const ElementNode& data_element,
+                                 const char* element_name) {
+    return std::get<tinyxml2::XMLElement*>(data_element)
+        ->NextSiblingElement(element_name);
+  };
+  auto has_attribute = [](const ElementNode& data_element,
+                          const char* attribute_name) {
+    std::string attribute_value;
+    return ParseStringAttribute(std::get<tinyxml2::XMLElement*>(data_element),
+                                attribute_name, &attribute_value);
+  };
+  auto get_string_attribute = [](const ElementNode& data_element,
+                                 const char* attribute_name) {
+    std::string attribute_value;
+    if (!ParseStringAttribute(std::get<tinyxml2::XMLElement*>(data_element),
+                              attribute_name, &attribute_value)) {
+      throw std::runtime_error(fmt::format(
+          "{}:{}:{} The tag <{}> does not specify the required attribute"
+          " \"{}\" at line {}.", __FILE__, __func__, __LINE__,
+          std::get<tinyxml2::XMLElement*>(data_element)->Value(),
+          attribute_name,
+          std::get<tinyxml2::XMLElement*>(data_element)->GetLineNum()));
+    }
+    return attribute_value;
+  };
+  auto get_bool_attribute = [](const ElementNode& data_element,
+                               const char* attribute_name) {
+    std::string attribute_value;
+    ParseStringAttribute(std::get<tinyxml2::XMLElement*>(data_element),
+                         attribute_name, &attribute_value);
+    return attribute_value == std::string("true") ? true : false;
+  };
+  ParseCollisionFilterGroupCommon(model_instance, node, plant,
+                                  next_child_element, next_sibling_element,
+                                  has_attribute, get_string_attribute,
+                                  get_bool_attribute, get_string_attribute);
 }
 
 // Parses a joint URDF specification to obtain the names of the joint, parent
@@ -314,8 +293,7 @@ void ParseJointLimits(XMLElement* node, double* lower, double* upper,
   }
 }
 
-void ParseJointDynamics(const std::string& joint_name,
-                        XMLElement* node, double* damping) {
+void ParseJointDynamics(XMLElement* node, double* damping) {
   *damping = 0.0;
   double coulomb_friction = 0.0;
   double coulomb_window = std::numeric_limits<double>::epsilon();
@@ -325,14 +303,18 @@ void ParseJointDynamics(const std::string& joint_name,
     ParseScalarAttribute(dynamics_node, "damping", damping);
     if (ParseScalarAttribute(dynamics_node, "friction", &coulomb_friction) &&
         coulomb_friction != 0.0) {
-      drake::log()->warn("Joint {} specifies non-zero friction, which is "
-                         "not supported by MultibodyPlant", joint_name);
+      static const logging::Warn log_once(
+          "At least one of your URDF files has specified a non-zero value for "
+          "the 'friction' attribute of a joint/dynamics tag. MultibodyPlant "
+          "does not currently support non-zero joint friction.");
     }
     if (ParseScalarAttribute(dynamics_node, "coulomb_window",
                              &coulomb_window) &&
         coulomb_window != std::numeric_limits<double>::epsilon()) {
-      drake::log()->warn("Joint {} specifies non-zero coulomb_window, which is "
-                         "not supported by MultibodyPlant", joint_name);
+      static const logging::Warn log_once(
+          "At least one of your URDF files has specified a value for  the "
+          "'coulomb_window' attribute of a <joint> tag. Drake no longer makes "
+          "use of that attribute and all instances will be ignored.");
     }
   }
 }
@@ -426,7 +408,7 @@ void ParseJoint(ModelInstanceIndex model_instance,
   if (type.compare("revolute") == 0 || type.compare("continuous") == 0) {
     throw_on_custom_joint(false);
     ParseJointLimits(node, &lower, &upper, &velocity, &acceleration, &effort);
-    ParseJointDynamics(name, node, &damping);
+    ParseJointDynamics(node, &damping);
     const JointIndex index = plant->AddJoint<RevoluteJoint>(
         name, parent_body, X_PJ,
         child_body, std::nullopt, axis, lower, upper, damping).index();
@@ -442,7 +424,7 @@ void ParseJoint(ModelInstanceIndex model_instance,
   } else if (type.compare("prismatic") == 0) {
     throw_on_custom_joint(false);
     ParseJointLimits(node, &lower, &upper, &velocity, &acceleration, &effort);
-    ParseJointDynamics(name, node, &damping);
+    ParseJointDynamics(node, &damping);
     const JointIndex index = plant->AddJoint<PrismaticJoint>(
         name, parent_body, X_PJ,
         child_body, std::nullopt, axis, lower, upper, damping).index();
@@ -457,7 +439,7 @@ void ParseJoint(ModelInstanceIndex model_instance,
                        "free body.", name, child_name);
   } else if (type.compare("ball") == 0) {
     throw_on_custom_joint(true);
-    ParseJointDynamics(name, node, &damping);
+    ParseJointDynamics(node, &damping);
     plant->AddJoint<BallRpyJoint>(name, parent_body, X_PJ,
                                   child_body, std::nullopt, damping);
   } else if (type.compare("planar") == 0) {
@@ -471,7 +453,7 @@ void ParseJoint(ModelInstanceIndex model_instance,
                                  child_body, std::nullopt, damping_vec);
   } else if (type.compare("universal") == 0) {
     throw_on_custom_joint(true);
-    ParseJointDynamics(name, node, &damping);
+    ParseJointDynamics(node, &damping);
     plant->AddJoint<UniversalJoint>(name, parent_body, X_PJ,
                                     child_body, std::nullopt, damping);
   } else {
@@ -505,9 +487,10 @@ void ParseTransmission(
   // print a warning and then abort this method call since only simple
   // transmissions are supported at this time.
   if (type.find("SimpleTransmission") == std::string::npos) {
-    drake::log()->warn(
-        "Only SimpleTransmissions are supported right now.  This element "
-        "will be skipped.");
+    static const logging::Warn log_once(
+        "At least one of your URDF files has <transmission> type that isn't "
+        "'SimpleTransmission'. Drake only supports 'SimpleTransmission'; all "
+        "other transmission types will be ignored.");
     return;
   }
 

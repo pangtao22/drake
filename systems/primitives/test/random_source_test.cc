@@ -11,7 +11,7 @@
 #include "drake/systems/framework/diagram_builder.h"
 #include "drake/systems/framework/test_utilities/scalar_conversion.h"
 #include "drake/systems/primitives/constant_vector_source.h"
-#include "drake/systems/primitives/signal_logger.h"
+#include "drake/systems/primitives/vector_log_sink.h"
 
 namespace drake {
 namespace systems {
@@ -24,12 +24,12 @@ namespace {
 void CheckStatistics(
     const std::function<double(double)>& cumulative_distribution,
     double min_value, double max_value, double h, double fudge_factor,
-    std::unique_ptr<RandomSourced> random_source_system) {
+    std::unique_ptr<RandomSource<double>> random_source_system) {
   DiagramBuilder<double> builder;
 
   auto source = builder.AddSystem(std::move(random_source_system));
   source->set_name("source");
-  auto logger = LogOutput(source->get_output_port(0), &builder);
+  auto logger = LogVectorOutput(source->get_output_port(0), &builder);
   logger->set_name("logger");
 
   auto diagram = builder.Build();
@@ -44,7 +44,7 @@ void CheckStatistics(
   simulator.Initialize();
   simulator.AdvanceTo(20);
 
-  const auto& x = logger->data();
+  const auto& x = logger->FindLog(simulator.get_context()).data();
 
   const int N = x.size();
 
@@ -75,8 +75,8 @@ void CheckStatistics(
 }
 
 GTEST_TEST(RandomSourceTest, UniformWhiteNoise) {
-  auto random_source =
-      std::make_unique<RandomSourced>(RandomDistribution::kUniform, 2, 0.0025);
+  auto random_source = std::make_unique<RandomSource<double>>(
+      RandomDistribution::kUniform, 2, 0.0025);
   EXPECT_EQ(random_source->get_distribution(), RandomDistribution::kUniform);
   EXPECT_EQ(random_source->get_fixed_seed(), std::nullopt);
 
@@ -92,25 +92,19 @@ GTEST_TEST(RandomSourceTest, UniformWhiteNoise) {
 }
 
 GTEST_TEST(RandomSourceTest, ToAutoDiff) {
-  auto random_source = std::make_unique<RandomSourced>(
+  auto random_source = std::make_unique<RandomSource<double>>(
       RandomDistribution::kUniform, 2, 0.0025);
   EXPECT_TRUE(is_autodiffxd_convertible(*random_source));
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  const RandomSourced deprecated(RandomDistribution::kUniform, 2, 0.0025);
-  EXPECT_NO_THROW(deprecated.ToAutoDiffXd());
-#pragma GCC diagnostic pop
 }
 
 GTEST_TEST(RandomSourceTest, ToSymbolic) {
-  auto random_source = std::make_unique<RandomSourced>(
+  auto random_source = std::make_unique<RandomSource<double>>(
       RandomDistribution::kUniform, 2, 0.0025);
   EXPECT_FALSE(is_symbolic_convertible(*random_source));
 }
 
 GTEST_TEST(RandomSourceTest, UniformWhiteNoiseAutoDiff) {
-  auto random_source = std::make_unique<internal::RandomSourceT<AutoDiffXd>>(
+  auto random_source = std::make_unique<RandomSource<AutoDiffXd>>(
       RandomDistribution::kUniform, 2, 0.0025);
   EXPECT_EQ(random_source->get_distribution(), RandomDistribution::kUniform);
   EXPECT_EQ(random_source->get_fixed_seed(), std::nullopt);
@@ -128,8 +122,8 @@ GTEST_TEST(RandomSourceTest, UniformWhiteNoiseAutoDiff) {
 }
 
 GTEST_TEST(RandomSourceTest, GaussianWhiteNoise) {
-  auto random_source =
-      std::make_unique<RandomSourced>(RandomDistribution::kGaussian, 2, 0.0025);
+  auto random_source = std::make_unique<RandomSource<double>>(
+      RandomDistribution::kGaussian, 2, 0.0025);
   EXPECT_EQ(random_source->get_distribution(), RandomDistribution::kGaussian);
   EXPECT_EQ(random_source->get_fixed_seed(), std::nullopt);
 
@@ -145,7 +139,7 @@ GTEST_TEST(RandomSourceTest, GaussianWhiteNoise) {
 }
 
 GTEST_TEST(RandomSourceTest, ExponentialWhiteNoise) {
-  auto random_source = std::make_unique<RandomSourced>(
+  auto random_source = std::make_unique<RandomSource<double>>(
       RandomDistribution::kExponential, 2, 0.0025);
   EXPECT_EQ(random_source->get_distribution(),
             RandomDistribution::kExponential);
@@ -255,22 +249,23 @@ GTEST_TEST(RandomSourceTest, CorrelationTest) {
   DiagramBuilder<double> builder;
   const int kSize = 1;
   const double kSampleTime = 0.0025;
-  const auto* random1 = builder.AddSystem<RandomSourced>(
+  const auto* random1 = builder.AddSystem<RandomSource<double>>(
       RandomDistribution::kGaussian, kSize, kSampleTime);
-  const auto* log1 = LogOutput(random1->get_output_port(0), &builder);
+  const auto* log1 = LogVectorOutput(random1->get_output_port(0), &builder);
 
-  const auto* random2 = builder.AddSystem<RandomSourced>(
+  const auto* random2 = builder.AddSystem<RandomSource<double>>(
       RandomDistribution::kGaussian, kSize, kSampleTime);
-  const auto* log2 = LogOutput(random2->get_output_port(0), &builder);
+  const auto* log2 = LogVectorOutput(random2->get_output_port(0), &builder);
 
   const auto diagram = builder.Build();
 
   systems::Simulator<double> simulator(*diagram);
+  const auto& context = simulator.get_context();
   simulator.Initialize();
   simulator.AdvanceTo(20);
 
-  const auto& x1 = log1->data();
-  const auto& x2 = log2->data();
+  const auto& x1 = log1->FindLog(context).data();
+  const auto& x2 = log2->FindLog(context).data();
 
   EXPECT_EQ(x1.size(), x2.size());
   const int N = static_cast<int>(x1.size()) / 2;
@@ -286,14 +281,14 @@ GTEST_TEST(RandomSourceTest, CorrelationTest) {
 
 // Check the invariants of the seed lifecycle.
 GTEST_TEST(RandomSourceTest, SeedTest) {
-  RandomSourced dut(RandomDistribution::kUniform, 1, 0.0025);
+  RandomSource<double> dut(RandomDistribution::kUniform, 1, 0.0025);
   const auto& port = dut.get_output_port(0);
 
   // The source does not have a fixed seed by default.
   EXPECT_EQ(dut.get_fixed_seed(), std::nullopt);
 
   // A given instance of a RandomSource always defaults to the same seed.
-  using Seed = RandomSourced::Seed;
+  using Seed = RandomSource<double>::Seed;
   const Seed default_seed = dut.get_seed(*dut.CreateDefaultContext());
   EXPECT_EQ(dut.get_seed(*dut.CreateDefaultContext()), default_seed);
   EXPECT_EQ(dut.get_seed(*dut.CreateDefaultContext()), default_seed);
@@ -336,7 +331,7 @@ GTEST_TEST(RandomSourceTest, SeedTest) {
   EXPECT_EQ(new2b.output, new2.output);
 
   // Now let's spin up a different RandomSource.
-  RandomSourced other(dut.get_distribution(), 1, 0.0025);
+  RandomSource<double> other(dut.get_distribution(), 1, 0.0025);
   const auto& other_port = other.get_output_port(0);
 
   // The output defaults to something fresh.
@@ -372,7 +367,7 @@ GTEST_TEST(RandomSourceTest, SeedTest) {
 // Make sure that calling SetRandomContext changes the output, and
 // SetDefaultContext returns it to the original (default) output.
 GTEST_TEST(RandomSourceTest, SetRandomContextTest) {
-  RandomSourced random_source(RandomDistribution::kUniform, 2, 0.0025);
+  RandomSource<double> random_source(RandomDistribution::kUniform, 2, 0.0025);
 
   auto context = random_source.CreateDefaultContext();
   const Eigen::Vector2d default_values =

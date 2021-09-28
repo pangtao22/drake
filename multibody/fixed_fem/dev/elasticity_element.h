@@ -5,9 +5,9 @@
 
 #include "drake/common/eigen_types.h"
 #include "drake/common/unused.h"
+#include "drake/multibody/fem/constitutive_model.h"
 #include "drake/multibody/fem/isoparametric_element.h"
 #include "drake/multibody/fem/quadrature.h"
-#include "drake/multibody/fixed_fem/dev/constitutive_model.h"
 #include "drake/multibody/fixed_fem/dev/fem_element.h"
 #include "drake/multibody/fixed_fem/dev/fem_state.h"
 
@@ -47,7 +47,7 @@ struct ElasticityElementTraits {
   static_assert(QuadratureType::num_quadrature_points ==
                 IsoparametricElementType::num_sample_locations);
   static_assert(QuadratureType::num_quadrature_points ==
-                ConstitutiveModelType::num_locations());
+                ConstitutiveModelType::num_locations);
   /* Check that the natural dimensions are compatible. */
   static_assert(IsoparametricElementType::natural_dimension ==
                 QuadratureType::natural_dimension);
@@ -78,8 +78,7 @@ struct ElasticityElementTraits {
   // TODO(xuchenhan-tri): Enforce the constraint mentioned above with
   //  static_assert with easy-to-parse error messages.
   struct Data {
-    typename ConstitutiveModelType::Traits::DeformationGradientDataType
-        deformation_gradient_data;
+    typename ConstitutiveModelType::Data deformation_gradient_data;
     /* The elastic energy density evaluated at quadrature points. */
     std::array<T, kNumQuadraturePoints> Psi;
     /* The first Piola stress evaluated at quadrature points. */
@@ -198,7 +197,7 @@ class ElasticityElement : public FemElement<DerivedElement, DerivedTraits> {
    @param[in] reference_positions    The positions (in world frame) of the nodes
    of this element in the reference configuration.
    @param[in] denstiy    The mass density of the element with unit kg/m³.
-   @param[in] gravity    The gravitational accleration (in world frame) for the
+   @param[in] gravity    The gravitational acceleration (in world frame) for the
    new element with unit m/s².
    @pre element_index must be valid.
    @pre density > 0. */
