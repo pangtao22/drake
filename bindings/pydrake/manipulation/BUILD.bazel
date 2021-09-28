@@ -118,13 +118,6 @@ drake_py_unittest(
 )
 
 drake_py_unittest(
-    name = "robot_plan_runner_test",
-    deps = [
-        ":robot_plan_runner_py",
-    ],
-)
-
-drake_py_unittest(
     name = "simple_ui_test",
     data = [
         "//multibody/benchmarks/acrobot:models",

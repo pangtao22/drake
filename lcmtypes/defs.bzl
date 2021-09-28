@@ -15,6 +15,8 @@ ALL_LCM_SRCS = [
     "lcmt_allegro_status.lcm",
     "lcmt_call_python.lcm",
     "lcmt_call_python_data.lcm",
+    "lcmt_contact_discrimination.lcm",
+    "lcmt_contact_info.lcm",
     "lcmt_contact_results_for_viz.lcm",
     "lcmt_drake_signal.lcm",
     "lcmt_force_torque.lcm",
