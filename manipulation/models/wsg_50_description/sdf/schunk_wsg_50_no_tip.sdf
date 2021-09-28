@@ -28,7 +28,7 @@
           <diffuse>0.7 0.7 0.7 1</diffuse>
         </material>
       </visual>
-      <collision name="collision">
+<!--       <collision name="collision">
         <laser_retro>0</laser_retro>
         <max_contacts>10</max_contacts>
         <geometry>
@@ -81,7 +81,7 @@
             </bullet>
           </contact>
         </surface>
-      </collision>
+      </collision> -->
     </link>
     <frame name="body_frame">
       <pose relative_to="body"/>
@@ -112,7 +112,7 @@
           <diffuse>0.2 0.2 0.2 1</diffuse>
         </material>
       </visual>
-      <collision name="collision">
+<!--       <collision name="collision">
         <laser_retro>0</laser_retro>
         <max_contacts>10</max_contacts>
         <geometry>
@@ -165,7 +165,7 @@
             </bullet>
           </contact>
         </surface>
-      </collision>
+      </collision> -->
     </link>
     <link name="right_finger">
       <pose>0.006 0.028 0 0 0 0</pose>
@@ -193,7 +193,7 @@
           <diffuse>0.2 0.2 0.2 1</diffuse>
         </material>
       </visual>
-      <collision name="collision">
+<!--       <collision name="collision">
         <laser_retro>0</laser_retro>
         <max_contacts>10</max_contacts>
         <geometry>
@@ -246,7 +246,7 @@
             </bullet>
           </contact>
         </surface>
-      </collision>
+      </collision> -->
     </link>
     <joint name="left_finger_sliding_joint" type="prismatic">
       <parent>body</parent>
