@@ -19,6 +19,10 @@ JointSpacePlanContact::JointSpacePlanContact(int num_positions)
   joint_stiffness_.resize(num_positions_);
   joint_stiffness_ << 800, 600, 600, 600, 400, 200, 200;
 
+  dq_weight_.resize(num_positions_, num_positions_);
+  dq_weight_.setZero();
+  dq_weight_.diagonal() << 5, 5, 3, 3, 2, 2, 1;
+
   prog_result_ = std::make_unique<solvers::MathematicalProgramResult>();
 }
 
@@ -50,44 +54,30 @@ void JointSpacePlanContact::Step(
   double f_desired = -1;
 
   cout << t << " ";
-  if (desired_separation_contact_force_) {
-    f_desired = desired_separation_contact_force_->value(t - t_separation_);
-    cout << (t - t_separation_) << " " << f_desired << " ";
+  if (f_norm > f_norm_threshold) {
+    cout << "control contact force ";
 
-    if (f_norm < 0.51 * f_norm_threshold) {
-      cout << "reset separation force ";
-      desired_separation_contact_force_.reset(nullptr);
+    const double dx_along_u = (J_u * dq_ref)[0];
+
+    if (dx_along_u > 0) {
+      positive_v_count_++;
+    } else {
+      positive_v_count_ = 0;
     }
 
-  } else {
-    if (f_norm > f_norm_threshold) {
-      cout << "control contact force ";
-
-      const double dx_along_u = (J_u * dq_ref)[0];
-
-      if (dx_along_u > 0) {
-        positive_v_count_++;
-      } else {
-        positive_v_count_ = 0;
-      }
-
-      // limit the norm of dq_ref.
-      const double dq_ref_norm = dq_ref.norm();
-      const double dq_ref_norm_threshold = 0.04;
-      if (dq_ref_norm > dq_ref_norm_threshold) {
-        dq_ref *= dq_ref_norm_threshold / dq_ref_norm;
-      }
-
-      f_desired = f_norm_threshold * 1.5;
-
-      if (positive_v_count_ >= 5) {
-        desired_separation_contact_force_ =
-            std::make_unique<FirstOrderSystem<double>>(
-                f_norm_threshold * 1.5, f_norm_threshold * 0.5, 0.15);
-        t_separation_ = t;
-        cout << "separation starts! ";
-      }
+    // limit the norm of dq_ref.
+    const double dq_ref_norm = dq_ref.norm();
+    const double dq_ref_norm_threshold = 0.04;
+    if (dq_ref_norm > dq_ref_norm_threshold) {
+      dq_ref *= dq_ref_norm_threshold / dq_ref_norm;
     }
+
+    f_desired = f_norm_threshold * 1.5;
+
+//    if (positive_v_count_ >= 5) {
+//      f_desired = -1;
+//      cout << "separation starts! ";
+//    }
   }
 
   if (f_desired > 0) {
@@ -95,12 +85,12 @@ void JointSpacePlanContact::Step(
     Eigen::VectorXd J_u_pinv = J_u.transpose() / std::pow(J_u.norm(), 2);
     SetSmallValuesToZero(&J_u_pinv, 1e-13);
 
-    prog->AddLinearEqualityConstraint(
-        (J_u_pinv.array() * joint_stiffness_).matrix().transpose(),
-        -f_desired, dq);
-//    prog->AddLinearConstraint(
-//        -(J_u_pinv.array() * joint_stiffness_).matrix().transpose(),
-//        -std::numeric_limits<double>::infinity(), f_desired, dq);
+//    prog->AddLinearEqualityConstraint(
+//        (J_u_pinv.array() * joint_stiffness_).matrix().transpose(),
+//        -f_desired, dq);
+    prog->AddLinearConstraint(
+        -(J_u_pinv.array() * joint_stiffness_).matrix().transpose(),
+        -std::numeric_limits<double>::infinity(), f_desired, dq);
   }
   cout << endl;
 
@@ -109,6 +99,12 @@ void JointSpacePlanContact::Step(
       Eigen::MatrixXd::Identity(num_positions_, num_positions_) /
           std::pow(control_period, 2),
       dq_ref, dq);
+
+  // joint velocity cost
+  prog->AddQuadraticErrorCost(
+      0.5 / std::pow(control_period, 2) * dq_weight_,
+      Eigen::VectorXd::Zero(num_positions_), dq);
+
   solver_.Solve(*prog, {}, {}, prog_result_.get());
 
   if (!prog_result_->is_success()) {

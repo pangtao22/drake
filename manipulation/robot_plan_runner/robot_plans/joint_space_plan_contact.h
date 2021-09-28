@@ -30,6 +30,7 @@ class JointSpacePlanContact : public PlanBase {
   std::unique_ptr<ContactForceEstimator> contact_force_estimator_;
   std::unique_ptr<solvers::MathematicalProgramResult> prog_result_;
   solvers::GurobiSolver solver_;
+  Eigen::MatrixXd dq_weight_;
 
   mutable int positive_v_count_{0};
   mutable std::unique_ptr<FirstOrderSystem<double>>
