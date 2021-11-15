@@ -1066,6 +1066,8 @@ GTEST_TEST(SceneGraphParserDetail, MakeProximityPropertiesForCollision) {
   auto assert_single_property = [](const ProximityProperties& properties,
                                    const char* group, const char* property,
                                    double value) {
+    SCOPED_TRACE(fmt::format("testing group {} property {} value {}",
+                             group, property, value));
     ASSERT_TRUE(properties.HasProperty(group, property));
     EXPECT_EQ(properties.GetProperty<double>(group, property), value);
   };
@@ -1078,7 +1080,7 @@ GTEST_TEST(SceneGraphParserDetail, MakeProximityPropertiesForCollision) {
     unique_ptr<sdf::Collision> sdf_collision = make_sdf_collision(R"""(
   <drake:proximity_properties>
     <drake:mesh_resolution_hint>2.5</drake:mesh_resolution_hint>
-    <drake:elastic_modulus>3.5</drake:elastic_modulus>
+    <drake:hydroelastic_modulus>3.5</drake:hydroelastic_modulus>
     <drake:hunt_crossley_dissipation>4.5</drake:hunt_crossley_dissipation>
     <drake:mu_dynamic>4.5</drake:mu_dynamic>
     <drake:mu_static>4.75</drake:mu_static>
@@ -1087,7 +1089,7 @@ GTEST_TEST(SceneGraphParserDetail, MakeProximityPropertiesForCollision) {
         MakeProximityPropertiesForCollision(*sdf_collision);
     assert_single_property(properties, geometry::internal::kHydroGroup,
                            geometry::internal::kRezHint, 2.5);
-    assert_single_property(properties, geometry::internal::kMaterialGroup,
+    assert_single_property(properties, geometry::internal::kHydroGroup,
                            geometry::internal::kElastic, 3.5);
     assert_single_property(properties, geometry::internal::kMaterialGroup,
                            geometry::internal::kHcDissipation, 4.5);

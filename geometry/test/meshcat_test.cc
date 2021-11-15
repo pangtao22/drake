@@ -93,12 +93,12 @@ GTEST_TEST(MeshcatTest, SetObjectWithShape) {
   EXPECT_TRUE(meshcat.GetPackedObject("capsule").empty());
   meshcat.SetObject(
       "mesh", Mesh(FindResourceOrThrow(
-                       "drake/systems/sensors/test/models/meshes/box.obj"),
+                       "drake/geometry/render/test/meshes/box.obj"),
                    .25));
   EXPECT_FALSE(meshcat.GetPackedObject("mesh").empty());
   meshcat.SetObject(
       "convex", Convex(FindResourceOrThrow(
-                           "drake/systems/sensors/test/models/meshes/box.obj"),
+                           "drake/geometry/render/test/meshes/box.obj"),
                        .25));
   EXPECT_FALSE(meshcat.GetPackedObject("convex").empty());
   // Bad filename (no extension).  Should only log a warning.
@@ -107,6 +107,103 @@ GTEST_TEST(MeshcatTest, SetObjectWithShape) {
   // Bad filename (file doesn't exist).  Should only log a warning.
   meshcat.SetObject("bad", Mesh("test.obj"));
   EXPECT_TRUE(meshcat.GetPackedObject("bad").empty());
+}
+
+GTEST_TEST(MeshcatTest, SetObjectWithPointCloud) {
+  Meshcat meshcat;
+
+  perception::PointCloud cloud(5);
+  // clang-format off
+  cloud.mutable_xyzs().transpose() <<
+    1, 2, 3,
+    10, 20, 30,
+    100, 200, 300,
+    4, 5, 6,
+    40, 50, 60;
+  // clang-format on
+  meshcat.SetObject("cloud", cloud);
+  EXPECT_FALSE(meshcat.GetPackedObject("cloud").empty());
+
+  perception::PointCloud rgb_cloud(
+      5, perception::pc_flags::kXYZs | perception::pc_flags::kRGBs);
+  rgb_cloud.mutable_xyzs() = cloud.xyzs();
+  // clang-format off
+  rgb_cloud.mutable_rgbs() <<
+    1, 2, 3,
+    10, 20, 30,
+    100, 200, 255,
+    4, 5, 6,
+    40, 50, 60;
+  // clang-format on
+  meshcat.SetObject("rgb_cloud", rgb_cloud);
+  EXPECT_FALSE(meshcat.GetPackedObject("rgb_cloud").empty());
+}
+
+GTEST_TEST(MeshcatTest, SetObjectWithTriangleSurfaceMesh) {
+  Meshcat meshcat;
+
+  const int face_data[2][3] = {{0, 1, 2}, {2, 3, 0}};
+  std::vector<SurfaceTriangle> faces;
+  for (int f = 0; f < 2; ++f) faces.emplace_back(face_data[f]);
+  const Eigen::Vector3d vertex_data[4] = {
+      {0, 0, 0}, {0.5, 0, 0}, {0.5, 0.5, 0}, {0, 0.5, 0.5}};
+  std::vector<Eigen::Vector3d> vertices;
+  for (int v = 0; v < 4; ++v) vertices.emplace_back(vertex_data[v]);
+  TriangleSurfaceMesh<double> surface_mesh(
+      std::move(faces), std::move(vertices));
+  meshcat.SetObject("triangle_mesh", surface_mesh, Rgba(.9, 0, .9, 1.0));
+  EXPECT_FALSE(meshcat.GetPackedObject("triangle_mesh").empty());
+
+  meshcat.SetObject("triangle_mesh_wireframe", surface_mesh,
+                    Rgba(.9, 0, .9, 1.0), true, 5.0);
+  EXPECT_FALSE(meshcat.GetPackedObject("triangle_mesh_wireframe").empty());
+}
+
+GTEST_TEST(MeshcatTest, SetLine) {
+  Meshcat meshcat;
+
+  Eigen::Matrix3Xd vertices(3, 200);
+  Eigen::RowVectorXd t = Eigen::RowVectorXd::LinSpaced(200, 0, 10 * M_PI);
+  vertices << .25 * t.array().sin(), .25 * t.array().cos(), t / (10 * M_PI);
+  meshcat.SetLine("line", vertices, 3.0, Rgba(0, 0, 1, 1));
+  EXPECT_FALSE(meshcat.GetPackedObject("line").empty());
+
+  Eigen::Matrix3Xd start(3, 4), end(3, 4);
+  // clang-format off
+  start << -.1, -.1,  .1, .1,
+           -.1,  .1, -.1, .1,
+           0, 0, 0, 0;
+  // clang-format on
+  end = start;
+  end.row(2) = Eigen::RowVector4d::Ones();
+  meshcat.SetLineSegments("line_segments", start, end, 5.0, Rgba(0, 1, 0, 1));
+  EXPECT_FALSE(meshcat.GetPackedObject("line_segments").empty());
+
+  // Throws if start.cols() != end.cols().
+  EXPECT_THROW(
+      meshcat.SetLineSegments("bad_segments", Eigen::Matrix3Xd::Identity(3, 4),
+                              Eigen::Matrix3Xd::Identity(3, 3)),
+      std::exception);
+}
+
+GTEST_TEST(MeshcatTest, SetTriangleMesh) {
+  Meshcat meshcat;
+
+  // Populate the vertices/faces transposed, for easier Eigen initialization.
+  Eigen::MatrixXd vertices(4, 3);
+  Eigen::MatrixXi faces(2, 3);
+  // clang-format off
+  vertices << 0, 0, 0,
+              1, 0, 0,
+              1, 0, 1,
+              0, 0, 1;
+  faces << 0, 1, 2,
+           3, 0, 2;
+  // clang-format on
+
+  meshcat.SetTriangleMesh("triangle_mesh", vertices.transpose(),
+                         faces.transpose(), Rgba(1, 0, 0, 1), true, 5.0);
+  EXPECT_FALSE(meshcat.GetPackedObject("triangle_mesh").empty());
 }
 
 GTEST_TEST(MeshcatTest, SetTransform) {
@@ -125,6 +222,29 @@ GTEST_TEST(MeshcatTest, SetTransform) {
   EXPECT_EQ(data.path, "/drake/frame");
   Eigen::Map<Eigen::Matrix4d> matrix(data.matrix);
   EXPECT_TRUE(CompareMatrices(matrix, X_ParentPath.GetAsMatrix4()));
+}
+
+GTEST_TEST(MeshcatTest, SetTransformWithMatrix) {
+  Meshcat meshcat;
+  EXPECT_FALSE(meshcat.HasPath("frame"));
+  EXPECT_TRUE(meshcat.GetPackedTransform("frame").empty());
+  Eigen::Matrix4d matrix;
+  // clang-format off
+  matrix <<  1,  2,  3,  4,
+             5,  6,  7,  8,
+            -1, -2, -3, -4,
+            -5, -6, -7, -8;
+  // clang-format on
+  meshcat.SetTransform("frame", matrix);
+
+  std::string transform = meshcat.GetPackedTransform("frame");
+  msgpack::object_handle oh =
+      msgpack::unpack(transform.data(), transform.size());
+  auto data = oh.get().as<internal::SetTransformData>();
+  EXPECT_EQ(data.type, "set_transform");
+  EXPECT_EQ(data.path, "/drake/frame");
+  Eigen::Map<Eigen::Matrix4d> actual(data.matrix);
+  EXPECT_TRUE(CompareMatrices(matrix, actual));
 }
 
 GTEST_TEST(MeshcatTest, Delete) {
@@ -381,6 +501,116 @@ GTEST_TEST(MeshcatTest, SetOrthographicCamera) {
         }
       }
     })""");
+}
+
+GTEST_TEST(MeshcatTest, SetAnimation) {
+  Meshcat meshcat;
+  MeshcatAnimation animation;
+
+  animation.SetTransform(0, "sphere", RigidTransformd(Vector3d{0, 0, 0}));
+  animation.SetTransform(20, "sphere", RigidTransformd(Vector3d{0, 0, 1}));
+  animation.SetTransform(40, "sphere", RigidTransformd(Vector3d{0, 0, 0}));
+
+  animation.SetProperty(0, "cylinder", "visible", true);
+  animation.SetProperty(20, "cylinder", "visible", false);
+  animation.SetProperty(40, "cylinder", "visible", true);
+
+  animation.SetProperty(0, "ellipsoid/<object>", "material.opacity", 0.0);
+  animation.SetProperty(20, "ellipsoid/<object>", "material.opacity", 1.0);
+  animation.SetProperty(40, "ellipsoid/<object>", "material.opacity", 0.0);
+
+  animation.set_loop_mode(MeshcatAnimation::kLoopRepeat);
+  animation.set_repetitions(4);
+  animation.set_autoplay(true);
+  animation.set_clamp_when_finished(true);
+
+  meshcat.SetAnimation(animation);
+
+  // The animations will be in lexographical order by path since we're using a
+  // std::map with the path strings as the (sorted) keys.
+  CheckWebsocketCommand(meshcat, 1, R"""({
+      "type": "set_animation",
+      "animations": [{
+          "path": "/drake/cylinder",
+          "clip": {
+              "fps": 32.0,
+              "name": "default",
+              "tracks": [{
+                  "name": ".visible",
+                  "type": "boolean",
+                  "keys": [{
+                      "time": 0,
+                      "value": true
+                    },{
+                      "time": 20,
+                      "value": false
+                    },{
+                      "time": 40,
+                      "value": true
+                  }]
+              }]
+          }
+      }, {
+          "path": "/drake/ellipsoid/<object>",
+          "clip": {
+              "fps": 32.0,
+              "name": "default",
+              "tracks": [{
+                  "name": ".material.opacity",
+                  "type": "number",
+                  "keys": [{
+                      "time": 0,
+                      "value": 0.0
+                    },{
+                      "time": 20,
+                      "value": 1.0
+                  },{
+                      "time": 40,
+                      "value": 0.0
+                  }]
+              }]
+          }
+      }, {
+          "path": "/drake/sphere",
+          "clip": {
+              "fps": 32.0,
+              "name": "default",
+              "tracks": [{
+                  "name": ".position",
+                  "type": "vector3",
+                  "keys": [{
+                      "time": 0,
+                      "value": [0.0, 0.0, 0.0]
+                    },{
+                      "time": 20,
+                      "value": [0.0, 0.0, 1.0]
+                    },{
+                      "time": 40,
+                      "value": [0.0, 0.0, 0.0]
+                  }]
+              }, {
+                  "name": ".quaternion",
+                  "type": "quaternion",
+                  "keys": [{
+                      "time": 0,
+                      "value": [0.0, 0.0, 0.0, 1.0]
+                    },{
+                      "time": 20,
+                      "value": [0.0, 0.0, 0.0, 1.0]
+                    },{
+                      "time": 40,
+                      "value": [0.0, 0.0, 0.0, 1.0]
+                  }]
+              }]
+          }
+      }],
+      "options": {
+          "play": true,
+          "loopMode": 2201,
+          "repetitions": 4,
+          "clampWhenFinished": true
+      }
+  })""");
 }
 
 GTEST_TEST(MeshcatTest, Set2dRenderMode) {

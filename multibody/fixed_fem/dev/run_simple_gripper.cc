@@ -114,7 +114,7 @@ int DoMain() {
   /* Set up proximity properties for the deformable box. */
   const CoulombFriction<double> surface_friction(1.0, 1.0);
   geometry::ProximityProperties proximity_props;
-  geometry::AddContactMaterial({}, {}, {}, surface_friction, &proximity_props);
+  geometry::AddContactMaterial({}, {}, surface_friction, &proximity_props);
 
   /* Register the deformable box in the DeformableModel. */
   auto deformable_model = std::make_unique<DeformableModel<double>>(&plant);
@@ -205,7 +205,7 @@ int DoMain() {
     reference_meshes.emplace_back(geometry.mesh());
   }
   auto& visualizer = *builder.AddSystem<DeformableVisualizer>(
-      1.0 / 60.0, deformable_model_raw->names(), reference_meshes);
+      1.0 / 64.0, deformable_model_raw->names(), reference_meshes);
   builder.Connect(deformable_model_raw->get_vertex_positions_output_port(),
                   visualizer.get_input_port());
   geometry::DrakeVisualizerd::AddToBuilder(&builder, scene_graph);

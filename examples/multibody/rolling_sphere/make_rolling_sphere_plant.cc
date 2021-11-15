@@ -25,7 +25,7 @@ using drake::multibody::UnitInertia;
 using drake::math::RigidTransformd;
 
 std::unique_ptr<drake::multibody::MultibodyPlant<double>> MakeBouncingBallPlant(
-    double mbp_dt, double radius, double mass, double elastic_modulus,
+    double mbp_dt, double radius, double mass, double hydroelastic_modulus,
     double dissipation, const CoulombFriction<double>& surface_friction,
     const Vector3<double>& gravity_W, bool rigid_sphere, bool soft_ground,
     SceneGraph<double>* scene_graph) {
@@ -42,11 +42,12 @@ std::unique_ptr<drake::multibody::MultibodyPlant<double>> MakeBouncingBallPlant(
     const RigidTransformd X_WG;  // identity.
     ProximityProperties ground_props;
     if (soft_ground) {
-      AddSoftHydroelasticPropertiesForHalfSpace(1.0, &ground_props);
+      AddSoftHydroelasticPropertiesForHalfSpace(
+          1.0, hydroelastic_modulus, &ground_props);
     } else {
       AddRigidHydroelasticProperties(&ground_props);
     }
-    AddContactMaterial(elastic_modulus, dissipation, surface_friction,
+    AddContactMaterial(dissipation, {} /* point stiffness */, surface_friction,
                        &ground_props);
     plant->RegisterCollisionGeometry(plant->world_body(), X_WG,
                                      geometry::HalfSpace{}, "collision",
@@ -60,12 +61,12 @@ std::unique_ptr<drake::multibody::MultibodyPlant<double>> MakeBouncingBallPlant(
     const RigidTransformd X_BS = RigidTransformd::Identity();
     // Set material properties for hydroelastics.
     ProximityProperties ball_props;
-    AddContactMaterial(elastic_modulus, dissipation, surface_friction,
+    AddContactMaterial(dissipation, {} /* point stiffness */, surface_friction,
                        &ball_props);
     if (rigid_sphere) {
       AddRigidHydroelasticProperties(radius, &ball_props);
     } else {
-      AddSoftHydroelasticProperties(radius, &ball_props);
+      AddSoftHydroelasticProperties(radius, hydroelastic_modulus, &ball_props);
     }
     plant->RegisterCollisionGeometry(ball, X_BS, Sphere(radius), "collision",
                                      std::move(ball_props));

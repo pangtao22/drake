@@ -55,7 +55,7 @@ ProximityProperties MakeProximityProperties(double stiffness,
                                             double dissipation,
                                             const CoulombFriction<double>& mu) {
   ProximityProperties proximity_properties;
-  geometry::AddContactMaterial({}, dissipation, stiffness, mu,
+  geometry::AddContactMaterial(dissipation, stiffness, mu,
                                &proximity_properties);
   return proximity_properties;
 }
@@ -92,8 +92,7 @@ internal::ReferenceDeformableGeometry<double> MakeUnitCubeDeformableGeometry() {
           geometry::Box(1.0, 1.0, 1.0), 1.0));
   std::vector<double> dummy_signed_distances(kNumCubeVertices, 0.0);
   auto mesh_field = std::make_unique<VolumeMeshFieldLinear<double, double>>(
-      "Dummy signed distances", std::move(dummy_signed_distances), mesh.get(),
-      false);
+      std::move(dummy_signed_distances), mesh.get(), false);
   return {std::move(mesh), std::move(mesh_field)};
 }
 

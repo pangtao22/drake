@@ -24,8 +24,9 @@ DEFINE_double(simulation_time, 2.0,
 // Contact model parameters.
 DEFINE_string(contact_model, "point",
               "Contact model. Options are: 'point', 'hydroelastic', 'hybrid'.");
-DEFINE_double(elastic_modulus, 5.0e4,
-              "For hydroelastic (and hybrid) contact, elastic modulus, [Pa].");
+DEFINE_double(hydroelastic_modulus, 5.0e4,
+              "For hydroelastic (and hybrid) contact, "
+              "hydroelastic modulus, [Pa].");
 DEFINE_double(dissipation, 5.0,
               "For hydroelastic (and hybrid) contact, Hunt & Crossley "
               "dissipation, [s/m].");
@@ -112,7 +113,7 @@ int do_main() {
       FLAGS_friction_coefficient /* dynamic friction */);
 
   MultibodyPlant<double>& plant = *builder.AddSystem(MakeBouncingBallPlant(
-      FLAGS_mbp_dt, radius, mass, FLAGS_elastic_modulus, FLAGS_dissipation,
+      FLAGS_mbp_dt, radius, mass, FLAGS_hydroelastic_modulus, FLAGS_dissipation,
       coulomb_friction, -g * Vector3d::UnitZ(), FLAGS_rigid_ball,
       FLAGS_soft_ground, &scene_graph));
 
@@ -120,9 +121,10 @@ int do_main() {
     geometry::Box wall{0.2, 4, 0.4};
     const RigidTransformd X_WB(Vector3d{-0.5, 0, 0});
     geometry::ProximityProperties prox_prop;
-    geometry::AddContactMaterial(1e8, {}, CoulombFriction<double>(),
+    geometry::AddContactMaterial({} /* dissipation */, {} /* point stiffness */,
+                                 CoulombFriction<double>(),
                                  &prox_prop);
-    geometry::AddSoftHydroelasticProperties(0.1, &prox_prop);
+    geometry::AddSoftHydroelasticProperties(0.1, 1e8, &prox_prop);
     plant.RegisterCollisionGeometry(plant.world_body(), X_WB, wall,
                                     "wall_collision", std::move(prox_prop));
 
@@ -171,7 +173,7 @@ int do_main() {
     }
     geometry::DrakeVisualizerd::AddToBuilder(&builder, scene_graph, nullptr,
                                              params);
-    ConnectContactResultsToDrakeVisualizer(&builder, plant);
+    ConnectContactResultsToDrakeVisualizer(&builder, plant, scene_graph);
   }
   auto diagram = builder.Build();
 

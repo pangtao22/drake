@@ -40,9 +40,15 @@ using systems::DiscreteValues;
 using systems::LeafSystem;
 using systems::PublishEvent;
 using systems::System;
+using systems::SystemBase;
 using systems::SystemScalarConverter;
 using systems::VectorSystem;
 using systems::WitnessFunction;
+
+class SystemBasePublic : public SystemBase {
+ public:
+  using SystemBase::DeclareCacheEntry;
+};
 
 // Provides a templated 'namespace'.
 template <typename T>
@@ -306,25 +312,8 @@ struct Impl {
                 std::optional<RandomDistribution>>(&PySystem::DeclareInputPort),
             py_rvp::reference_internal, py::arg("name"), py::arg("type"),
             py::arg("size"), py::arg("random_type") = std::nullopt,
-            doc.System.DeclareInputPort.doc);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    system_cls  // BR
-        .def("DeclareInputPort",
-            WrapDeprecated(doc.System.DeclareInputPort.doc_deprecated,
-                [](PySystem* self, PortDataType type, int size,
-                    std::optional<RandomDistribution> random_type) {
-                  auto& result =
-                      self->DeclareInputPort(type, size, random_type);
-                  // WrapDeprecated cannot handle references, but a pointer
-                  // works and is equivalent as far as Python cares.
-                  return &result;
-                }),
-            py_rvp::reference_internal, py::arg("type"), py::arg("size"),
-            py::arg("random_type") = std::nullopt,
-            doc.System.DeclareInputPort.doc_deprecated);
-#pragma GCC diagnostic pop
-    system_cls  // - Feedthrough.
+            doc.System.DeclareInputPort.doc)
+        // Feedthrough.
         .def("HasAnyDirectFeedthrough", &System<T>::HasAnyDirectFeedthrough,
             doc.System.HasAnyDirectFeedthrough.doc)
         .def("HasDirectFeedthrough",
@@ -541,27 +530,7 @@ Note: The above is for the C++ documentation. For Python, use
             py::arg("prerequisites_of_calc") =
                 std::set<DependencyTicket>{SystemBase::all_sources_ticket()},
             doc.LeafSystem.DeclareAbstractOutputPort
-                .doc_4args_name_alloc_function_calc_function_prerequisites_of_calc);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    leaf_system_cls  // BR
-        .def("DeclareAbstractOutputPort",
-            WrapDeprecated(
-                doc.LeafSystem.DeclareAbstractOutputPort
-                    .doc_deprecated_deprecated_3args_constOutputType_voidMySystemconstContextOutputTypeconst_stdset,
-                WrapCallbacks(
-                    [](PyLeafSystem* self, AllocCallback arg1,
-                        CalcCallback arg2) -> const LeafOutputPort<T>* {
-                      // WrapDeprecated cannot handle references, but a pointer
-                      // works and is equivalent as far as Python cares, thus
-                      // the use of `&` here.
-                      return &self->DeclareAbstractOutputPort(arg1, arg2);
-                    })),
-            py_rvp::reference_internal, py::arg("alloc"), py::arg("calc"),
-            doc.LeafSystem.DeclareAbstractOutputPort
-                .doc_deprecated_deprecated_3args_constOutputType_voidMySystemconstContextOutputTypeconst_stdset);
-#pragma GCC diagnostic pop
-    leaf_system_cls  // BR
+                .doc_4args_name_alloc_function_calc_function_prerequisites_of_calc)
         .def(
             "DeclareVectorInputPort",
             [](PyLeafSystem* self, std::string name,
@@ -610,26 +579,7 @@ Note: The above is for the C++ documentation. For Python, use
             py::arg("calc"),
             py::arg("prerequisites_of_calc") =
                 std::set<DependencyTicket>{SystemBase::all_sources_ticket()},
-            doc.LeafSystem.DeclareVectorOutputPort.doc_4args_size);
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    leaf_system_cls  // BR
-        .def("DeclareVectorOutputPort",
-            WrapDeprecated(
-                doc.LeafSystem.DeclareVectorOutputPort.doc_deprecated,
-                WrapCallbacks(
-                    [](PyLeafSystem* self, const BasicVector<T>& arg1,
-                        CalcVectorCallback arg2) -> const OutputPort<T>* {
-                      // WrapDeprecated cannot handle references, but a
-                      // pointer works and is equivalent as far as Python
-                      // cares, thus the use of `&` here.
-                      return &self->DeclareVectorOutputPort(arg1, arg2);
-                    })),
-            py_rvp::reference_internal,
-            doc.LeafSystem.DeclareVectorOutputPort.doc_deprecated);
-#pragma GCC diagnostic pop
-    leaf_system_cls  // BR
+            doc.LeafSystem.DeclareVectorOutputPort.doc_4args_size)
         .def("DeclareStateOutputPort",
             py::overload_cast<std::variant<std::string, UseDefaultName>,
                 ContinuousStateIndex>(
@@ -878,7 +828,22 @@ void DoScalarIndependentDefinitions(py::module m) {
         .def("input_port_ticket", &Class::input_port_ticket, py::arg("index"),
             cls_doc.input_port_ticket.doc)
         .def("numeric_parameter_ticket", &Class::numeric_parameter_ticket,
-            py::arg("index"), cls_doc.numeric_parameter_ticket.doc);
+            py::arg("index"), cls_doc.numeric_parameter_ticket.doc)
+        .def("get_cache_entry", &Class::get_cache_entry, py::arg("index"),
+            py_rvp::reference_internal, cls_doc.get_cache_entry.doc)
+        // N.B. Since this method has template overloads, we must specify the
+        // types `overload_cast_explicit`; we must also specify Class.
+        // We do not use `static_cast<>` to avoid accidental type mixing.
+        .def("DeclareCacheEntry",
+            overload_cast_explicit<CacheEntry&, std::string, ValueProducer,
+                std::set<DependencyTicket>>.operator()<Class>(
+                &SystemBasePublic::DeclareCacheEntry),
+            py_rvp::reference_internal, py::arg("description"),
+            py::arg("value_producer"),
+            py::arg("prerequisites_of_calc") =
+                std::set<DependencyTicket>{Class::all_sources_ticket()},
+            doc.SystemBase.DeclareCacheEntry
+                .doc_3args_description_value_producer_prerequisites_of_calc);
   }
 
   {
@@ -897,19 +862,21 @@ void DoScalarIndependentDefinitions(py::module m) {
       using T = typename Pack::template type_at<0>;
       using U = typename Pack::template type_at<1>;
       AddTemplateMethod(converter, "IsConvertible",
-          &SystemScalarConverter::IsConvertible<T, U>, GetPyParam<T, U>());
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-      AddTemplateMethod(converter, "Add",
-          WrapDeprecated(cls_doc.Add.doc_deprecated,
-              WrapCallbacks(&SystemScalarConverter::Add<T, U>)),
-          GetPyParam<T, U>());
-      // N.B. When the deprecation date happens, the C++ member function Add()
-      // should become internal or private, to be used only by pydrake here
-      // via this method with a leading underscore.
+          &SystemScalarConverter::IsConvertible<T, U>, GetPyParam<T, U>(),
+          cls_doc.IsConvertible.doc);
+      using system_scalar_converter_internal::AddPydrakeConverterFunction;
+      using ConverterFunction =
+          std::function<std::unique_ptr<System<T>>(const System<U>&)>;
       AddTemplateMethod(converter, "_Add",
-          WrapCallbacks(&SystemScalarConverter::Add<T, U>), GetPyParam<T, U>());
-#pragma GCC diagnostic pop
+          WrapCallbacks(
+              [](SystemScalarConverter* self, const ConverterFunction& func) {
+                const std::function<System<T>*(const System<U>&)> bare_func =
+                    [func](const System<U>& other) {
+                      return func(other).release();
+                    };
+                AddPydrakeConverterFunction(self, bare_func);
+              }),
+          GetPyParam<T, U>());
     };
     // N.B. When changing the pairs of supported types below, ensure that these
     // reflect the stanzas for the advanced constructor of

@@ -13,7 +13,7 @@
 #include "drake/common/reset_on_copy.h"
 #include "drake/common/sorted_pair.h"
 #include "drake/geometry/proximity/mesh_traits.h"
-#include "drake/geometry/proximity/surface_mesh.h"
+#include "drake/geometry/proximity/triangle_surface_mesh.h"
 #include "drake/geometry/proximity/volume_mesh.h"
 
 namespace drake {
@@ -89,7 +89,7 @@ namespace geometry {
  Notice that (0,0,0) may or may not lie in element E.
 
  @tparam T  a valid Eigen scalar for field values.
- @tparam MeshType    the type of the meshes: SurfaceMesh or VolumeMesh.
+ @tparam MeshType    the type of the meshes: TriangleSurfaceMesh or VolumeMesh.
  */
 template <class T, class MeshType>
 class MeshFieldLinear {
@@ -97,7 +97,6 @@ class MeshFieldLinear {
   DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(MeshFieldLinear)
 
   /** Constructs a MeshFieldLinear.
-   @param name    The name of the field variable.
    @param values  The field value at each vertex of the mesh.
    @param mesh    The mesh M to which this field refers.
    @param calculate_gradient Calculate gradient field when true, default is
@@ -144,9 +143,9 @@ class MeshFieldLinear {
    @pre   The `mesh` is non-null, and the number of entries in `values` is the
           same as the number of vertices of the mesh.
    */
-  MeshFieldLinear(std::string name, std::vector<T>&& values,
-                  const MeshType* mesh, bool calculate_gradient = true)
-      : mesh_(mesh), name_(std::move(name)), values_(std::move(values)) {
+  MeshFieldLinear(std::vector<T>&& values, const MeshType* mesh,
+                  bool calculate_gradient = true)
+      : mesh_(mesh), values_(std::move(values)) {
     DRAKE_DEMAND(mesh_ != nullptr);
     DRAKE_DEMAND(static_cast<int>(values_.size()) ==
                  this->mesh().num_vertices());
@@ -159,10 +158,19 @@ class MeshFieldLinear {
     }
   }
 
+  DRAKE_DEPRECATED("2022-01-01", "This object will no longer store a name")
+  MeshFieldLinear(std::string name, std::vector<T>&& values,
+                  const MeshType* mesh, bool calculate_gradient = true)
+    : MeshFieldLinear(std::move(values), mesh, calculate_gradient) {
+    name_ = std::move(name);
+  }
+
   /** Evaluates the field value at a vertex.
    @param v The index of the vertex.
+   @pre v ∈ [0, this->mesh().num_vertices()).
    */
-  const T& EvaluateAtVertex(typename MeshType::VertexIndex v) const {
+  const T& EvaluateAtVertex(int v) const {
+    DRAKE_ASSERT(v >= 0 && v < mesh_->num_vertices());
     return values_[v];
   }
 
@@ -178,7 +186,7 @@ class MeshFieldLinear {
    */
   template <typename B>
   promoted_numerical_t<B, T> Evaluate(
-      typename MeshType::ElementIndex e,
+      int e,
       // NOLINTNEXTLINE(runtime/references): "template Bar..." confuses cpplint.
       const typename MeshType::template Barycentric<B>& b) const {
     const auto& element = this->mesh().element(e);
@@ -206,13 +214,13 @@ class MeshFieldLinear {
                coordinates. M is the frame of the mesh.
    */
   template <typename C>
-  promoted_numerical_t<C, T> EvaluateCartesian(
-      typename MeshType::ElementIndex e, const Vector3<C>& p_MQ) const {
+  promoted_numerical_t<C, T> EvaluateCartesian(int e,
+                                               const Vector3<C>& p_MQ) const {
     if (gradients_.size() == 0) {
       return Evaluate(e, this->mesh().CalcBarycentric(p_MQ, e));
     } else {
-      DRAKE_ASSERT(e < gradients_.size());
-      DRAKE_ASSERT(e < values_at_Mo_.size());
+      DRAKE_ASSERT(e < static_cast<int>(gradients_.size()));
+      DRAKE_ASSERT(e < static_cast<int>(values_at_Mo_.size()));
       return gradients_[e].dot(p_MQ) + values_at_Mo_[e];
     }
   }
@@ -222,7 +230,7 @@ class MeshFieldLinear {
   will particularly lie parallel to the plane of the corresponding triangle.
   @throws std::exception if the gradient vector was not calculated.
   */
-  Vector3<T> EvaluateGradient(typename MeshType::ElementIndex e) const {
+  Vector3<T> EvaluateGradient(int e) const {
     if (gradients_.size() == 0) {
       throw std::runtime_error("Gradient vector was not calculated.");
     }
@@ -257,6 +265,7 @@ class MeshFieldLinear {
   }
 
   const MeshType& mesh() const { return *mesh_; }
+  DRAKE_DEPRECATED("2022-01-01", "This object will no longer store a name")
   const std::string& name() const { return name_; }
   const std::vector<T>& values() const { return values_; }
 
@@ -271,8 +280,7 @@ class MeshFieldLinear {
     if (!this->mesh().Equal(field.mesh())) return false;
 
     // Check field value at each vertex.
-    for (typename MeshType::VertexIndex i(0); i < this->mesh().num_vertices();
-         ++i) {
+    for (int i = 0; i < this->mesh().num_vertices(); ++i) {
       if (values_.at(i) != field.values_.at(i)) return false;
     }
     if (gradients_ != field.gradients_) return false;
@@ -290,13 +298,12 @@ class MeshFieldLinear {
   void CalcGradientField() {
     gradients_.clear();
     gradients_.reserve(this->mesh().num_elements());
-    for (typename MeshType::ElementIndex e(0); e < this->mesh().num_elements();
-         ++e) {
+    for (int e = 0; e < this->mesh().num_elements(); ++e) {
       gradients_.push_back(CalcGradientVector(e));
     }
   }
 
-  Vector3<T> CalcGradientVector(typename MeshType::ElementIndex e) const {
+  Vector3<T> CalcGradientVector(int e) const {
     std::array<T, MeshType::kVertexPerElement> u;
     for (int i = 0; i < MeshType::kVertexPerElement; ++i) {
       u[i] = values_[this->mesh().element(e).vertex(i)];
@@ -307,16 +314,15 @@ class MeshFieldLinear {
   void CalcValueAtMeshOriginForAllElements() {
     values_at_Mo_.clear();
     values_at_Mo_.reserve(this->mesh().num_elements());
-    for (typename MeshType::ElementIndex e(0); e < this->mesh().num_elements();
-         ++e) {
+    for (int e = 0; e < this->mesh().num_elements(); ++e) {
       values_at_Mo_.push_back(CalcValueAtMeshOrigin(e));
     }
   }
 
-  T CalcValueAtMeshOrigin(typename MeshType::ElementIndex e) const {
-    DRAKE_DEMAND(e < gradients_.size());
-    const typename MeshType::VertexIndex v0 = this->mesh().element(e).vertex(0);
-    const Vector3<T>& p_MV0 = this->mesh().vertex(v0).r_MV();
+  T CalcValueAtMeshOrigin(int e) const {
+    DRAKE_DEMAND(0 <= e && e < static_cast<int>(gradients_.size()));
+    const int v0 = this->mesh().element(e).vertex(0);
+    const Vector3<T>& p_MV0 = this->mesh().vertex(v0);
     // f(V₀) = ∇fᵉ⋅p_MV₀ + fᵉ(Mo)
     // fᵉ(Mo) = f(V₀) - ∇fᵉ⋅p_MV₀
     return values_[v0] - gradients_[e].dot(p_MV0);
@@ -326,13 +332,14 @@ class MeshFieldLinear {
   // the pointer to null when a MeshFieldLinear is copied.
   reset_on_copy<const MeshType*> mesh_;
 
+  // (Deprecated.)
   std::string name_;
   // The field values are indexed in the same way as vertices, i.e.,
   // values_[i] is the field value for the mesh vertices_[i].
   std::vector<T> values_;
   // The gradients are indexed in the same way as elements, i.e.,
   // gradients_[i] is the gradient vector on elements_[i]. The elements could
-  // be tetrahedra for VolumeMesh or triangles for SurfaceMesh.
+  // be tetrahedra for VolumeMesh or triangles for TriangleSurfaceMesh.
   std::vector<Vector3<T>> gradients_;
   // values_at_Mo_[i] is the value of the linear function that represents the
   // piecewise linear field on the mesh elements_[i] at Mo the origin of

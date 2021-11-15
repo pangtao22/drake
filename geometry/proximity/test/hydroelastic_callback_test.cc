@@ -46,9 +46,8 @@ ProximityProperties rigid_properties() {
 // for supported geometries.
 ProximityProperties soft_properties() {
   ProximityProperties props;
-  AddContactMaterial(1e8, {}, {}, &props);
   const double resolution_hint = 0.25;
-  AddSoftHydroelasticProperties(resolution_hint, &props);
+  AddSoftHydroelasticProperties(resolution_hint, 1e8, &props);
   // Redundantly add slab thickness so it can be used with compliant mesh or
   // compliant half space.
   props.AddProperty(kHydroGroup, kSlabThickness, 0.25);
@@ -271,26 +270,24 @@ class TestScene {
 // soft mesh.
 ::testing::AssertionResult ValidateDerivatives(
     const ContactSurface<AutoDiffXd>& surface) {
-  const SurfaceVertexIndex v0(0);
-  const SurfaceFaceIndex f0(0);
   const auto& mesh_W = surface.mesh_W();
-  if (mesh_W.vertex(v0).r_MV().x().derivatives().size() != 3) {
+  if (mesh_W.vertex(0).x().derivatives().size() != 3) {
     return ::testing::AssertionFailure() << "Vertex 0 is missing derivatives";
   }
 
-  if (surface.e_MN().EvaluateAtVertex(v0).derivatives().size() != 3) {
+  if (surface.e_MN().EvaluateAtVertex(0).derivatives().size() != 3) {
     return ::testing::AssertionFailure()
            << "Pressure field at vertex 0 is missing derivatives";
   }
 
   if (surface.HasGradE_M()) {
-    if (surface.EvaluateGradE_M_W(f0).x().derivatives().size() != 3) {
+    if (surface.EvaluateGradE_M_W(0).x().derivatives().size() != 3) {
       return ::testing::AssertionFailure()
              << "Face 0's grad eM is missing derivatives";
     }
   }
   if (surface.HasGradE_N()) {
-    if (surface.EvaluateGradE_N_W(f0).x().derivatives().size() != 3) {
+    if (surface.EvaluateGradE_N_W(0).x().derivatives().size() != 3) {
       return ::testing::AssertionFailure()
              << "Face 0's grad eN is missing derivatives";
     }
@@ -337,10 +334,10 @@ TYPED_TEST(DispatchRigidSoftCalculationTests, SoftMeshRigidMesh) {
       EXPECT_TRUE(ValidateDerivatives(*surface));
       switch (representation) {
         case ContactPolygonRepresentation::kCentroidSubdivision:
-          EXPECT_EQ(100, surface->mesh_W().num_faces());
+          EXPECT_EQ(100, surface->mesh_W().num_triangles());
           break;
         case ContactPolygonRepresentation::kSingleTriangle:
-          EXPECT_EQ(28, surface->mesh_W().num_faces());
+          EXPECT_EQ(28, surface->mesh_W().num_triangles());
       }
     }
 

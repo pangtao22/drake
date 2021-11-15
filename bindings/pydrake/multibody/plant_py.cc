@@ -17,6 +17,7 @@
 #include "drake/math/rigid_transform.h"
 #include "drake/multibody/plant/contact_results.h"
 #include "drake/multibody/plant/contact_results_to_lcm.h"
+#include "drake/multibody/plant/contact_results_to_meshcat.h"
 #include "drake/multibody/plant/externally_applied_spatial_force.h"
 #include "drake/multibody/plant/multibody_plant.h"
 #include "drake/multibody/plant/point_pair_contact_info.h"
@@ -36,8 +37,8 @@ using systems::State;
 
 namespace {
 constexpr char doc_iso3_deprecation[] = R"""(
-This API using Isometry3 is / will be deprecated soon with the resolution of
-#9865. We only offer it for backwards compatibility. DO NOT USE!.
+Use of Isometry3 with the MultibodyPlant API is deprecated and will be removed
+from Drake on or after 2022-02-01.  Pass a pydrake.math.RigidTransform instead.
 )""";
 
 template <typename T>
@@ -392,9 +393,12 @@ void DoScalarDependentDefinitions(py::module m, T) {
             },
             py::arg("model_instance"), py::arg("u_instance"), py::arg("u"),
             cls_doc.SetActuationInArray.doc)
-        .def("GetPositionsFromArray", &Class::GetPositionsFromArray,
+        .def("GetPositionsFromArray",
+            overload_cast_explicit<VectorX<T>, ModelInstanceIndex,
+                const Eigen::Ref<const VectorX<T>>&>(
+                &Class::GetPositionsFromArray),
             py::arg("model_instance"), py::arg("q"),
-            cls_doc.GetPositionsFromArray.doc)
+            cls_doc.GetPositionsFromArray.doc_2args)
         .def(
             "SetPositionsInArray",
             [](const Class* self, multibody::ModelInstanceIndex model_instance,
@@ -404,9 +408,12 @@ void DoScalarDependentDefinitions(py::module m, T) {
             },
             py::arg("model_instance"), py::arg("q_instance"), py::arg("q"),
             cls_doc.SetPositionsInArray.doc)
-        .def("GetVelocitiesFromArray", &Class::GetVelocitiesFromArray,
+        .def("GetVelocitiesFromArray",
+            overload_cast_explicit<VectorX<T>, ModelInstanceIndex,
+                const Eigen::Ref<const VectorX<T>>&>(
+                &Class::GetVelocitiesFromArray),
             py::arg("model_instance"), py::arg("v"),
-            cls_doc.GetVelocitiesFromArray.doc)
+            cls_doc.GetVelocitiesFromArray.doc_2args)
         .def(
             "SetVelocitiesInArray",
             [](const Class* self, multibody::ModelInstanceIndex model_instance,
@@ -1145,6 +1152,52 @@ void DoScalarDependentDefinitions(py::module m, T) {
             &Class::get_spatial_forces_output_port, py_rvp::reference_internal,
             doc.Propeller.get_spatial_forces_output_port.doc);
   }
+
+  // ContactResultsToMeshcat
+  if constexpr (!std::is_same_v<T, symbolic::Expression>) {
+    using Class = ContactResultsToMeshcat<T>;
+    constexpr auto& cls_doc = doc.ContactResultsToMeshcat;
+    auto cls = DefineTemplateClassWithDefault<Class, systems::LeafSystem<T>>(
+        m, "ContactResultsToMeshcat", param, cls_doc.doc);
+    cls  // BR
+        .def(py::init<std::shared_ptr<geometry::Meshcat>,
+                 ContactResultsToMeshcatParams>(),
+            py::arg("meshcat"),
+            py::arg("params") = ContactResultsToMeshcatParams{},
+            // `meshcat` is a shared_ptr, so does not need a keep_alive.
+            cls_doc.ctor.doc)
+        .def("Delete", &Class::Delete, cls_doc.Delete.doc)
+        .def("contact_results_input_port", &Class::contact_results_input_port,
+            py_rvp::reference_internal, cls_doc.contact_results_input_port.doc)
+        .def_static("AddToBuilder",
+            py::overload_cast<systems::DiagramBuilder<T>*,
+                const MultibodyPlant<T>&, std::shared_ptr<geometry::Meshcat>,
+                ContactResultsToMeshcatParams>(
+                &ContactResultsToMeshcat<T>::AddToBuilder),
+            py::arg("builder"), py::arg("plant"), py::arg("meshcat"),
+            py::arg("params") = ContactResultsToMeshcatParams{},
+            // Keep alive, ownership: `return` keeps `builder` alive.
+            py::keep_alive<0, 1>(),
+            // `meshcat` is a shared_ptr, so does not need a keep_alive.
+            py_rvp::reference,
+            cls_doc.AddToBuilder.doc_4args_builder_plant_meshcat_params)
+        .def_static("AddToBuilder",
+            py::overload_cast<systems::DiagramBuilder<T>*,
+                const systems::OutputPort<T>&,
+                std::shared_ptr<geometry::Meshcat>,
+                ContactResultsToMeshcatParams>(
+                &ContactResultsToMeshcat<T>::AddToBuilder),
+            py::arg("builder"), py::arg("contact_results_port"),
+            py::arg("meshcat"),
+            py::arg("params") = ContactResultsToMeshcatParams{},
+            // Keep alive, ownership: `return` keeps `builder` alive.
+            py::keep_alive<0, 1>(),
+            // `meshcat` is a shared_ptr, so does not need a keep_alive.
+            py_rvp::reference,
+            cls_doc.AddToBuilder
+                .doc_4args_builder_contact_results_port_meshcat_params);
+  }
+
   // NOLINTNEXTLINE(readability/fn_size)
 }
 }  // namespace
@@ -1162,8 +1215,6 @@ PYBIND11_MODULE(plant, m) {
   py::module::import("pydrake.multibody.tree");
   py::module::import("pydrake.systems.framework");
 
-  type_visit([m](auto dummy) { DoScalarDependentDefinitions(m, dummy); },
-      CommonScalarPack{});
   constexpr auto& doc = pydrake_doc.drake.multibody;
 
   using T = double;
@@ -1184,34 +1235,82 @@ PYBIND11_MODULE(plant, m) {
             cls_doc.get_lcm_message_output_port.doc);
   }
 
-  m.def(
-      "ConnectContactResultsToDrakeVisualizer",
-      [](systems::DiagramBuilder<double>* builder,
-          const MultibodyPlant<double>& plant, lcm::DrakeLcmInterface* lcm) {
-        return drake::multibody::ConnectContactResultsToDrakeVisualizer(
-            builder, plant, lcm);
-      },
+  // ContactResultsToMeshcatParams
+  {
+    using Class = ContactResultsToMeshcatParams;
+    constexpr auto& cls_doc = doc.ContactResultsToMeshcatParams;
+    py::class_<Class>(
+        m, "ContactResultsToMeshcatParams", py::dynamic_attr(), cls_doc.doc)
+        .def(ParamInit<Class>())
+        .def_readwrite("publish_period",
+            &ContactResultsToMeshcatParams::publish_period,
+            cls_doc.publish_period.doc)
+        .def_readwrite(
+            "color", &ContactResultsToMeshcatParams::color, cls_doc.color.doc)
+        .def_readwrite("prefix", &ContactResultsToMeshcatParams::prefix,
+            cls_doc.prefix.doc)
+        .def_readwrite("delete_on_initialization_event",
+            &ContactResultsToMeshcatParams::delete_on_initialization_event,
+            cls_doc.delete_on_initialization_event.doc)
+        .def_readwrite("force_threshold",
+            &ContactResultsToMeshcatParams::force_threshold,
+            cls_doc.force_threshold.doc)
+        .def_readwrite("newtons_per_meter",
+            &ContactResultsToMeshcatParams::newtons_per_meter,
+            cls_doc.newtons_per_meter.doc)
+        .def_readwrite("radius", &ContactResultsToMeshcatParams::radius,
+            cls_doc.radius.doc)
+        .def("__repr__", [](const Class& self) {
+          return py::str(
+              "ContactResultsToMeshcatParams("
+              "publish_period={}, "
+              "color={}, "
+              "prefix={}, "
+              "delete_on_initialization_event={}, "
+              "force_threshold={}, "
+              "newtons_per_meter={}, "
+              "radius={})")
+              .format(self.publish_period, self.color, self.prefix,
+                  self.delete_on_initialization_event, self.force_threshold,
+                  self.newtons_per_meter, self.radius);
+        });
+  }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  m.def("ConnectContactResultsToDrakeVisualizer",
+      WrapDeprecated(doc.ConnectContactResultsToDrakeVisualizer
+                         .doc_4args_builder_plant_lcm_publish_period,
+          [](systems::DiagramBuilder<double>* builder,
+              const MultibodyPlant<double>& plant, lcm::DrakeLcmInterface* lcm,
+              std::optional<double> publish_period) {
+            return drake::multibody::ConnectContactResultsToDrakeVisualizer(
+                builder, plant, lcm, publish_period);
+          }),
       py::arg("builder"), py::arg("plant"), py::arg("lcm") = nullptr,
-      py_rvp::reference,
+      py::arg("publish_period") = std::nullopt, py_rvp::reference,
       // Keep alive, ownership: `return` keeps `builder` alive.
       py::keep_alive<0, 1>(),
       // Keep alive, transitive: `plant` keeps `builder` alive.
       py::keep_alive<2, 1>(),
       // Keep alive, transitive: `lcm` keeps `builder` alive.
       py::keep_alive<3, 1>(),
-      doc.ConnectContactResultsToDrakeVisualizer.doc_3args_builder_plant_lcm);
+      doc.ConnectContactResultsToDrakeVisualizer
+          .doc_4args_builder_plant_lcm_publish_period);
+#pragma GCC diagnostic pop
 
   m.def(
       "ConnectContactResultsToDrakeVisualizer",
       [](systems::DiagramBuilder<double>* builder,
           const MultibodyPlant<double>& plant,
           const geometry::SceneGraph<double>& scene_graph,
-          lcm::DrakeLcmInterface* lcm) {
+          lcm::DrakeLcmInterface* lcm, std::optional<double> publish_period) {
         return drake::multibody::ConnectContactResultsToDrakeVisualizer(
-            builder, plant, scene_graph, lcm);
+            builder, plant, scene_graph, lcm, publish_period);
       },
       py::arg("builder"), py::arg("plant"), py::arg("scene_graph"),
-      py::arg("lcm") = nullptr, py_rvp::reference,
+      py::arg("lcm") = nullptr, py::arg("publish_period") = std::nullopt,
+      py_rvp::reference,
       // Keep alive, ownership: `return` keeps `builder` alive.
       py::keep_alive<0, 1>(),
       // Keep alive, transitive: `plant` keeps `builder` alive.
@@ -1221,7 +1320,7 @@ PYBIND11_MODULE(plant, m) {
       // Keep alive, transitive: `lcm` keeps `builder` alive.
       py::keep_alive<4, 1>(),
       doc.ConnectContactResultsToDrakeVisualizer
-          .doc_4args_builder_plant_scene_graph_lcm);
+          .doc_5args_builder_plant_scene_graph_lcm_publish_period);
 
   {
     using Class = PropellerInfo;
@@ -1257,6 +1356,9 @@ PYBIND11_MODULE(plant, m) {
         .value("kPointContactOnly", Class::kPointContactOnly,
             cls_doc.kPointContactOnly.doc);
   }
+
+  type_visit([m](auto dummy) { DoScalarDependentDefinitions(m, dummy); },
+      CommonScalarPack{});
 }  // NOLINT(readability/fn_size)
 
 }  // namespace pydrake

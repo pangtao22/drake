@@ -356,7 +356,11 @@ VectorX<T> ExpandRows(const VectorX<T>& v, int rows_out,
 
 template <typename T>
 MultibodyPlant<T>::MultibodyPlant(double time_step)
-    : MultibodyPlant(nullptr, time_step) {}
+    : MultibodyPlant(nullptr, time_step) {
+  // Cross-check that the Config default matches our header file default.
+  DRAKE_DEMAND(contact_model_ == ContactModel::kPoint);
+  DRAKE_DEMAND(MultibodyPlantConfig{}.contact_model == "point");
+}
 
 template <typename T>
 MultibodyPlant<T>::MultibodyPlant(
@@ -2076,8 +2080,8 @@ void MultibodyPlant<T>::CalcDiscreteContactPairs(
       const std::vector<geometry::ContactSurface<T>>& surfaces =
           EvalContactSurfaces(context);
       for (const auto& s : surfaces) {
-        const geometry::SurfaceMesh<T>& mesh = s.mesh_W();
-        num_quadrature_pairs += num_quad_points * mesh.num_faces();
+        const geometry::TriangleSurfaceMesh<T>& mesh = s.mesh_W();
+        num_quadrature_pairs += num_quad_points * mesh.num_triangles();
       }
     }
 
@@ -2114,14 +2118,13 @@ void MultibodyPlant<T>::CalcDiscreteContactPairs(
       const std::vector<geometry::ContactSurface<T>>& surfaces =
           EvalContactSurfaces(context);
       for (const auto& s : surfaces) {
-        const geometry::SurfaceMesh<T>& mesh_W = s.mesh_W();
+        const geometry::TriangleSurfaceMesh<T>& mesh_W = s.mesh_W();
 
         // Combined Hunt & Crossley dissipation.
         const T dissipation = hydroelastics_engine_.CalcCombinedDissipation(
             s.id_M(), s.id_N(), inspector);
 
-        for (geometry::SurfaceFaceIndex face(0); face < mesh_W.num_faces();
-             ++face) {
+        for (int face = 0; face < mesh_W.num_triangles(); ++face) {
           const T& Ae = mesh_W.area(face);  // Face element area.
 
           // We found out that the hydroelastic query might report
@@ -2539,10 +2542,9 @@ void MultibodyPlant<T>::CallContactSolver(
       : public contact_solvers::internal::LinearOperator<T> {
    public:
     MassMatrixInverseOperator(const std::string& name, const MatrixX<T>* M)
-        : contact_solvers::internal::LinearOperator<T>(name) {
+        : contact_solvers::internal::LinearOperator<T>(name), M_ldlt_{*M} {
       DRAKE_DEMAND(M != nullptr);
       nv_ = M->rows();
-      M_ldlt_ = M->ldlt();
       // TODO(sherm1) Eliminate heap allocation.
       tmp_.resize(nv_);
     }
@@ -2555,15 +2557,15 @@ void MultibodyPlant<T>::CallContactSolver(
     void DoMultiply(const Eigen::Ref<const Eigen::SparseVector<T>>& x,
                     Eigen::SparseVector<T>* y) const final {
       tmp_ = VectorX<T>(x);
-      *y = M_ldlt_.solve(tmp_).sparseView();
+      *y = M_ldlt_.Solve(tmp_).sparseView();
     }
     void DoMultiply(const Eigen::Ref<const VectorX<T>>& x,
                     VectorX<T>* y) const final {
-      *y = M_ldlt_.solve(x);
+      *y = M_ldlt_.Solve(x);
     }
     int nv_;
     mutable VectorX<T> tmp_;  // temporary workspace.
-    Eigen::LDLT<MatrixX<T>> M_ldlt_;
+    math::LinearSolver<Eigen::LDLT, MatrixX<T>> M_ldlt_;
   };
   MassMatrixInverseOperator Minv_op("Minv", &M0);
 

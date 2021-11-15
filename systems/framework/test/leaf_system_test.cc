@@ -453,56 +453,6 @@ TEST_F(LeafSystemTest, DeclareVectorPortsBySizeTest) {
   EXPECT_EQ(output2.size(), 2);
 }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-class AllThingsDeprecated final : public LeafSystem<double> {
- public:
-  AllThingsDeprecated() {
-    // Call each deprecated "Declare...Port" method once.
-    DeclareInputPort(kVectorValued, 2);
-    DeclareVectorInputPort(BasicVector<double>(2));
-    DeclareAbstractInputPort(Value<int>(1));
-    DeclareVectorOutputPort(
-        &AllThingsDeprecated::CalcVectorSubtype);
-    DeclareVectorOutputPort(
-        MyVector2d{},
-        &AllThingsDeprecated::CalcVectorSubtype);
-    DeclareVectorOutputPort(
-        BasicVector<double>(2),
-        [](const Context<double>&, BasicVector<double>*) {});
-    DeclareAbstractOutputPort(
-        &AllThingsDeprecated::CalcInt);
-    DeclareAbstractOutputPort(
-        0,
-        &AllThingsDeprecated::CalcInt);
-    DeclareAbstractOutputPort(
-        &AllThingsDeprecated::MakeInt,
-        &AllThingsDeprecated::CalcInt);
-    DeclareAbstractOutputPort(
-        []() { return AbstractValue::Make<int>(); },
-        [](const Context<double>&, AbstractValue*) {});
-  }
-
-  void CalcVectorSubtype(const Context<double>&, MyVector2d*) const {}
-  int MakeInt() const { return 0; }
-  void CalcInt(const Context<double>&, int*) const {}
-};
-#pragma GCC diagnostic pop
-
-TEST_F(LeafSystemTest, DeprecatedDefaultPortNameTest) {
-  const AllThingsDeprecated dut;
-  EXPECT_EQ(dut.get_input_port(0).get_name(), "u0");
-  EXPECT_EQ(dut.get_input_port(1).get_name(), "u1");
-  EXPECT_EQ(dut.get_input_port(2).get_name(), "u2");
-  EXPECT_EQ(dut.get_output_port(0).get_name(), "y0");
-  EXPECT_EQ(dut.get_output_port(1).get_name(), "y1");
-  EXPECT_EQ(dut.get_output_port(2).get_name(), "y2");
-  EXPECT_EQ(dut.get_output_port(3).get_name(), "y3");
-  EXPECT_EQ(dut.get_output_port(4).get_name(), "y4");
-  EXPECT_EQ(dut.get_output_port(5).get_name(), "y5");
-  EXPECT_EQ(dut.get_output_port(6).get_name(), "y6");
-}
-
 // Tests that witness functions can be declared. Tests that witness functions
 // stop Simulator at desired points (i.e., the raison d'être of a witness
 // function) are done in diagram_test.cc and
@@ -1538,17 +1488,7 @@ class DeclaredNonModelOutputSystem : public LeafSystem<double> {
         });
     unused(port);
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    // Output port 3 is declared with a commonly-used signature taking
-    // methods for both allocator and calculator for an abstract port.
-    port = &DeclareAbstractOutputPort(
-        kUseDefaultName, &DeclaredNonModelOutputSystem::MakeString,
-        &DeclaredNonModelOutputSystem::CalcString);
-    unused(port);
-#pragma GCC diagnostic pop
-
-    // Output port 4 uses a default-constructed bare struct which should be
+    // Output port 3 uses a default-constructed bare struct which should be
     // value-initialized.
     port = &DeclareAbstractOutputPort(
         kUseDefaultName, &DeclaredNonModelOutputSystem::CalcPOD);
@@ -1602,18 +1542,16 @@ GTEST_TEST(NonModelLeafSystemTest, NonModelPortsOutput) {
 
   // Check topology.
   EXPECT_EQ(dut.num_input_ports(), 0);
-  EXPECT_EQ(dut.num_output_ports(), 5);
+  ASSERT_EQ(dut.num_output_ports(), 4);
 
   auto& out0 = dut.get_output_port(0);
   auto& out1 = dut.get_output_port(1);
   auto& out2 = dut.get_output_port(2);
   auto& out3 = dut.get_output_port(3);
-  auto& out4 = dut.get_output_port(4);
   EXPECT_EQ(out0.get_data_type(), kVectorValued);
   EXPECT_EQ(out1.get_data_type(), kAbstractValued);
   EXPECT_EQ(out2.get_data_type(), kAbstractValued);
   EXPECT_EQ(out3.get_data_type(), kAbstractValued);
-  EXPECT_EQ(out4.get_data_type(), kAbstractValued);
 
   // Sanity check output port prerequisites. Leaf ports should not designate
   // a subsystem since they are resolved internally. We don't know the right
@@ -1666,34 +1604,25 @@ GTEST_TEST(NonModelLeafSystemTest, NonModelPortsOutput) {
   out2.Calc(*context, output2);
   EXPECT_EQ(*downcast_output2, 321);
 
-  // Check that Value<string>() came out, custom initialized.
-  auto output3 = system_output->GetMutableData(3);
-  ASSERT_NE(output3, nullptr);
-  const std::string* downcast_output3{};
-  DRAKE_EXPECT_NO_THROW(downcast_output3 = &output3->get_value<std::string>());
-  EXPECT_EQ(*downcast_output3, "freshly made");
-  out3.Calc(*context, output3);
-  EXPECT_EQ(*downcast_output3, "calc'ed string");
-
   // Check that Value<SomePOD>{} came out, value initialized. Note that this
   // is not a perfect test since the values *could* come out zero by accident
   // even if the value initializer had not been called. Better than nothing!
-  auto output4 = system_output->GetMutableData(4);
-  ASSERT_NE(output4, nullptr);
-  const SomePOD* downcast_output4{};
-  DRAKE_EXPECT_NO_THROW(downcast_output4 = &output4->get_value<SomePOD>());
-  EXPECT_EQ(downcast_output4->some_int, 0);
-  EXPECT_EQ(downcast_output4->some_double, 0.0);
-  out4.Calc(*context, output4);
-  EXPECT_EQ(downcast_output4->some_int, -10);
-  EXPECT_EQ(downcast_output4->some_double, 3.25);
+  auto output3 = system_output->GetMutableData(3);
+  ASSERT_NE(output3, nullptr);
+  const SomePOD* downcast_output3{};
+  DRAKE_EXPECT_NO_THROW(downcast_output3 = &output3->get_value<SomePOD>());
+  EXPECT_EQ(downcast_output3->some_int, 0);
+  EXPECT_EQ(downcast_output3->some_double, 0.0);
+  out3.Calc(*context, output3);
+  EXPECT_EQ(downcast_output3->some_int, -10);
+  EXPECT_EQ(downcast_output3->some_double, 3.25);
 
   EXPECT_EQ(dut.calc_POD_calls(), 1);
-  const auto& eval_out = out4.Eval<SomePOD>(*context);
+  const auto& eval_out = out3.Eval<SomePOD>(*context);
   EXPECT_EQ(eval_out.some_int, -10);
   EXPECT_EQ(eval_out.some_double, 3.25);
   EXPECT_EQ(dut.calc_POD_calls(), 2);
-  out4.Eval<SomePOD>(*context);
+  out3.Eval<SomePOD>(*context);
   EXPECT_EQ(dut.calc_POD_calls(), 2);  // Should have been cached.
 }
 

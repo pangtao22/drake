@@ -150,21 +150,6 @@ RotationalInertia<double> ExtractRotationalInertiaAboutBcmExpressedInBi(
                                    I(1, 0), I(2, 0), I(2, 1));
 }
 
-// Fails fast if a user attempts to specify `<pose frame='...'/>` in an
-// unsupported location.
-void ThrowIfPoseFrameSpecified(sdf::ElementPtr element) {
-  // TODO(eric.cousineau): Fix this for `<inertial/>` and `<model/>`.
-  if (element->HasElement("pose")) {
-    sdf::ElementPtr pose = element->GetElement("pose");
-    const std::string frame_name = pose->Get<std::string>("relative_to");
-    if (!frame_name.empty()) {
-      throw std::runtime_error(
-          "<pose relative_to='{non-empty}'/> is presently not supported "
-          "in <inertial/> or top-level <model/> tags in model files.");
-    }
-  }
-}
-
 // Throws an exception if there are any errors present in the `errors` list.
 void ThrowAnyErrors(const sdf::Errors& errors) {
   if (!errors.empty()) {
@@ -622,9 +607,6 @@ std::vector<LinkInfo> AddLinksFromSpecification(
     // inertial frame Bi as defined in <inertial> <pose></pose> </inertial>.
     // Per SDF specification, Bi's origin is at the COM Bcm, but Bi is not
     // necessarily aligned with B.
-    if (link.Element()->HasElement("inertial")) {
-      ThrowIfPoseFrameSpecified(link.Element()->GetElement("inertial"));
-    }
     const ignition::math::Inertiald& Inertial_Bcm_Bi = link.Inertial();
 
     const SpatialInertia<double> M_BBo_B =
@@ -775,6 +757,7 @@ Eigen::Vector3d ParseVector3(const sdf::ElementPtr node,
 }
 
 const Frame<double>& ParseFrame(const sdf::ElementPtr node,
+                                ModelInstanceIndex model_instance,
                                 MultibodyPlant<double>* plant,
                                 const char* element_name) {
   if (!node->HasElement(element_name)) {
@@ -785,18 +768,19 @@ const Frame<double>& ParseFrame(const sdf::ElementPtr node,
 
   const std::string frame_name = node->Get<std::string>(element_name);
 
-  if (!plant->HasFrameNamed(frame_name)) {
+  if (!plant->HasFrameNamed(frame_name, model_instance)) {
     throw std::runtime_error(fmt::format(
         "<{}>: Frame '{}' specified for <{}> does not exist in the model.",
         node->GetName(), frame_name, element_name));
   }
 
-  return plant->GetFrameByName(frame_name);
+  return plant->GetFrameByName(frame_name, model_instance);
 }
 
 // TODO(eric.cousineau): Update parsing pending resolution of
 // https://github.com/osrf/sdformat/issues/288
 void AddDrakeJointFromSpecification(const sdf::ElementPtr node,
+                                    ModelInstanceIndex model_instance,
                                     MultibodyPlant<double>* plant) {
   if (!node->HasAttribute("type")) {
     throw std::runtime_error(
@@ -815,8 +799,10 @@ void AddDrakeJointFromSpecification(const sdf::ElementPtr node,
         "<drake:joint> does not yet support the <pose> child tag.");
   }
 
-  const Frame<double>& parent_frame = ParseFrame(node, plant, "drake:parent");
-  const Frame<double>& child_frame = ParseFrame(node, plant, "drake:child");
+  const Frame<double>& parent_frame =
+      ParseFrame(node, model_instance, plant, "drake:parent");
+  const Frame<double>& child_frame =
+      ParseFrame(node, model_instance, plant, "drake:child");
 
   if (joint_type == "planar") {
     // TODO(eric.cousineau): Error out when there are unused tags.
@@ -831,7 +817,9 @@ void AddDrakeJointFromSpecification(const sdf::ElementPtr node,
 }
 
 const LinearBushingRollPitchYaw<double>& AddBushingFromSpecification(
-    const sdf::ElementPtr node, MultibodyPlant<double>* plant) {
+    const sdf::ElementPtr node,
+    ModelInstanceIndex model_instance,
+    MultibodyPlant<double>* plant) {
   // Functor to read a vector valued child tag with tag name: `element_name`
   // e.g. <element_name>0 0 0</element_name>
   // Throws an error if the tag does not exist.
@@ -844,8 +832,9 @@ const LinearBushingRollPitchYaw<double>& AddBushingFromSpecification(
   // Throws an error if the tag does not exist or if the frame does not exist in
   // the plant.
   auto read_frame = [node,
+                     model_instance,
                      plant](const char* element_name) -> const Frame<double>& {
-    return ParseFrame(node, plant, element_name);
+    return ParseFrame(node, model_instance, plant, element_name);
   };
 
   return ParseLinearBushingRollPitchYaw(read_vector, read_frame, plant);
@@ -1007,7 +996,7 @@ std::vector<ModelInstanceIndex> AddModelsFromSpecification(
     for (sdf::ElementPtr joint_node =
              model.Element()->GetElement("drake:joint");
          joint_node; joint_node = joint_node->GetNextElement("drake:joint")) {
-      AddDrakeJointFromSpecification(joint_node, plant);
+      AddDrakeJointFromSpecification(joint_node, model_instance, plant);
     }
   }
 
@@ -1017,7 +1006,7 @@ std::vector<ModelInstanceIndex> AddModelsFromSpecification(
              model.Element()->GetElement("drake:linear_bushing_rpy");
          bushing_node; bushing_node = bushing_node->GetNextElement(
                            "drake:linear_bushing_rpy")) {
-      AddBushingFromSpecification(bushing_node, plant);
+      AddBushingFromSpecification(bushing_node, model_instance, plant);
     }
   }
 
@@ -1135,15 +1124,15 @@ sdf::InterfaceModelPtr ParseNestedInterfaceModel(
     const sdf::NestedInclude& include, sdf::Errors* errors,
     const sdf::ParserConfig& parser_config, bool test_sdf_forced_nesting) {
   // Do not attempt to parse anything other than URDF or forced nesting files.
-  const bool is_urdf = EndsWith(include.resolvedFileName, kExtUrdf);
+  const bool is_urdf = EndsWith(include.ResolvedFileName(), kExtUrdf);
   const bool is_forced_nesting =
       test_sdf_forced_nesting &&
-      EndsWith(include.resolvedFileName, kExtForcedNesting);
+      EndsWith(include.ResolvedFileName(), kExtForcedNesting);
   if (!is_urdf && !is_forced_nesting) {
     return nullptr;
   }
 
-  if (include.isStatic) {
+  if (include.IsStatic()) {
     errors->emplace_back(
         sdf::ErrorCode::ELEMENT_INVALID,
         "Drake does not yet support //include/static for custom nesting.");
@@ -1151,15 +1140,15 @@ sdf::InterfaceModelPtr ParseNestedInterfaceModel(
   }
 
   DataSource data_source;
-  data_source.file_name = &include.resolvedFileName;
+  data_source.file_name = &include.ResolvedFileName();
 
   ModelInstanceIndex main_model_instance;
   // New instances will have indices starting from cur_num_models
   int cur_num_models = plant->num_model_instances();
   if (is_urdf) {
     main_model_instance =
-        AddModelFromUrdf(data_source, include.localModelName.value_or(""),
-                         include.absoluteParentName, package_map, plant);
+        AddModelFromUrdf(data_source, include.LocalModelName().value_or(""),
+                         include.AbsoluteParentName(), package_map, plant);
     // Add explicit model frame to first link.
     auto body_indices = plant->GetBodyIndices(main_model_instance);
     if (body_indices.empty()) {
@@ -1186,10 +1175,10 @@ sdf::InterfaceModelPtr ParseNestedInterfaceModel(
     const sdf::Model &model = *root.Model();
 
     const std::string model_name =
-        include.localModelName.value_or(model.Name());
+        include.LocalModelName().value_or(model.Name());
     main_model_instance = AddModelsFromSpecification(
-        model, sdf::JoinName(include.absoluteParentName, model_name), {}, plant,
-        package_map, root_dir).front();
+        model, sdf::JoinName(include.AbsoluteParentName(), model_name), {},
+        plant, package_map, root_dir).front();
   }
 
   // Now that the model is parsed, we create interface elements to send to
@@ -1311,22 +1300,11 @@ ModelInstanceIndex AddModelFromSdf(
 
   std::string root_dir = LoadSdf(&root, data_source, parser_config);
 
-  // TODO(jwnimmer-tri) When we upgrade to a version of libsdformat that no
-  // longer offers ModelCount(), remove this entire paragraph of code.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  const uint64_t model_count = root.ModelCount();
-#pragma GCC diagnostic pop
-  if (model_count != 1) {
+  if (root.Model() == nullptr) {
     throw std::runtime_error("File must have a single <model> element.");
   }
-
   // Get the only model in the file.
   const sdf::Model& model = *root.Model();
-
-  // //sdf/model/pose/@relative_to is invalid. Note, libsdformat should emit an
-  // error during Load, but currently doesn't. See sdformat#567
-  ThrowIfPoseFrameSpecified(model.Element());
 
   if (scene_graph != nullptr && !plant->geometry_source_is_registered()) {
     plant->RegisterAsSourceForSceneGraph(scene_graph);
@@ -1360,11 +1338,9 @@ std::vector<ModelInstanceIndex> AddModelsFromSdf(
   std::string root_dir = LoadSdf(&root, data_source, parser_config);
 
   // There either must be exactly one model, or exactly one world.
-  // TODO(jwnimmer-tri) When we upgrade to a version of libsdformat that no
-  // longer offers ModelCount(), use 'Model() != nullptr ? 1 : 0' here.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  const uint64_t model_count = root.ModelCount();
+  const uint64_t model_count = root.Model() != nullptr ? 1 : 0;
 #pragma GCC diagnostic pop
   const uint64_t world_count = root.WorldCount();
   if ((model_count + world_count) != 1) {
@@ -1386,10 +1362,6 @@ std::vector<ModelInstanceIndex> AddModelsFromSdf(
     DRAKE_DEMAND(world_count == 0);
     DRAKE_DEMAND(root.Model() != nullptr);
     const sdf::Model& model = *root.Model();
-
-    // //sdf/model/pose/@relative_to is invalid. Note, libsdformat should emit
-    // an error during Load, but currently doesn't. See sdformat#567
-    ThrowIfPoseFrameSpecified(model.Element());
 
     std::vector<ModelInstanceIndex> added_model_instances =
         AddModelsFromSpecification(model, model.Name(), {}, plant,

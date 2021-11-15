@@ -9,7 +9,7 @@
 #include "drake/common/filesystem.h"
 #include "drake/common/find_resource.h"
 #include "drake/common/schema/transform.h"
-#include "drake/common/yaml/yaml_read_archive.h"
+#include "drake/common/yaml/yaml_io.h"
 #include "drake/multibody/parsing/parser.h"
 #include "drake/multibody/parsing/scoped_names.h"
 
@@ -18,7 +18,6 @@ namespace multibody {
 namespace parsing {
 
 using std::make_unique;
-using Eigen::Isometry3d;
 
 namespace fs = drake::filesystem;
 using drake::FindResourceOrThrow;
@@ -29,7 +28,7 @@ using drake::multibody::ModelInstanceIndex;
 using drake::multibody::MultibodyPlant;
 using drake::multibody::PackageMap;
 using drake::multibody::Parser;
-using drake::yaml::YamlReadArchive;
+using drake::yaml::LoadYamlFile;
 
 namespace {
 
@@ -58,7 +57,7 @@ namespace {
 void AddWeldWithOptionalError(
     const Frame<double>& parent_frame,
     const Frame<double>& child_frame,
-    ModelWeldErrorFunction error_func,
+    ModelWeldErrorFunctionToBeDeprecated error_func,
     MultibodyPlant<double>* plant,
     std::vector<ModelInstanceInfo>* added_models) {
   // TODO(#14084): This hack really shouldn't belong in model
@@ -106,7 +105,7 @@ void ProcessModelDirectivesImpl(
     const ModelDirectives& directives, MultibodyPlant<double>* plant,
     std::vector<ModelInstanceInfo>* added_models, Parser* parser,
     const std::string& model_namespace,
-    ModelWeldErrorFunction error_func) {
+    ModelWeldErrorFunctionToBeDeprecated error_func) {
   drake::log()->debug("ProcessModelDirectives(MultibodyPlant)");
   DRAKE_DEMAND(plant != nullptr);
   DRAKE_DEMAND(added_models != nullptr);
@@ -231,9 +230,22 @@ std::string ResolveModelDirectiveUri(const std::string& uri,
 }
 
 void ProcessModelDirectives(
+    const ModelDirectives& directives,
+    drake::multibody::MultibodyPlant<double>* plant,
+    std::vector<ModelInstanceInfo>* added_models,
+    drake::multibody::Parser* parser) {
+  // Once 2022-02-01 comes around, we can fold these two overloads back down
+  // to just one function.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  ProcessModelDirectives(directives, plant, added_models, parser, {});
+#pragma GCC diagnostic pop
+}
+
+void ProcessModelDirectives(
     const ModelDirectives& directives, MultibodyPlant<double>* plant,
     std::vector<ModelInstanceInfo>* added_models, Parser* parser,
-    ModelWeldErrorFunction error_func) {
+    ModelWeldErrorFunctionToBeDeprecated error_func) {
   auto tmp_parser = ConstructIfNullAndReassign<Parser>(&parser, plant);
   auto tmp_added_model =
       ConstructIfNullAndReassign<std::vector<ModelInstanceInfo>>(&added_models);
@@ -250,14 +262,14 @@ ModelDirectives LoadModelDirectives(const std::string& filename) {
         "No such file {} during LoadModelDirectives", filename));
   }
 
-  // TODO(ggould-tri) This should use the YamlLoadWithDefaults mechanism
-  // instead once that is ported to drake.
-  ModelDirectives directives;
-  YAML::Node root = YAML::LoadFile(filename);
-  drake::yaml::YamlReadArchive::Options options;
-  options.allow_cpp_with_no_yaml = true;
-  drake::yaml::YamlReadArchive(root, options).Accept(&directives);
-
+  // Even though the 'defaults' we use to start parsing here are empty, by
+  // providing any defaults at all, the effect during parsing will be that
+  // any of the users' ModelDirective structs and sub-structs will _also_
+  // start from their default values and allow for overwriting only a subset
+  // of the data fields instead of requiring that the user provide them all.
+  const ModelDirectives defaults;
+  const auto directives = LoadYamlFile<ModelDirectives>(
+      filename, std::nullopt /* child_name */, defaults);
   DRAKE_DEMAND(directives.IsValid());
   return directives;
 }

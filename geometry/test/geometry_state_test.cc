@@ -3715,8 +3715,8 @@ GTEST_TEST(GeometryStateHydroTest, GetHydroMesh) {
   ProximityProperties rigid_hydro;
   AddRigidHydroelasticProperties(1.0, &rigid_hydro);
   ProximityProperties soft_hydro;
-  AddContactMaterial(1e8, 0.0, {}, &soft_hydro);
-  AddSoftHydroelasticProperties(1.0, &soft_hydro);
+  AddContactMaterial(0.0, {}, {}, &soft_hydro);
+  AddSoftHydroelasticProperties(1.0, 1e8, &soft_hydro);
 
   // We'll simply affix a number of geometries as anchored with the identity
   // pose. The other details don't really matter.
@@ -3759,8 +3759,10 @@ GTEST_TEST(GeometryStateHydroTest, GetHydroMesh) {
     geometry_state.AssignRole(source_id, id, rigid_hydro);
 
     const auto maybe_mesh = geometry_state.maybe_get_hydroelastic_mesh(id);
-    EXPECT_TRUE(std::holds_alternative<const SurfaceMesh<double>*>(maybe_mesh));
-    EXPECT_NE(std::get<const SurfaceMesh<double>*>(maybe_mesh), nullptr);
+    EXPECT_TRUE(
+        std::holds_alternative<const TriangleSurfaceMesh<double>*>(maybe_mesh));
+    EXPECT_NE(std::get<const TriangleSurfaceMesh<double>*>(maybe_mesh),
+              nullptr);
   }
 
   // Case: id has volume mesh.

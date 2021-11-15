@@ -43,7 +43,7 @@ using Eigen::VectorXd;
 using geometry::GeometryId;
 using geometry::ProximityProperties;
 using geometry::SceneGraph;
-using geometry::SurfaceMesh;
+using geometry::TriangleSurfaceMesh;
 using geometry::VolumeMesh;
 using geometry::VolumeMeshFieldLinear;
 using math::RigidTransformd;
@@ -64,9 +64,9 @@ VolumeMesh<double> MakeUnitCubeTetMesh(
   DRAKE_DEMAND(mesh.num_vertices() == kNumVertices);
 
   std::vector<geometry::VolumeElement> elements = mesh.tetrahedra();
-  std::vector<geometry::VolumeVertex<double>> vertices;
+  std::vector<Vector3d> vertices;
   for (const auto& v : mesh.vertices()) {
-    vertices.emplace_back(pose * v.r_MV());
+    vertices.emplace_back(pose * v);
   }
   return {std::move(elements), std::move(vertices)};
 }
@@ -82,8 +82,7 @@ internal::ReferenceDeformableGeometry<double> MakeUnitCubeDeformableGeometry(
   std::vector<double> dummy_signed_distances(kNumVertices,
                                              kDummySignedDistance);
   auto mesh_field = std::make_unique<VolumeMeshFieldLinear<double, double>>(
-      "Dummy signed distances", std::move(dummy_signed_distances), mesh.get(),
-      false);
+      std::move(dummy_signed_distances), mesh.get(), false);
   return {std::move(mesh), std::move(mesh_field)};
 }
 
@@ -93,7 +92,7 @@ ProximityProperties MakeProximityProperties(double stiffness,
                                             double dissipation,
                                             const CoulombFriction<double>& mu) {
   ProximityProperties proximity_properties;
-  geometry::AddContactMaterial({}, dissipation, stiffness, mu,
+  geometry::AddContactMaterial(dissipation, stiffness, mu,
                                &proximity_properties);
   return proximity_properties;
 }
@@ -244,7 +243,7 @@ TEST_F(DeformableRigidManagerTest, RegisterCollisionGeometry) {
   GeometryId id;
   get_collision_geometry(&id);
   /* Verify the surface mesh is as expected. */
-  const SurfaceMesh<double> expected_surface_mesh =
+  const TriangleSurfaceMesh<double> expected_surface_mesh =
       geometry::ConvertVolumeToSurfaceMesh(MakeUnitCubeTetMesh());
   EXPECT_TRUE(expected_surface_mesh.Equal(collision_objects.mesh(id)));
   /* Verify proximity property is as expected. */
@@ -278,8 +277,7 @@ TEST_F(DeformableRigidManagerTest, UpdateDeformableVertexPositions) {
                reference_configuration_geometries[0].mesh().num_elements());
   /* Verify that the elements of the deformed mesh is the same as the elements
    of the initial mesh. */
-  for (geometry::VolumeElementIndex i(0);
-       i < deformed_meshes[0].mesh().num_elements(); ++i) {
+  for (int i = 0; i < deformed_meshes[0].mesh().num_elements(); ++i) {
     EXPECT_EQ(deformed_meshes[0].mesh().element(i),
               reference_configuration_geometries[0].mesh().element(i));
   }
@@ -291,11 +289,10 @@ TEST_F(DeformableRigidManagerTest, UpdateDeformableVertexPositions) {
   EXPECT_EQ(current_positions.size(), 1);
   EXPECT_EQ(current_positions[0].size(),
             deformed_meshes[0].mesh().num_vertices() * 3);
-  for (geometry::VolumeVertexIndex i(0);
-       i < deformed_meshes[0].mesh().num_vertices(); ++i) {
+  for (int i = 0; i < deformed_meshes[0].mesh().num_vertices(); ++i) {
     const Vector3<double> p_WV = current_positions[0].segment<3>(3 * i);
     EXPECT_TRUE(
-        CompareMatrices(p_WV, deformed_meshes[0].mesh().vertex(i).r_MV()));
+        CompareMatrices(p_WV, deformed_meshes[0].mesh().vertex(i)));
   }
 }
 

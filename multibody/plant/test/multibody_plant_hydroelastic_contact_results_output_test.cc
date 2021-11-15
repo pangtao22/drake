@@ -12,11 +12,6 @@ using Eigen::Vector3d;
 namespace drake {
 
 using geometry::ContactSurface;
-using geometry::SurfaceFace;
-using geometry::SurfaceFaceIndex;
-using geometry::SurfaceVertex;
-using geometry::SurfaceVertexIndex;
-using geometry::SurfaceMesh;
 
 namespace multibody {
 namespace {
@@ -38,7 +33,7 @@ class HydroelasticContactResultsOutputTester : public ::testing::Test {
     // Set some reasonable, but arbitrary, parameters: none of these will
     // affect the test results.
     const double mass = 2.0;                           // kg.
-    const double elastic_modulus = 1e7;                // Pascals.
+    const double hydroelastic_modulus = 1e7;           // Pascals.
     const Vector3<double> gravity_W(0, 0, -9.8);       // m/s^2.
 
     // Create the plant.
@@ -50,7 +45,7 @@ class HydroelasticContactResultsOutputTester : public ::testing::Test {
     //  directory. Examples code shouldn't feed back into other code.
     plant_ = builder.AddSystem(
         examples::multibody::bouncing_ball::MakeBouncingBallPlant(
-            0.0 /* mbp_dt */, radius, mass, elastic_modulus, dissipation,
+            0.0 /* mbp_dt */, radius, mass, hydroelastic_modulus, dissipation,
             friction, gravity_W, false /* rigid_sphere */,
             false /* soft_ground */, &scene_graph));
     plant_->set_contact_model(ContactModel::kHydroelastic);
@@ -129,7 +124,7 @@ TEST_F(HydroelasticContactResultsOutputTester, SpatialForceAtCentroid) {
 
   // The following crude quadrature process relies upon there being three
   // quadrature points per triangle.
-  ASSERT_EQ(results.contact_surface().mesh_W().num_faces() * 3,
+  ASSERT_EQ(results.contact_surface().mesh_W().num_triangles() * 3,
             results.quadrature_point_data().size());
 
   // Sanity check that geometry ID is consistent with direction of spatial

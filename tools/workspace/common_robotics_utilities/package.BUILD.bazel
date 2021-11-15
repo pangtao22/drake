@@ -47,6 +47,7 @@ cc_library(
         "include/common_robotics_utilities/zlib_helpers.hpp",
     ],
     includes = ["include"],
+    linkstatic = True,
     deps = [
         "@eigen",
         "@zlib",
@@ -68,16 +69,6 @@ cc_test(
 cc_test(
     name = "task_planning_test",
     srcs = ["test/task_planning_test.cpp"],
-    deps = [
-        ":common_robotics_utilities",
-        "@gtest//:without_main",
-    ],
-)
-
-cc_test(
-    name = "task_planning_test_no_equals",
-    srcs = ["test/task_planning_test.cpp"],
-    defines = ["NO_OPERATOR_EQUALS"],
     deps = [
         ":common_robotics_utilities",
         "@gtest//:without_main",

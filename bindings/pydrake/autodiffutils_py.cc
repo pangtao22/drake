@@ -4,6 +4,7 @@
 #include "pybind11/stl.h"
 
 #include "drake/bindings/pydrake/autodiff_types_pybind.h"
+#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
 #include "drake/common/drake_throw.h"
@@ -108,13 +109,21 @@ PYBIND11_MODULE(autodiffutils, m) {
 
   m.def(
       "InitializeAutoDiff",
-      [](const Eigen::MatrixXd& value, Eigen::DenseIndex num_derivatives,
-          Eigen::DenseIndex deriv_num_start) {
+      [](const Eigen::MatrixXd& value, std::optional<int> num_derivatives,
+          std::optional<int> deriv_num_start) {
         return InitializeAutoDiff(value, num_derivatives, deriv_num_start);
       },
       py::arg("value"), py::arg("num_derivatives") = std::nullopt,
       py::arg("deriv_num_start") = std::nullopt,
       doc.InitializeAutoDiff.doc_just_value);
+
+  m.def(
+      "InitializeAutoDiff",
+      [](const Eigen::MatrixXd& value, const Eigen::MatrixXd& gradient) {
+        return InitializeAutoDiff(value, gradient);
+      },
+      py::arg("value"), py::arg("gradient"),
+      doc.InitializeAutoDiff.doc_value_and_gradient);
 
   m.def(
       "ExtractValue",
@@ -130,45 +139,40 @@ PYBIND11_MODULE(autodiffutils, m) {
       },
       py::arg("auto_diff_matrix"), doc.ExtractGradient.doc);
 
-  m.def(
-      "InitializeAutoDiff",
-      [](const Eigen::VectorXd& value, const Eigen::MatrixXd& gradient) {
-        return InitializeAutoDiff(value, gradient);
-      },
-      py::arg("value"), py::arg("gradient"),
-      doc.InitializeAutoDiff.doc_value_and_gradient);
-
-  // TODO(sherm1) To be deprecated asap.
-  m.def(
-      "initializeAutoDiff",
-      [](const Eigen::MatrixXd& mat, Eigen::DenseIndex num_derivatives,
-          Eigen::DenseIndex deriv_num_start) {
-        return initializeAutoDiff(mat, num_derivatives, deriv_num_start);
-      },
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  m.def("initializeAutoDiff",
+      WrapDeprecated(doc.initializeAutoDiff.doc_deprecated,
+          [](const Eigen::MatrixXd& mat, Eigen::DenseIndex num_derivatives,
+              Eigen::DenseIndex deriv_num_start) {
+            return initializeAutoDiff(mat, num_derivatives, deriv_num_start);
+          }),
       py::arg("mat"), py::arg("num_derivatives") = -1,
-      py::arg("deriv_num_start") = 0, doc.initializeAutoDiff.doc);
+      py::arg("deriv_num_start") = 0, doc.initializeAutoDiff.doc_deprecated);
 
-  m.def(
-      "autoDiffToValueMatrix",
-      [](const MatrixX<AutoDiffXd>& autodiff_matrix) {
-        return autoDiffToValueMatrix(autodiff_matrix);
-      },
-      py::arg("autodiff_matrix"), doc.autoDiffToValueMatrix.doc);
+  m.def("autoDiffToValueMatrix",
+      WrapDeprecated(doc.autoDiffToValueMatrix.doc_deprecated,
+          [](const MatrixX<AutoDiffXd>& autodiff_matrix) {
+            return autoDiffToValueMatrix(autodiff_matrix);
+          }),
+      py::arg("autodiff_matrix"), doc.autoDiffToValueMatrix.doc_deprecated);
 
-  m.def(
-      "autoDiffToGradientMatrix",
-      [](const MatrixX<AutoDiffXd>& autodiff_matrix) {
-        return autoDiffToGradientMatrix(autodiff_matrix);
-      },
-      py::arg("autodiff_matrix"), doc.autoDiffToGradientMatrix.doc);
+  m.def("autoDiffToGradientMatrix",
+      WrapDeprecated(doc.autoDiffToGradientMatrix.doc_deprecated,
+          [](const MatrixX<AutoDiffXd>& autodiff_matrix) {
+            return autoDiffToGradientMatrix(autodiff_matrix);
+          }),
+      py::arg("autodiff_matrix"), doc.autoDiffToGradientMatrix.doc_deprecated);
 
-  m.def(
-      "initializeAutoDiffGivenGradientMatrix",
-      [](const Eigen::VectorXd& val, const Eigen::MatrixXd& gradient) {
-        return initializeAutoDiffGivenGradientMatrix(val, gradient);
-      },
+  m.def("initializeAutoDiffGivenGradientMatrix",
+      WrapDeprecated(
+          doc.initializeAutoDiffGivenGradientMatrix.doc_deprecated_2args,
+          [](const Eigen::VectorXd& val, const Eigen::MatrixXd& gradient) {
+            return initializeAutoDiffGivenGradientMatrix(val, gradient);
+          }),
       py::arg("val"), py::arg("gradient"),
-      doc.initializeAutoDiffGivenGradientMatrix.doc);
+      doc.initializeAutoDiffGivenGradientMatrix.doc_deprecated_2args);
+#pragma GCC diagnostic pop
 
   ExecuteExtraPythonCode(m);
 }

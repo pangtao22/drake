@@ -26,6 +26,7 @@
 #include "drake/multibody/plant/coulomb_friction.h"
 #include "drake/multibody/plant/discrete_contact_pair.h"
 #include "drake/multibody/plant/discrete_update_manager.h"
+#include "drake/multibody/plant/multibody_plant_config.h"
 #include "drake/multibody/plant/physical_model.h"
 #include "drake/multibody/plant/tamsi_solver.h"
 #include "drake/multibody/topology/multibody_graph.h"
@@ -1424,8 +1425,8 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   /// @name                    Contact modeling
   /// Use methods in this section to choose the contact model and to provide
   /// parameters for that model. Currently Drake supports an advanced compliant
-  /// contact model we call _Hydroelastic contact_ that is still experimental,
-  /// and a penalty-based point contact model as a reliable fallback.
+  /// contact model we call _Hydroelastic contact_ and a penalty-based point
+  /// contact model as a reliable fallback.
   ///
   /// @anchor mbp_hydroelastic_materials_properties
   ///                      #### Hydroelastic contact
@@ -1436,37 +1437,51 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   /// For brevity, here we limit ourselves to state the relationship between the
   /// material properties and the computation of the normal traction or
   /// "pressure" `p(x)` at each point `x` in the contact patch.
-  /// Given two bodies A and B, with elastic moduli `Eᵃ` and `Eᵇ` respectively
-  /// and dissipation `dᵃ` and `dᵇ` respectively, we define the effective
-  /// material properties of the pair according to: <pre>
+  /// Given two bodies A and B, with hydroelastic moduli `Eᵃ` and `Eᵇ`
+  /// respectively and dissipation `dᵃ` and `dᵇ` respectively, we define the
+  /// effective material properties of the pair according to: <pre>
   ///   E = Eᵃ⋅Eᵇ/(Eᵃ + Eᵇ),
   ///   d = E/Eᵃ⋅dᵃ + E/Eᵇ⋅dᵇ = Eᵇ/(Eᵃ+Eᵇ)⋅dᵃ + Eᵃ/(Eᵃ+Eᵇ)⋅dᵇ
   /// </pre>
-  /// The effective modulus of elasticity is computed in accordance with the
-  /// Hertz theory of contact. Dissipation is weighted in accordance with the
+  /// The effective hydroelastic modulus computation is based on that of the
+  /// effective elastic modulus in the Hertz theory of contact.
+  /// Dissipation is weighted in accordance with the
   /// fact that the softer material will deform more and faster and thus the
-  /// softer material dissipation is given more importance. Elastic modulus has
-  /// units of pressure, i.e. `Pa (N/m²)`. The elastic modulus is often
-  /// estimated based on the Young's modulus of the material though in the
-  /// hydroelastic model it represents an effective elastic property. For
+  /// softer material dissipation is given more importance. Hydroelastic
+  /// modulus has units of pressure, i.e. `Pa (N/m²)`. The hydroelastic modulus
+  /// is often estimated based on the Young's modulus of the material though in
+  /// the hydroelastic model it represents an effective elastic property. For
   /// instance, [R. Elandt 2019] chooses to use `E = G`, with `G` the P-wave
   /// elastic modulus `G = (1-ν)/(1+ν)/(1-2ν)E`, with ν the Poisson
   /// ratio, consistent with the theory of layered solids in which plane
   /// sections remain planar after compression. Another possibility is to
   /// specify `E = E*`, with `E*` the effective elastic modulus given by the
   /// Hertz theory of contact, `E* = E/(1-ν²)`. In all of these cases a sound
-  /// estimation of `elastic_modulus` starts with the Young's modulus of the
-  /// material.
+  /// estimation of `hydroelastic_modulus` starts with the Young's modulus of
+  /// the material.
+  ///
+  /// @note `hydroelastic_modulus` has units of stress/strain, measured in
+  /// Pascal or N/m² like the more-familiar elastic moduli discussed above.
+  /// However, it is quantitatively different and may require experimentation
+  /// to match empirical behavior.
   ///
   /// We use a dissipation model inspired by the model in
   /// [Hunt and Crossley, 1975], parameterized by a dissipation constant with
   /// units of inverse of velocity, i.e. `s/m`.
   ///
-  /// The elastic modulus and dissipation can be specified in one of two ways:
+  /// The dissipation can be specified in one of two ways:
   ///
-  /// - define them in an instance of geometry::ProximityProperties using
+  /// - define it in an instance of geometry::ProximityProperties using
   ///   the function geometry::AddContactMaterial(), or
-  /// - define them in an input URDF/SDF as detailed @ref sdf_contact_material
+  /// - define it in an input URDF/SDF as detailed @ref sdf_contact_material
+  ///   "here for SDF" or @ref urdf_contact_material "here for URDF".
+  ///
+  /// The hydroelastic modulus can be specified in one of two ways:
+  ///
+  /// - define it in an instance of geometry::ProximityProperties using
+  ///   the function geometry::AddSoftHydroelasticProperties() and
+  ///   geometry::AddSoftHydroelasticPropertiesForHalfSpace(), or
+  /// - define it in an input URDF/SDF as detailed @ref sdf_contact_material
   ///   "here for SDF" or @ref urdf_contact_material "here for URDF".
   ///
   /// With the effective properties of the pair defined as above, the
@@ -1493,6 +1508,7 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   ///   pressure field model for fast, robust approximation of net contact force
   ///   and moment between nominally rigid objects. Proc. IEEE/RSJ Intl. Conf.
   ///   on Intelligent Robots and Systems (IROS), 2019.
+  ///
   /// [Hunt and Crossley 1975] Hunt, KH and Crossley, FRE, 1975. Coefficient
   ///   of restitution interpreted as damping in vibroimpact. Journal of Applied
   ///   Mechanics, vol. 42, pp. 440–445.
@@ -1693,7 +1709,9 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   /// details.
   ///
   /// @throws std::exception if penetration_allowance is not positive.
-  void set_penetration_allowance(double penetration_allowance = 0.001);
+  void set_penetration_allowance(
+      double penetration_allowance =
+          MultibodyPlantConfig{}.penetration_allowance);
 
   /// Returns a time-scale estimate `tc` based on the requested penetration
   /// allowance δ set with set_penetration_allowance().
@@ -1755,7 +1773,8 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   /// this value.
   /// See also @ref stribeck_approximation.
   /// @throws std::exception if `v_stiction` is non-positive.
-  void set_stiction_tolerance(double v_stiction = 0.001) {
+  void set_stiction_tolerance(
+      double v_stiction = MultibodyPlantConfig{}.stiction_tolerance) {
     friction_model_.set_stiction_tolerance(v_stiction);
   }
   /// @} <!-- Contact modeling -->
@@ -1801,6 +1820,26 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
       ModelInstanceIndex model_instance) const {
     this->ValidateContext(context);
     return internal_tree().GetPositionsAndVelocities(context, model_instance);
+  }
+
+  /// (Advanced) Populates output vector qv_out representing the generalized
+  /// positions q and generalized velocities v of a specified model instance
+  /// in a given Context.
+  /// @note qv_out is a dense vector of dimensions
+  ///       `num_positions(model_instance) + num_velocities(model_instance)`
+  ///       associated with `model_instance` and is populated by copying from
+  ///       `context`.
+  /// @note This function is guaranteed to allocate no heap.
+  /// @throws std::exception if `context` does not correspond to the Context
+  ///         for a multibody model or `model_instance` is invalid.
+  /// @throws std::exception if qv_out does not have size
+  ///         `num_positions(model_instance) + num_velocities(model_instance)`
+  void GetPositionsAndVelocities(
+      const systems::Context<T>& context,
+      ModelInstanceIndex model_instance,
+      EigenPtr<VectorX<T>> qv_out) const {
+    this->ValidateContext(context);
+    internal_tree().GetPositionsAndVelocities(context, model_instance, qv_out);
   }
 
   /// (Advanced -- **see warning**) Returns a mutable vector reference `[q; v]`
@@ -1873,6 +1912,23 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
     this->ValidateContext(context);
     return internal_tree().GetPositionsFromArray(
         model_instance, internal_tree().get_positions(context));
+  }
+
+  /// (Advanced) Populates output vector q_out with the generalized positions q
+  /// of a specified model instance in a given Context.
+  /// @note q_out is a dense vector of dimension
+  ///       `num_positions(model_instance)' associated with `model_instance`
+  ///       and is populated by copying from `context`.
+  /// @note This function is guaranteed to allocate no heap.
+  /// @throws std::exception if `context` does not correspond to the Context
+  ///         for a multibody model or `model_instance` is invalid.
+  void GetPositions(
+      const systems::Context<T>& context,
+      ModelInstanceIndex model_instance,
+      EigenPtr<VectorX<T>> q_out) const {
+    this->ValidateContext(context);
+    internal_tree().GetPositionsFromArray(
+        model_instance, internal_tree().get_positions(context), q_out);
   }
 
   /// (Advanced -- **see warning**) Returns a mutable vector reference to the
@@ -1975,6 +2031,24 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
     return internal_tree().GetVelocitiesFromArray(
         model_instance, internal_tree().get_velocities(context));
   }
+
+  /// (Advanced) Populates output vector v_out with the generalized
+  /// velocities v of a specified model instance in a given Context.
+  /// @note v_out is a dense vector of dimension
+  ///       `num_velocities(model_instance)` associated with `model_instance`
+  ///       and is populated by copying from `context`.
+  /// @note This function is guaranteed to allocate no heap.
+  /// @throws std::exception if `context` does not correspond to the Context
+  ///         for a multibody model or `model_instance` is invalid.
+  void GetVelocities(
+      const systems::Context<T>& context,
+      ModelInstanceIndex model_instance,
+      EigenPtr<VectorX<T>> v_out) const {
+    this->ValidateContext(context);
+    internal_tree().GetVelocitiesFromArray(
+        model_instance, internal_tree().get_velocities(context), v_out);
+  }
+
 
   /// (Advanced -- **see warning**) Returns a mutable vector reference to the
   /// generalized velocities v in a given Context.
@@ -2122,6 +2196,17 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
     return internal_tree().GetPositionsFromArray(model_instance, q);
   }
 
+  /// (Advanced) Populates output vector q_out and with the generalized
+  /// positions for `model_instance` from a vector `q` of generalized
+  /// positions for the entire model.  This method throws an exception
+  /// if `q` is not of size MultibodyPlant::num_positions().
+  void GetPositionsFromArray(
+      ModelInstanceIndex model_instance,
+      const Eigen::Ref<const VectorX<T>>& q,
+      EigenPtr<VectorX<T>> q_out) const {
+    internal_tree().GetPositionsFromArray(model_instance, q, q_out);
+  }
+
   /// Sets the vector of generalized positions for `model_instance` in
   /// `q` using `q_instance`, leaving all other elements in the array
   /// untouched. This method throws an exception if `q` is not of size
@@ -2143,6 +2228,17 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
       ModelInstanceIndex model_instance,
       const Eigen::Ref<const VectorX<T>>& v) const {
     return internal_tree().GetVelocitiesFromArray(model_instance, v);
+  }
+
+  /// (Advanced) Populates output vector v_out with the generalized
+  /// velocities for `model_instance` from a vector `v` of generalized
+  /// velocities for the entire model.  This method throws an exception
+  /// if `v` is not of size MultibodyPlant::num_velocities().
+  void GetVelocitiesFromArray(
+      ModelInstanceIndex model_instance,
+      const Eigen::Ref<const VectorX<T>>& v,
+      EigenPtr<VectorX<T>> v_out) const {
+    internal_tree().GetVelocitiesFromArray(model_instance, v, v_out);
   }
 
   /// Sets the vector of generalized velocities for `model_instance` in
@@ -3708,6 +3804,12 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
     return internal_tree().GetFrameByName(name, model_instance);
   }
 
+  /// Returns a list of frame indices associated with `model_instance`.
+  std::vector<FrameIndex> GetFrameIndices(ModelInstanceIndex model_instance)
+  const {
+    return internal_tree().GetFrameIndices(model_instance);
+  }
+
   /// Returns the number of joint actuators in the model.
   /// @see AddJointActuator().
   int num_actuators() const {
@@ -4682,7 +4784,7 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
 
   // Penetration allowance used to estimate ContactByPenaltyMethodParameters.
   // See set_penetration_allowance() for details.
-  double penetration_allowance_{1.0e-3};
+  double penetration_allowance_{MultibodyPlantConfig{}.penetration_allowance};
 
   // Stribeck model of friction.
   class StribeckModel {
@@ -4793,7 +4895,9 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   // See geometry_id_to_collision_index_.
   std::vector<CoulombFriction<double>> default_coulomb_friction_;
 
-  // The model used by the plant to compute contact forces.
+  // The model used by the plant to compute contact forces. Keep this in sync
+  // with the default value in multibody_plant_config.h; there are already
+  // assertions in the cc file that enforce this.
   ContactModel contact_model_{ContactModel::kPoint};
 
   bool use_low_resolution_contact_surface_{false};

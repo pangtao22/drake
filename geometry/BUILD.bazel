@@ -37,6 +37,8 @@ drake_cc_package_library(
         ":internal_frame",
         ":internal_geometry",
         ":meshcat",
+        ":meshcat_animation",
+        ":meshcat_point_cloud_visualizer",
         ":meshcat_visualizer",
         ":meshcat_visualizer_params",
         ":proximity_engine",
@@ -142,7 +144,7 @@ drake_cc_library(
 
 drake_cc_library(
     name = "geometry_frame",
-    srcs = [],
+    srcs = ["geometry_frame.cc"],
     hdrs = ["geometry_frame.h"],
     deps = [
         ":geometry_ids",
@@ -309,6 +311,7 @@ drake_cc_library(
     hdrs = ["shape_specification.h"],
     deps = [
         "//common:essential",
+        "//common:nice_type_name",
         "//math:geometric_transform",
     ],
 )
@@ -375,6 +378,24 @@ install_files(
 )
 
 drake_cc_library(
+    name = "meshcat_animation",
+    srcs = ["meshcat_animation.cc"],
+    hdrs = ["meshcat_animation.h"],
+    deps = [
+        "//math:geometric_transform",
+    ],
+)
+
+drake_cc_googletest(
+    name = "meshcat_animation_test",
+    deps = [
+        ":meshcat_animation",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
+    ],
+)
+
+drake_cc_library(
     name = "meshcat",
     srcs = ["meshcat.cc"],
     hdrs = [
@@ -384,12 +405,15 @@ drake_cc_library(
     data = [":meshcat_resources"],
     install_hdrs_exclude = ["meshcat_types.h"],
     deps = [
+        ":meshcat_animation",
         ":rgba",
         ":shape_specification",
         "//common:essential",
         "//common:find_resource",
         "//common:unused",
+        "//geometry/proximity:triangle_surface_mesh",
         "//math:geometric_transform",
+        "//perception:point_cloud",
         "@common_robotics_utilities",
         "@msgpack",
         "@stduuid",
@@ -402,9 +426,10 @@ drake_cc_binary(
     testonly = True,
     srcs = ["test/meshcat_manual_test.cc"],
     data = [
+        "//examples/kuka_iiwa_arm:models",
+        "//geometry/render:test_models",
         "//manipulation/models/iiwa_description:models",
         "//manipulation/models/ycb:models",
-        "//systems/sensors:test_models",
     ],
     visibility = ["//visibility:private"],
     deps = [
@@ -412,6 +437,7 @@ drake_cc_binary(
         ":meshcat_visualizer",
         "//multibody/parsing",
         "//multibody/plant",
+        "//multibody/plant:contact_results_to_meshcat",
         "//systems/analysis:simulator",
     ],
 )
@@ -427,7 +453,7 @@ drake_cc_googletest(
     name = "meshcat_test",
     data = [
         ":meshcat_websocket_client",
-        "//systems/sensors:test_models",
+        "//geometry/render:test_models",
     ],
     # Disable valgrind because it currently fails on the system call to python.
     # TODO(russt): Make it possible to pass --trace-children=no to valgrind.sh.
@@ -436,6 +462,30 @@ drake_cc_googletest(
         ":meshcat",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
+    ],
+)
+
+drake_cc_library(
+    name = "meshcat_point_cloud_visualizer",
+    srcs = ["meshcat_point_cloud_visualizer.cc"],
+    hdrs = ["meshcat_point_cloud_visualizer.h"],
+    deps = [
+        ":meshcat",
+        ":rgba",
+        ":utilities",
+        "//perception:point_cloud",
+        "//systems/framework:leaf_system",
+    ],
+)
+
+drake_cc_googletest(
+    name = "meshcat_point_cloud_visualizer_test",
+    deps = [
+        ":meshcat_point_cloud_visualizer",
+        "//common/test_utilities:expect_throws_message",
+        "//systems/analysis:simulator",
+        "//systems/framework:diagram_builder",
+        "//systems/primitives:constant_value_source",
     ],
 )
 
@@ -470,9 +520,6 @@ drake_cc_googletest(
     name = "meshcat_visualizer_test",
     data = [
         "//manipulation/models/iiwa_description:models",
-    ],
-    tags = [
-        "no_asan",  # TODO(#15828) This is a workaround and should be removed.
     ],
     deps = [
         ":meshcat_visualizer",
@@ -521,7 +568,6 @@ drake_cc_googletest(
         ":drake_visualizer",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
-        "//lcm:mock",
         "//systems/analysis:simulator",
     ],
 )

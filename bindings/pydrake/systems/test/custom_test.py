@@ -16,6 +16,8 @@ from pydrake.systems.framework import (
     AbstractParameterIndex,
     AbstractStateIndex,
     BasicVector, BasicVector_,
+    CacheEntry,
+    CacheEntryValue,
     CacheIndex,
     Context,
     ContinuousStateIndex,
@@ -32,6 +34,7 @@ from pydrake.systems.framework import (
     System,
     TriggerType,
     UnrestrictedUpdateEvent,
+    ValueProducer,
     VectorSystem,
     WitnessFunctionDirection,
     kUseDefaultName,
@@ -221,6 +224,34 @@ class TestCustom(unittest.TestCase):
                 (dut.numeric_parameter_ticket, NumericParameterIndex(0)),
                 ]:
             self.assertIsInstance(func(arg), DependencyTicket, func)
+
+    def test_cache_entry(self):
+        """Checks the existence of CacheEntry-related bindings."""
+
+        # Cover DeclareCacheEntry.
+        dummy = LeafSystem()
+        allocate_abstract_int = AbstractValue.Make(0).Clone
+        cache_entry = dummy.DeclareCacheEntry(
+            description="scratch",
+            value_producer=ValueProducer(
+                allocate=allocate_abstract_int,
+                calc=ValueProducer.NoopCalc),
+            prerequisites_of_calc={dummy.nothing_ticket()})
+        self.assertIsInstance(cache_entry, CacheEntry)
+
+        # Cover CacheEntry and get_cache_entry.
+        self.assertIsInstance(cache_entry.prerequisites(), set)
+        cache_index = cache_entry.cache_index()
+        self.assertIsInstance(cache_index, CacheIndex)
+        self.assertIsInstance(cache_entry.ticket(), DependencyTicket)
+        self.assertIs(dummy.get_cache_entry(cache_index), cache_entry)
+
+        # Cover CacheEntryValue.
+        context = dummy.CreateDefaultContext()
+        cache_entry_value = cache_entry.get_mutable_cache_entry_value(context)
+        self.assertIsInstance(cache_entry_value, CacheEntryValue)
+        data = cache_entry_value.GetMutableValueOrThrow()
+        self.assertIsInstance(data, int)
 
     def test_leaf_system_issue13792(self):
         """
@@ -419,36 +450,6 @@ class TestCustom(unittest.TestCase):
         self.assertTrue(system.called_guard)
         self.assertTrue(system.called_reset)
         self.assertTrue(system.called_system_reset)
-
-    def test_deprecated_leaf_system_port_declarations(self):
-        """Checks that the bindings without a name= argument still work."""
-        dut = LeafSystem()
-
-        # Input port.
-        with catch_drake_warnings(expected_count=1):
-            input_port = dut.DeclareInputPort(
-                type=PortDataType.kVectorValued, size=1)
-
-        # Vector output port.
-        def _vector_calc(context, output):
-            output.get_mutable_value()[:] = context.get_time()
-        with catch_drake_warnings(expected_count=1):
-            vector_output_port = dut.DeclareVectorOutputPort(
-                BasicVector(1), _vector_calc)
-
-        # Abstract output port.
-        def _tuple_calc(context, output):
-            output.set_value(("time", context.get_time()))
-        with catch_drake_warnings(expected_count=1):
-            abstract_output_port = dut.DeclareAbstractOutputPort(
-                lambda: AbstractValue.Make(("string", 0.0)),
-                _tuple_calc)
-
-        # Check that the return values were sane.
-        context = dut.CreateDefaultContext()
-        input_port.get_index()
-        vector_output_port.Eval(context)
-        abstract_output_port.Eval(context)
 
     def test_state_output_port_declarations(self):
         """Checks that DeclareStateOutputPort is bound."""

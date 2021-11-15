@@ -12,7 +12,6 @@ import webbrowser
 import numpy as np
 
 from pydrake.common.deprecation import _warn_deprecated
-from pydrake.common.eigen_geometry import Quaternion, Isometry3
 from pydrake.common.value import AbstractValue
 from pydrake.geometry import (
     Box, ConvertVolumeToSurfaceMesh, Convex, Cylinder, Mesh, Sphere,
@@ -44,7 +43,9 @@ import meshcat.geometry as g  # noqa
 import meshcat.transformations as tf  # noqa
 from meshcat.animation import Animation
 
-_DEFAULT_PUBLISH_PERIOD = 1 / 30.
+# To help avoid small simulation timesteps, we use a default period that has an
+# exact representation in binary floating point; see drake#15021 for details.
+_DEFAULT_PUBLISH_PERIOD = 1 / 32.
 
 
 def AddTriad(vis, name, prefix, length=1., radius=0.04, opacity=1.):
@@ -480,16 +481,16 @@ class MeshcatVisualizer(LeafSystem):
                     surface_mesh = hydro_mesh
                     if isinstance(hydro_mesh, VolumeMesh):
                         surface_mesh = ConvertVolumeToSurfaceMesh(hydro_mesh)
-                    v_count = len(surface_mesh.faces()) * 3
+                    v_count = len(surface_mesh.triangles()) * 3
                     vertices = np.empty((v_count, 3), dtype=float)
                     normals = np.empty((v_count, 3), dtype=float)
 
                     mesh_verts = surface_mesh.vertices()
                     v = 0
-                    for face in surface_mesh.faces():
-                        p_MA = mesh_verts[int(face.vertex(0))].r_MV()
-                        p_MB = mesh_verts[int(face.vertex(1))].r_MV()
-                        p_MC = mesh_verts[int(face.vertex(2))].r_MV()
+                    for face in surface_mesh.triangles():
+                        p_MA = mesh_verts[int(face.vertex(0))]
+                        p_MB = mesh_verts[int(face.vertex(1))]
+                        p_MC = mesh_verts[int(face.vertex(2))]
                         vertices[v, :] = tuple(p_MA)
                         vertices[v + 1, :] = tuple(p_MB)
                         vertices[v + 2, :] = tuple(p_MC)

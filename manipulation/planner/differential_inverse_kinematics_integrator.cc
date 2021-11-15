@@ -54,7 +54,7 @@ void DifferentialInverseKinematicsIntegrator::SetPositions(
     Context<double>* context,
     const Eigen::Ref<const Eigen::VectorXd>& positions) const {
   DRAKE_DEMAND(positions.size() == robot_.num_positions());
-  context->get_mutable_discrete_state(0).SetFromVector(positions);
+  context->SetDiscreteState(0, positions);
 }
 
 math::RigidTransformd
@@ -95,9 +95,19 @@ void DifferentialInverseKinematicsIntegrator::DoCalcDiscreteVariableUpdates(
       input->get_value<math::RigidTransformd>();
   const math::RigidTransform<double> X_WE = ForwardKinematics(context);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  {
+    const Vector6<double> isometry_result =
+        ComputePoseDiffInCommonFrame(X_WE.GetAsIsometry3(),
+                                     X_WE_desired.GetAsIsometry3());
+    // Ignore the result; we only care that it compiles and doesn't segfault.
+    (void)(isometry_result);
+  }
+#pragma GCC diagnostic push
+
   const Vector6<double> V_WE_desired =
-      ComputePoseDiffInCommonFrame(X_WE.GetAsIsometry3(),
-                                   X_WE_desired.GetAsIsometry3()) /
+      ComputePoseDiffInCommonFrame(X_WE, X_WE_desired) /
       time_step_;
 
   const Context<double>& robot_context =

@@ -28,6 +28,7 @@ from pydrake.systems.analysis import (
     )
 from pydrake.systems.framework import (
     BasicVector, BasicVector_,
+    ContextBase,
     Context, Context_,
     ContinuousState, ContinuousState_,
     Diagram, Diagram_,
@@ -126,6 +127,20 @@ class TestGeneral(unittest.TestCase):
         # TODO(eric.cousineau): Consolidate the main API tests for `System`
         # to this test point.
 
+    def test_context_base_api(self):
+        system = Adder(3, 10)
+        context = system.AllocateContext()
+        self.assertIsInstance(context, ContextBase)
+        self.assertEqual(context.num_input_ports(), 3)
+        self.assertEqual(context.num_output_ports(), 1)
+        context.DisableCaching()
+        context.EnableCaching()
+        context.SetAllCacheEntriesOutOfDate()
+        context.FreezeCache()
+        self.assertTrue(context.is_cache_frozen())
+        context.UnfreezeCache()
+        self.assertFalse(context.is_cache_frozen())
+
     def test_context_api(self):
         system = Adder(3, 10)
         context = system.AllocateContext()
@@ -189,13 +204,6 @@ class TestGeneral(unittest.TestCase):
         # abstract parameter to actually call this method.
         self.assertTrue(hasattr(context, "get_abstract_parameter"))
         self.assertTrue(hasattr(context, "get_mutable_abstract_parameter"))
-        context.DisableCaching()
-        context.EnableCaching()
-        context.SetAllCacheEntriesOutOfDate()
-        context.FreezeCache()
-        self.assertTrue(context.is_cache_frozen())
-        context.UnfreezeCache()
-        self.assertFalse(context.is_cache_frozen())
         x = np.array([0.1, 0.2])
         context.SetContinuousState(x)
         np.testing.assert_equal(
@@ -335,6 +343,7 @@ class TestGeneral(unittest.TestCase):
         self.assertEqual(discrete_values.get_mutable_vector(index=0).size(), 3)
         x = np.array([1., 3., 4.])
         discrete_values.set_value(x)
+        np.testing.assert_array_equal(discrete_values.value(index=0), x)
         np.testing.assert_array_equal(discrete_values.get_value(), x)
         np.testing.assert_array_equal(discrete_values.get_mutable_value(), x)
         discrete_values[1] = 5.
@@ -350,6 +359,8 @@ class TestGeneral(unittest.TestCase):
         self._check_instantiations(Simulator_, Simulator, False)
         # `framework_py_semantics.cc`
         self._check_instantiations(Context_, Context)
+        for T in [float, AutoDiffXd, Expression]:
+            self.assertTrue(issubclass(Context_[T], ContextBase), repr(T))
         self._check_instantiations(LeafContext_, LeafContext)
         self._check_instantiations(Event_, Event)
         self._check_instantiations(PublishEvent_, PublishEvent)

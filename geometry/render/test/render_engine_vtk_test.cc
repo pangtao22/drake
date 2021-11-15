@@ -371,7 +371,7 @@ class RenderEngineVtkTest : public ::testing::Test {
       material.AddProperty(
           "phong", "diffuse_map",
           FindResourceOrThrow(
-              "drake/systems/sensors/test/models/meshes/box.png"));
+              "drake/geometry/render/test/meshes/box.png"));
     }
     return material;
   }
@@ -900,7 +900,7 @@ TEST_F(RenderEngineVtkTest, MeshTest) {
   Init(X_WC_, true);
 
   auto filename =
-      FindResourceOrThrow("drake/systems/sensors/test/models/meshes/box.obj");
+      FindResourceOrThrow("drake/geometry/render/test/meshes/box.obj");
   Mesh mesh(filename);
   expected_label_ = RenderLabel(3);
   PerceptionProperties material = simple_material();
@@ -920,13 +920,13 @@ TEST_F(RenderEngineVtkTest, TextureMeshTest) {
   Init(X_WC_, true);
 
   auto filename =
-      FindResourceOrThrow("drake/systems/sensors/test/models/meshes/box.obj");
+      FindResourceOrThrow("drake/geometry/render/test/meshes/box.obj");
   Mesh mesh(filename);
   expected_label_ = RenderLabel(4);
   PerceptionProperties material = simple_material();
   material.AddProperty(
       "phong", "diffuse_map",
-      FindResourceOrThrow("drake/systems/sensors/test/models/meshes/box.png"));
+      FindResourceOrThrow("drake/geometry/render/test/meshes/box.png"));
   const GeometryId id = GeometryId::get_new_id();
   renderer_->RegisterVisual(id, mesh, material, RigidTransformd::Identity(),
                             true /* needs update */);
@@ -951,7 +951,7 @@ TEST_F(RenderEngineVtkTest, ImpliedTextureMeshTest) {
   Init(X_WC_, true);
 
   auto filename =
-      FindResourceOrThrow("drake/systems/sensors/test/models/meshes/box.obj");
+      FindResourceOrThrow("drake/geometry/render/test/meshes/box.obj");
   Mesh mesh(filename);
   expected_label_ = RenderLabel(4);
   PerceptionProperties material = simple_material();
@@ -1034,7 +1034,15 @@ TEST_F(RenderEngineVtkTest, RemoveVisual) {
 
   // Sets the expected values prior to calling PerformCenterShapeTest().
   auto set_expectations = [this](const RgbaColor& color, float depth,
-                                 RenderLabel label) {
+                                 RenderLabel label)
+// Optimizers on some platforms break code and cause test failures. Worse
+// still, there is no agreement on attribute spelling.
+#ifdef __clang__
+__attribute__((optnone))
+#else
+__attribute__((optimize("-O0")))
+#endif
+  {
     expected_color_ = color;
     expected_label_ = label;
     expected_object_depth_ = depth;

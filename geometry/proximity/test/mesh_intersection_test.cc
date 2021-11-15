@@ -40,16 +40,16 @@ class SurfaceVolumeIntersectorTester {
     intersect_.RemoveDuplicateVertices(polygon);
   }
   const std::vector<Vector3<T>>& ClipTriangleByTetrahedron(
-      VolumeElementIndex element, const VolumeMesh<double>& volume_M,
-      SurfaceFaceIndex face, const SurfaceMesh<double>& surface_N,
+      int element, const VolumeMesh<double>& volume_M, int face,
+      const TriangleSurfaceMesh<double>& surface_N,
       const math::RigidTransform<T>& X_MN) {
     return intersect_.ClipTriangleByTetrahedron(element, volume_M, face,
                                                 surface_N, X_MN);
   }
   bool IsFaceNormalAlongPressureGradient(
       const VolumeMeshFieldLinear<double, double>& volume_field_M,
-      const SurfaceMesh<double>& surface_N, const math::RigidTransform<T>& X_MN,
-      const VolumeElementIndex& tet_index, const SurfaceFaceIndex& tri_index) {
+      const TriangleSurfaceMesh<double>& surface_N,
+      const math::RigidTransform<T>& X_MN, int tet_index, int tri_index) {
     return intersect_.IsFaceNormalAlongPressureGradient(
         volume_field_M, surface_N, X_MN, tet_index, tri_index);
   }
@@ -379,20 +379,16 @@ GTEST_TEST(MeshIntersectionTest, RemoveDuplicateVertices) {
 // +X
 //
 template<typename T>
-unique_ptr<SurfaceMesh<T>> TrivialSurfaceMesh() {
+unique_ptr<TriangleSurfaceMesh<T>> TrivialSurfaceMesh() {
   const int face_data[3] = {0, 1, 2};
-  std::vector<SurfaceFace> faces{SurfaceFace(face_data)};
-  const Vector3<T> vertex_data[3] = {
+  std::vector<SurfaceTriangle> faces{SurfaceTriangle(face_data)};
+  std::vector<Vector3<T>> vertices = {
       Vector3<T>::Zero(),
       Vector3<T>::UnitX(),
       Vector3<T>::UnitY()
   };
-  std::vector<SurfaceVertex<T>> vertices;
-  for (auto& vertex : vertex_data) {
-    vertices.emplace_back(vertex);
-  }
-  return std::make_unique<SurfaceMesh<T>>(std::move(faces),
-                                          std::move(vertices));
+  return std::make_unique<TriangleSurfaceMesh<T>>(std::move(faces),
+                                                  std::move(vertices));
 }
 
 // Generates a trivial volume mesh consisting of two tetrahedrons with
@@ -421,17 +417,13 @@ unique_ptr<VolumeMesh<T>> TrivialVolumeMesh(
   for (const auto& element : element_data) {
     elements.emplace_back(element);
   }
-  const Vector3<T> vertex_data[5] = {
+  std::vector<Vector3<T>> vertices = {
       X_MN * Vector3<T>::Zero(),
       X_MN * Vector3<T>::UnitX(),
       X_MN * Vector3<T>::UnitY(),
       X_MN * Vector3<T>::UnitZ(),
       X_MN * (-Vector3<T>::UnitZ())
   };
-  std::vector<VolumeVertex<T>> vertices;
-  for (auto& vertex : vertex_data) {
-    vertices.emplace_back(vertex);
-  }
   return std::make_unique<VolumeMesh<T>>(std::move(elements),
                                          std::move(vertices));
 }
@@ -448,7 +440,7 @@ unique_ptr<VolumeMeshFieldLinear<T, T>> TrivialVolumeMeshField(
   std::vector<T> p_values = {p0, p1, p2, p3, p4};
   DRAKE_DEMAND(5 == volume_mesh->num_vertices());
   auto volume_mesh_field = std::make_unique<VolumeMeshFieldLinear<T, T>>(
-      "pressure", std::move(p_values), volume_mesh);
+      std::move(p_values), volume_mesh);
 
   return volume_mesh_field;
 }
@@ -513,9 +505,9 @@ GTEST_TEST(MeshIntersectionTest, ClipTriangleByTetrahedron) {
   //  TetrahedronIndex and TriangleIndex (or TetIndex and TriIndex,
   //  respectively) as being far more literal. It's not like each of those
   //  surface types are ever designed to support any other kind of "element".
-  const VolumeElementIndex element0(0);
-  const VolumeElementIndex element1(1);
-  SurfaceFaceIndex face(0);
+  const int element0 = 0;
+  const int element1 = 1;
+  const int face = 0;
   const std::vector<Vector3d> empty_polygon;
 
   // The triangle is outside the tetrahedron `element0` with one vertex on a
@@ -664,39 +656,31 @@ GTEST_TEST(MeshIntersectionTest, ClipTriangleByTetrahedronIntoHeptagon) {
     const int element_data[4] = {0, 1, 2, 3};
     std::vector<VolumeElement> elements{VolumeElement(element_data)};
     // clang-format off
-    const Vector3d vertex_data[4] = {
+    std::vector<Vector3d> vertices = {
         { 2,  0,  2},
         {-2,  0,  2},
         { 0,  2, -2},
         { 0, -2, -2}
     };
     // clang-format on
-    std::vector<VolumeVertex<double>> vertices;
-    for (auto& vertex : vertex_data) {
-      vertices.emplace_back(vertex);
-    }
     volume_M = std::make_unique<VolumeMesh<double>>(std::move(elements),
                                                     std::move(vertices));
   }
-  unique_ptr<SurfaceMesh<double>> surface_N;
+  unique_ptr<TriangleSurfaceMesh<double>> surface_N;
   {
     const int face_data[3] = {0, 1, 2};
-    std::vector<SurfaceFace> faces{SurfaceFace(face_data)};
+    std::vector<SurfaceTriangle> faces{SurfaceTriangle(face_data)};
     // clang-format off
-    const Vector3d vertex_data[3] = {
+    std::vector<Vector3d> vertices = {
         {1.5,   1.5, 0.},
         {-1.5,  0.,  0.},
         {0.,   -1.5, 0.}};
     // clang-format on
-    std::vector<SurfaceVertex<double>> vertices;
-    for (auto& vertex : vertex_data) {
-      vertices.emplace_back(vertex);
-    }
-    surface_N = std::make_unique<SurfaceMesh<double>>(std::move(faces),
+    surface_N = std::make_unique<TriangleSurfaceMesh<double>>(std::move(faces),
                                                       std::move(vertices));
   }
-  const VolumeElementIndex tetrahedron(0);
-  const SurfaceFaceIndex triangle(0);
+  const int tetrahedron = 0;
+  const int triangle = 0;
   const auto X_MN = RigidTransformd::Identity();
   const std::vector<Vector3d> polygon_M =
       SurfaceVolumeIntersectorTester<double>().ClipTriangleByTetrahedron(
@@ -734,7 +718,7 @@ GTEST_TEST(MeshIntersectionTest, IsFaceNormalAlongPressureGradient) {
   // in +Z direction of N's frame.
   const auto rigid_N = TrivialSurfaceMesh<double>();
 
-  // We will set the pose of SurfaceMesh N in frame M so that triangle
+  // We will set the pose of TriangleSurfaceMesh N in frame M so that triangle
   // Face_0 of N has its face normal vector make various angles with the
   // gradient vector in tetrahedron Element_0.
   struct TestData {
@@ -763,31 +747,30 @@ GTEST_TEST(MeshIntersectionTest, IsFaceNormalAlongPressureGradient) {
     EXPECT_EQ(t.expect_result,
               SurfaceVolumeIntersectorTester<double>()
                   .IsFaceNormalAlongPressureGradient(
-                      *volume_field_M, *rigid_N, X_MN, VolumeElementIndex(0),
-                      SurfaceFaceIndex(0)));
+                      *volume_field_M, *rigid_N, X_MN, 0 /*tet_index*/,
+                      0 /*tri_index*/));
   }
 }
 
 // Given a triangle in a surface mesh, reports the tet in the volume mesh that
 // completely contains the triangle. Throws if a test cannot be identified.
 template <typename T>
-VolumeElementIndex GetTetForTriangle(const SurfaceMesh<T>& surface_S,
-                                     SurfaceFaceIndex f,
-                                     const VolumeMesh<double>& volume_V,
-                                     const RigidTransform<T>& X_VS) {
-  const std::vector<SurfaceVertex<T>>& vertices_S = surface_S.vertices();
+int GetTetForTriangle(const TriangleSurfaceMesh<T>& surface_S, int f,
+                      const VolumeMesh<double>& volume_V,
+                      const RigidTransform<T>& X_VS) {
+  const std::vector<Vector3<T>>& vertices_S = surface_S.vertices();
 
   // Each triangle lies completely within one tet in the volume mesh. The
   // gradient value reported should be that of that tet. So, we'll grab
   // the centroid of each triangle, find the tet it lies in, and confirm
   // that the pressure gradient on that triangle matches the tet.
-  const SurfaceFace& face = surface_S.element(f);
+  const SurfaceTriangle& face = surface_S.element(f);
   const Vector3<T> p_SC =
-      (vertices_S[face.vertex(0)].r_MV() + vertices_S[face.vertex(1)].r_MV() +
-       vertices_S[face.vertex(2)].r_MV()) /
+      (vertices_S[face.vertex(0)] + vertices_S[face.vertex(1)] +
+       vertices_S[face.vertex(2)]) /
       3;
   const Vector3<T> p_VC = X_VS * p_SC;
-  for (VolumeElementIndex e(0); e < volume_V.num_elements(); ++e) {
+  for (int e = 0; e < volume_V.num_elements(); ++e) {
     auto bary_e = volume_V.CalcBarycentric(p_VC, e);
     if ((bary_e.array() >= 0).all() && (bary_e.array() <= 1).all()) {
       return e;
@@ -812,7 +795,8 @@ class MeshIntersectionFixture : public testing::Test {
     field_S_ = TrivialVolumeMeshField<double>(mesh_S_.get());
     // The rigid surface mesh is expressed in frame R.
     surface_R_ = TrivialSurfaceMesh<double>();
-    bvh_surface_R_ = make_unique<Bvh<Obb, SurfaceMesh<double>>>(*surface_R_);
+    bvh_surface_R_ =
+        make_unique<Bvh<Obb, TriangleSurfaceMesh<double>>>(*surface_R_);
     // Transform the surface (single triangle) so that it intersects with *both*
     // tets in the volume mesh. The surface lies on the y = 0.75 plane.
     // Each tet gets intersected into a isosceles right triangle with a leg
@@ -824,8 +808,8 @@ class MeshIntersectionFixture : public testing::Test {
   // This helper function verifies the output (surface_S, e_field, and
   // grad_eS_S) of SampleVolumeFieldOnSurface().
   void VerifySampleVolumeFieldOnSurface(
-      const unique_ptr<SurfaceMesh<double>>& surface_S,
-      const unique_ptr<SurfaceMeshFieldLinear<double, double>>& e_field,
+      const unique_ptr<TriangleSurfaceMesh<double>>& surface_S,
+      const unique_ptr<TriangleSurfaceMeshFieldLinear<double, double>>& e_field,
       const vector<Vector3<double>>& grad_eS_S) {
     // The two geometries intersect such that both tets get sliced into
     // identical right, isosceles triangles (with a leg length of 0.25m). The
@@ -843,10 +827,10 @@ class MeshIntersectionFixture : public testing::Test {
     // for *this* test. Note: we're skipping the vertices located at the
     // triangle centroids.
     const double kEpsPressure = kEps * 1e10;
-    const std::vector<SurfaceVertex<double>>& vertices = surface_S->vertices();
+    const std::vector<Vector3<double>>& vertices = surface_S->vertices();
     bool domain_checked[] = {false, false, false};
-    for (SurfaceVertexIndex v(0); v < surface_S->num_vertices(); ++v) {
-      const double p_SV_z = vertices[v].r_MV()[2];
+    for (int v = 0; v < surface_S->num_vertices(); ++v) {
+      const double p_SV_z = vertices[v][2];
       if (std::abs(p_SV_z) < kEps) {
         ASSERT_NEAR(e_field->EvaluateAtVertex(v), 0.0, kEpsPressure);
         domain_checked[0] = true;
@@ -872,21 +856,19 @@ class MeshIntersectionFixture : public testing::Test {
     // Test the face normals of resulting mesh. Because the 'trivial' surface
     // mesh is a single triangle, all triangles in the resulting mesh should
     // have the same normal.
-    using FIndex = SurfaceFaceIndex;
     ASSERT_TRUE(
-        CompareMatrices(surface_R_->face_normal(FIndex{0}), Vector3d::UnitZ()));
-    for (FIndex f(0); f < surface_S->num_faces(); ++f) {
+        CompareMatrices(surface_R_->face_normal(0), Vector3d::UnitZ()));
+    for (int f = 0; f < surface_S->num_triangles(); ++f) {
       EXPECT_TRUE(CompareMatrices(surface_S->face_normal(f),
                                   X_SR_.rotation() * Vector3d::UnitZ(),
                                   4 * kEps));
     }
 
     // Only the soft volume mesh provides gradients.
-    const std::vector<SurfaceFace>& faces = surface_S->faces();
+    const std::vector<SurfaceTriangle>& faces = surface_S->triangles();
     ASSERT_EQ(faces.size(), grad_eS_S.size());
-    for (FIndex f(0); f < surface_S->num_elements(); ++f) {
-      const VolumeElementIndex t =
-          GetTetForTriangle(*surface_S, f, *mesh_S_, {});
+    for (int f = 0; f < surface_S->num_elements(); ++f) {
+      const int t = GetTetForTriangle(*surface_S, f, *mesh_S_, {});
       ASSERT_TRUE(
           CompareMatrices(grad_eS_S[f], field_S_->EvaluateGradient(t)));
     }
@@ -909,23 +891,22 @@ class MeshIntersectionFixture : public testing::Test {
       const RigidTransformd& X_WS) {
     // Mesh invariants:
     // Meshes are the same "size" (topologically).
-    EXPECT_EQ(contact_SR->mesh_W().num_faces(),
-              contact_RS->mesh_W().num_faces());
+    EXPECT_EQ(contact_SR->mesh_W().num_triangles(),
+              contact_RS->mesh_W().num_triangles());
     EXPECT_EQ(contact_SR->mesh_W().num_vertices(),
               contact_RS->mesh_W().num_vertices());
 
     // Test one and assume all share the same property.
-    const SurfaceVertexIndex v_index(0);
-    EXPECT_TRUE(CompareMatrices(contact_SR->mesh_W().vertex(v_index).r_MV(),
-                                contact_RS->mesh_W().vertex(v_index).r_MV()));
+    EXPECT_TRUE(CompareMatrices(contact_SR->mesh_W().vertex(0),
+                                contact_RS->mesh_W().vertex(0)));
 
     // TODO(SeanCurtis-TRI): Test that the face winding has been reversed, once
     //  that is officially documented as a property of the ContactSurface.
 
     // The "pressure" field is frame invariant and should be equal.
-    const SurfaceMesh<double>::Barycentric<double> centroid(
+    const TriangleSurfaceMesh<double>::Barycentric<double> centroid(
         1. / 3., 1. / 3., 1. / 3.);
-    const SurfaceFaceIndex f_index(0);
+    const int f_index = 0;
     EXPECT_EQ(contact_SR->e_MN().Evaluate(f_index, centroid),
               contact_RS->e_MN().Evaluate(f_index, centroid));
 
@@ -934,10 +915,9 @@ class MeshIntersectionFixture : public testing::Test {
     // we'll find which tetrahedron produced the first triangle in the contact
     // surface. We'll confirm that its gradient has been transformed to the
     // world frame.
-    const SurfaceFaceIndex f0(0);
-    const VolumeElementIndex t =
-        GetTetForTriangle<double>(contact_SR->mesh_W(), f0, *mesh_S_,
-                                  X_WS.inverse());
+    const int f0 = 0;
+    const int t = GetTetForTriangle<double>(contact_SR->mesh_W(), f0, *mesh_S_,
+                                            X_WS.inverse());
     EXPECT_TRUE(CompareMatrices(contact_SR->EvaluateGradE_M_W(f0),
                                 X_WS.rotation() * field_S_->EvaluateGradient(t),
                                 4. * kEps));
@@ -949,8 +929,8 @@ class MeshIntersectionFixture : public testing::Test {
   unique_ptr<VolumeMeshFieldLinear<double, double>> field_S_;
 
   // Rigid surface mesh.
-  unique_ptr<SurfaceMesh<double>> surface_R_;
-  unique_ptr<Bvh<Obb, SurfaceMesh<double>>> bvh_surface_R_;
+  unique_ptr<TriangleSurfaceMesh<double>> surface_R_;
+  unique_ptr<Bvh<Obb, TriangleSurfaceMesh<double>>> bvh_surface_R_;
 
   RigidTransformd X_SR_;
 
@@ -959,8 +939,8 @@ class MeshIntersectionFixture : public testing::Test {
 
 TEST_F(MeshIntersectionFixture, SampleVolumeFieldOnSurface) {
   vector<Vector3<double>> grad_eS_S;
-  unique_ptr<SurfaceMesh<double>> surface_S;
-  unique_ptr<SurfaceMeshFieldLinear<double, double>> e_field;
+  unique_ptr<TriangleSurfaceMesh<double>> surface_S;
+  unique_ptr<TriangleSurfaceMeshFieldLinear<double, double>> e_field;
 
   {
     SCOPED_TRACE("Triangulate each polygon around its centroid.");
@@ -969,7 +949,7 @@ TEST_F(MeshIntersectionFixture, SampleVolumeFieldOnSurface) {
         ContactPolygonRepresentation::kCentroidSubdivision,
         &surface_S, &e_field, &grad_eS_S);
 
-    EXPECT_EQ(6, surface_S->num_faces());
+    EXPECT_EQ(6, surface_S->num_triangles());
     VerifySampleVolumeFieldOnSurface(surface_S, e_field, grad_eS_S);
   }
   {
@@ -979,7 +959,7 @@ TEST_F(MeshIntersectionFixture, SampleVolumeFieldOnSurface) {
         ContactPolygonRepresentation::kSingleTriangle,
         &surface_S, &e_field, &grad_eS_S);
 
-    EXPECT_EQ(2, surface_S->num_faces());
+    EXPECT_EQ(2, surface_S->num_triangles());
     VerifySampleVolumeFieldOnSurface(surface_S, e_field, grad_eS_S);
   }
 }
@@ -1086,27 +1066,24 @@ class MeshMeshDerivativesTest : public ::testing::Test {
     /* The pressure field is arbitrary, but
       1. its orientation doesn't lead to culling of intersection polygons, and
       2. validation is expressed in terms of that gradient. */
-    using VI = VolumeVertexIndex;
-    vector<VolumeElement> elements({VolumeElement(VI(0), VI(1), VI(2), VI(3))});
-    using V = VolumeVertex<double>;
-    vector<V> vertices_S({V(Vector3d::Zero()), V(Vector3d::UnitX()),
-                          V(Vector3d::UnitY()), V(Vector3d::UnitZ())});
+    vector<VolumeElement> elements({VolumeElement(0, 1, 2, 3)});
+    vector<Vector3d> vertices_S({Vector3d::Zero(), Vector3d::UnitX(),
+                                 Vector3d::UnitY(), Vector3d::UnitZ()});
     tet_mesh_S_ = make_unique<VolumeMesh<double>>(std::move(elements),
                                               std::move(vertices_S));
     field_S_ = make_unique<VolumeMeshFieldLinear<double, double>>(
-        "pressure", vector<double>{0.25, 0.5, 0.75, 1}, tet_mesh_S_.get());
+        vector<double>{0.25, 0.5, 0.75, 1}, tet_mesh_S_.get());
     bvh_S_ = std::make_unique<Bvh<Obb, VolumeMesh<double>>>(*tet_mesh_S_);
 
     /* Rigid triangle mesh; tilt and offset the triangle's plane so things are
      interesting. */
-    using Vertex = SurfaceVertex<double>;
-    vector<Vertex> vertices{Vertex{Vector3d{-5, -5, 0}},
-                            Vertex{Vector3d{5, -5, 0}},
-                            Vertex{Vector3d{0, 5, 0}}};
-    using VIndex = SurfaceVertexIndex;
-    vector<SurfaceFace> faces({SurfaceFace{VIndex(0), VIndex(1), VIndex(2)}});
-    tri_mesh_R_ = make_unique<SurfaceMesh<double>>(move(faces), move(vertices));
-    bvh_R_ = make_unique<Bvh<Obb, SurfaceMesh<double>>>(*tri_mesh_R_);
+    vector<Vector3d> vertices{Vector3d{-5, -5, 0},
+                              Vector3d{5, -5, 0},
+                              Vector3d{0, 5, 0}};
+    vector<SurfaceTriangle> faces{{0, 1, 2}};
+    tri_mesh_R_ =
+        make_unique<TriangleSurfaceMesh<double>>(move(faces), move(vertices));
+    bvh_R_ = make_unique<Bvh<Obb, TriangleSurfaceMesh<double>>>(*tri_mesh_R_);
     X_WR_ = HalfSpace::MakePose(Vector3d{1, 2, 3}.normalized(),
                                 Vector3d{0.25, 0.1, -0.2})
                 .cast<AutoDiffXd>();
@@ -1214,10 +1191,10 @@ class MeshMeshDerivativesTest : public ::testing::Test {
       /* Reality check: confirm the edges *are* parallel with the triangle. */
       const RotationMatrixd R_WR_d = convert_to_double(X_WR_).rotation();
       const RotationMatrixd R_WS_d = R_WR_d * R_RS_d;
-      const Vector3d v0_S = tet_mesh_S_->vertex(VolumeVertexIndex(0)).r_MV();
-      const Vector3d v1_S = tet_mesh_S_->vertex(VolumeVertexIndex(1)).r_MV();
-      const Vector3d v2_S = tet_mesh_S_->vertex(VolumeVertexIndex(2)).r_MV();
-      const Vector3d v3_S = tet_mesh_S_->vertex(VolumeVertexIndex(3)).r_MV();
+      const Vector3d& v0_S = tet_mesh_S_->vertex(0);
+      const Vector3d& v1_S = tet_mesh_S_->vertex(1);
+      const Vector3d& v2_S = tet_mesh_S_->vertex(2);
+      const Vector3d& v3_S = tet_mesh_S_->vertex(3);
       const Vector3d e03_S = v3_S - v0_S;
       const Vector3d e12_S = v2_S - v1_S;
       const Vector3d e03_W = R_WS_d * e03_S;
@@ -1241,7 +1218,7 @@ class MeshMeshDerivativesTest : public ::testing::Test {
 
       SCOPED_TRACE(config.name);
       ASSERT_NE(surface, nullptr);
-      ASSERT_EQ(surface->mesh_W().num_faces(), config.num_faces);
+      ASSERT_EQ(surface->mesh_W().num_triangles(), config.num_faces);
 
       evaluate_quantity(*surface, X_WS, config.pose);
     }
@@ -1257,12 +1234,12 @@ class MeshMeshDerivativesTest : public ::testing::Test {
     // two simplifying assumptions:
     //   1. E actually does lie on *one* of the mesh edges.
     //   2. The edges are easily distinguishable by direction.
-    const vector<VolumeVertex<double>>& verts_S = field_S_->mesh().vertices();
+    const vector<Vector3d>& verts_S = field_S_->mesh().vertices();
     const vector<pair<int, int>> edges{{0, 1}, {0, 2}, {0, 3},
                                        {1, 2}, {1, 3}, {2, 3}};
-    for (const auto [a, b] : edges) {
-      const Vector3d& p_AB_S = verts_S[b].r_MV() - verts_S[a].r_MV();
-      const Vector3d p_AE_S = p_SE - verts_S[a].r_MV();
+    for (const auto& [a, b] : edges) {
+      const Vector3d p_AB_S = verts_S[b] - verts_S[a];
+      const Vector3d p_AE_S = p_SE - verts_S[a];
       const double lhs = std::pow(p_AB_S.dot(p_AE_S), 2);
       const double rhs = p_AB_S.squaredNorm() * p_AE_S.squaredNorm();
       if (std::abs(lhs - rhs) < 1e-15) {
@@ -1281,8 +1258,8 @@ class MeshMeshDerivativesTest : public ::testing::Test {
 
   /* Rigid triangle mesh. */
   RigidTransform<AutoDiffXd> X_WR_;
-  unique_ptr<SurfaceMesh<double>> tri_mesh_R_;
-  unique_ptr<Bvh<Obb, SurfaceMesh<double>>> bvh_R_;
+  unique_ptr<TriangleSurfaceMesh<double>> tri_mesh_R_;
+  unique_ptr<Bvh<Obb, TriangleSurfaceMesh<double>>> bvh_R_;
   GeometryId id_R_;
 
   /* The amount I penetrate triangle into the tet.  */
@@ -1341,20 +1318,19 @@ TEST_F(MeshMeshDerivativesTest, Area) {
      these hard-coded indices could become invalid. A more robust solution would
      be to *infer* the boundary polygon edges from the contact surface, but
      that's a lot of effort for little present value. */
-    using VIndex = SurfaceVertexIndex;
-    vector<vector<VIndex>> triangles;
+    vector<vector<int>> triangles;
     switch (pose) {
       case TetPose::kHorizontalSlice:
       case TetPose::kTriangleSlice:
-        triangles.emplace_back(vector<VIndex>{VIndex(0), VIndex(1), VIndex(2)});
+        triangles.emplace_back(vector<int>{0, 1, 2});
         break;
       case TetPose::kQuadSlice:
         /* This is a bit brittle and is predicated on knowledge of how
          the intersection algorithm processes the particular geometry. If that
          proves to be too brittle, we'll need to reconstruct this by looking
          at the provided mesh. */
-        triangles.emplace_back(vector<VIndex>{VIndex(0), VIndex(1), VIndex(2)});
-        triangles.emplace_back(vector<VIndex>{VIndex(2), VIndex(3), VIndex(1)});
+        triangles.emplace_back(vector<int>{0, 1, 2});
+        triangles.emplace_back(vector<int>{2, 3, 1});
         break;
     }
 
@@ -1365,9 +1341,9 @@ TEST_F(MeshMeshDerivativesTest, Area) {
     double area_expected = 0;
     Vector3d dArea_dSo_expected = Vector3d::Zero();
     for (const auto& tri : triangles) {
-      const auto& p_WA_ad = mesh_W.vertex(tri[0]).r_MV();
-      const auto& p_WB_ad = mesh_W.vertex(tri[1]).r_MV();
-      const auto& p_WC_ad = mesh_W.vertex(tri[2]).r_MV();
+      const auto& p_WA_ad = mesh_W.vertex(tri[0]);
+      const auto& p_WB_ad = mesh_W.vertex(tri[1]);
+      const auto& p_WC_ad = mesh_W.vertex(tri[2]);
       const Vector3d p_WA = convert_to_double(p_WA_ad);
       const Vector3d p_WB = convert_to_double(p_WB_ad);
       const Vector3d p_WC = convert_to_double(p_WC_ad);
@@ -1471,20 +1447,19 @@ TEST_F(MeshMeshDerivativesTest, VertexPosition) {
                                  const RigidTransform<AutoDiffXd>& X_WS_ad,
                                  TetPose pose) {
     constexpr double kEps = 5 * std::numeric_limits<double>::epsilon();
-    using VIndex = SurfaceVertexIndex;
 
     /* The test is set up so there is only ever a single intersecting polygon.
      So, there is *one* centroid (the last vertex). All other vertices come
      from intersecting a tet edge with the triangle. We'll evaluate all of those
      and then handle the centroid specially. */
     const Vector3d n_R{0, 0, 1};
-    const SurfaceMesh<AutoDiffXd>& mesh_W = surface.mesh_W();
+    const TriangleSurfaceMesh<AutoDiffXd>& mesh_W = surface.mesh_W();
     const RotationMatrixd R_WR = convert_to_double(this->X_WR_).rotation();
     const RotationMatrixd R_RW = R_WR.inverse();
     const RigidTransformd X_WS = convert_to_double(X_WS_ad);
     const RotationMatrixd& R_WS = X_WS.rotation();
-    for (VIndex v(0); v < mesh_W.num_vertices() - 1; ++v) {
-      const Vector3<AutoDiffXd>& p_WV_ad = mesh_W.vertex(v).r_MV();
+    for (int v = 0; v < mesh_W.num_vertices() - 1; ++v) {
+      const Vector3<AutoDiffXd>& p_WV_ad = mesh_W.vertex(v);
       const Vector3d& p_WV = convert_to_double(p_WV_ad);
       const Vector3d e_R = R_RW * R_WS * GetEdgeDirInS(X_WS.inverse() * p_WV);
       const double in_normal_dir = e_R.dot(n_R);
@@ -1509,11 +1484,11 @@ TEST_F(MeshMeshDerivativesTest, VertexPosition) {
       case kTriangleSlice: {
         /* The derivative should simply be the mean of the first three. */
         Matrix3<double> expected_J_W = Matrix3<double>::Zero();
-        for (VIndex v(0); v < 3; ++v) {
-          expected_J_W += math::ExtractGradient(mesh_W.vertex(v).r_MV());
+        for (int v = 0; v < 3; ++v) {
+          expected_J_W += math::ExtractGradient(mesh_W.vertex(v));
         }
         expected_J_W /= 3;
-        const Vector3<AutoDiffXd>& p_WC = mesh_W.vertex(VIndex(3)).r_MV();
+        const Vector3<AutoDiffXd>& p_WC = mesh_W.vertex(3);
         const Matrix3<double> J_W = math::ExtractGradient(p_WC);
         EXPECT_TRUE(CompareMatrices(J_W, expected_J_W, kEps));
         break;
@@ -1536,7 +1511,7 @@ TEST_F(MeshMeshDerivativesTest, FaceNormalsWrtPosition) {
     const auto& mesh_W = surface.mesh_W();
     const Vector3d plane_n_W = X_WR.rotation().col(2);
     const Matrix3<double> zeros = Matrix3<double>::Zero();
-    for (SurfaceFaceIndex f(0); f < mesh_W.num_elements(); ++f) {
+    for (int f = 0; f < mesh_W.num_elements(); ++f) {
       const Vector3<AutoDiffXd>& tri_n_W = mesh_W.face_normal(f);
       EXPECT_TRUE(
           CompareMatrices(math::ExtractValue(tri_n_W), plane_n_W, 2 * kEps));
@@ -1590,7 +1565,7 @@ TEST_F(MeshMeshDerivativesTest, FaceNormalsWrtOrientation) {
     ASSERT_GT(mesh_W.num_elements(), 0);
 
     constexpr double kEps = std::numeric_limits<double>::epsilon();
-    for (SurfaceFaceIndex f(0); f < mesh_W.num_elements(); ++f) {
+    for (int f = 0; f < mesh_W.num_elements(); ++f) {
       const Vector3<AutoDiffXd>& tri_n_W = mesh_W.face_normal(f);
       /* Confirm the normal direction. */
       EXPECT_TRUE(
@@ -1631,7 +1606,7 @@ TEST_F(MeshMeshDerivativesTest, Pressure) {
 
    ∂p_WQ/∂p_WSo are the derivatives that were confirmed in the VertexPosition
    test, so we can use those to compute the expected pressure derivative. */
-  const Vector3d grad_p_S = field_S_->EvaluateGradient(VolumeElementIndex(0));
+  const Vector3d grad_p_S = field_S_->EvaluateGradient(0);
   auto evaluate_pressure = [X_WR = convert_to_double(this->X_WR_), &grad_p_S](
                                const ContactSurface<AutoDiffXd>& surface,
                                const RigidTransform<AutoDiffXd>& X_WS,
@@ -1639,9 +1614,9 @@ TEST_F(MeshMeshDerivativesTest, Pressure) {
     constexpr double kEps = 8 * std::numeric_limits<double>::epsilon();
     const RigidTransform<double> X_WS_d = convert_to_double(X_WS);
     const Vector3d grad_p_W = X_WS_d.rotation() * grad_p_S;
-    for (SurfaceVertexIndex v(0); v < surface.mesh_W().num_vertices(); ++v) {
+    for (int v = 0; v < surface.mesh_W().num_vertices(); ++v) {
       const Matrix3<double> dp_WQ_dp_WSo_W =
-          math::ExtractGradient(surface.mesh_W().vertex(v).r_MV());
+          math::ExtractGradient(surface.mesh_W().vertex(v));
       const Vector3d dp_dp_WSo_W_expected =
           grad_p_W.transpose() * (dp_WQ_dp_WSo_W - Matrix3<double>::Identity());
       const AutoDiffXd& p = surface.e_MN().EvaluateAtVertex(v);

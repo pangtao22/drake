@@ -18,7 +18,6 @@
 #include "drake/geometry/scene_graph.h"
 #include "drake/geometry/shape_specification.h"
 #include "drake/lcm/drake_lcm.h"
-#include "drake/lcm/drake_mock_lcm.h"
 #include "drake/lcm/lcm_messages.h"
 #include "drake/lcmt_viewer_draw.hpp"
 #include "drake/lcmt_viewer_geometry_data.hpp"
@@ -51,7 +50,7 @@ class DrakeVisualizerTester {
  public:
   template <typename T>
   static std::string lcm_url(const DrakeVisualizer<T>& visualizer) {
-    return dynamic_cast<lcm::DrakeLcm*>(visualizer.lcm_)->get_lcm_url();
+    return visualizer.lcm_->get_lcm_url();
   }
 
   template <typename T>
@@ -304,7 +303,7 @@ class DrakeVisualizerTest : public ::testing::Test {
     }
   }
 
-  static constexpr double kPublishPeriod = 1 / 60.0;
+  static constexpr double kPublishPeriod = 1 / 64.0;
   /* The LCM channel names. We are implicitly confirming that DrakeVisualizer
    broadcasts on the right channels via the subscribers. The reception of
    expected messages on those subscribers is proof.  */
@@ -315,7 +314,7 @@ class DrakeVisualizerTest : public ::testing::Test {
   static constexpr char kSourceName[] = "DrakeVisualizerTest";
 
   /* The LCM visualizer broadcasts messages on.  */
-  lcm::DrakeMockLcm lcm_;
+  lcm::DrakeLcm lcm_;
   /* The subscribers for draw and load messages.  */
   lcm::Subscriber<lcmt_viewer_draw> draw_subscriber_{&lcm_, kDrawChannel};
   lcm::Subscriber<lcmt_viewer_load_robot> load_subscriber_{&lcm_, kLoadChannel};
@@ -340,7 +339,7 @@ TYPED_TEST_SUITE(DrakeVisualizerTest, ScalarTypes);
 
 TYPED_TEST(DrakeVisualizerTest, PublishPeriod) {
   using T = TypeParam;
-  for (double period : {1 / 30.0, 1 / 10.0}) {
+  for (double period : {1 / 32.0, 1 / 10.0}) {
     this->ConfigureDiagram({.publish_period = period});
     Simulator<T> simulator(*(this->diagram_));
     ASSERT_EQ(simulator.get_context().get_time(), 0.0);
@@ -778,7 +777,7 @@ TYPED_TEST(DrakeVisualizerTest, VisualizeHydroGeometry) {
 
   /* Populate with soft hydroelastic properties and add soft geometries. */
   props.AddProperty(internal::kHydroGroup, internal::kSlabThickness, 5.0);
-  props.AddProperty(internal::kMaterialGroup, internal::kElastic, 5.0);
+  props.AddProperty(internal::kHydroGroup, internal::kElastic, 5.0);
   props.UpdateProperty(internal::kHydroGroup, internal::kComplianceType,
                        HydroelasticType::kSoft);
   const RigidTransformd X_PSphere{RotationMatrixd::MakeZRotation(0.3),
