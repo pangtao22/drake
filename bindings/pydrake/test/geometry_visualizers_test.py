@@ -141,6 +141,9 @@ class TestGeometryVisualizers(unittest.TestCase):
             name="slider"), 0.7, delta=1e-14)
         meshcat.DeleteSlider(name="slider")
         meshcat.DeleteAddedControls()
+        self.assertIn("data:application/octet-binary;base64",
+                      meshcat.StaticHtml())
+        meshcat.Flush()
 
     def test_meshcat_animation(self):
         animation = mut.MeshcatAnimation(frames_per_second=64)
@@ -182,7 +185,7 @@ class TestGeometryVisualizers(unittest.TestCase):
         vis = mut.MeshcatVisualizerCpp_[T](meshcat=meshcat, params=params)
         vis.Delete()
         self.assertIsInstance(vis.query_object_input_port(), InputPort_[T])
-        animation = vis.StartRecording()
+        animation = vis.StartRecording(set_transforms_while_recording=True)
         self.assertIsInstance(animation, mut.MeshcatAnimation)
         self.assertEqual(animation, vis.get_mutable_recording())
         vis.StopRecording()
@@ -227,3 +230,9 @@ class TestGeometryVisualizers(unittest.TestCase):
             ad_visualizer = visualizer.ToAutoDiffXd()
             self.assertIsInstance(
                 ad_visualizer, mut.MeshcatPointCloudVisualizerCpp_[AutoDiffXd])
+
+    def test_start_meshcat(self):
+        # StartMeshcat only performs interesting work on Deepnote or Google
+        # Colab.  Here we simply ensure that it runs.
+        meshcat = mut.StartMeshcat()
+        self.assertIsInstance(meshcat, mut.Meshcat)
