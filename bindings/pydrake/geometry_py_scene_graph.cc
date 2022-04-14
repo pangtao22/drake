@@ -4,31 +4,12 @@
  pydrake.geometry module. */
 
 #include "drake/bindings/pydrake/common/default_scalars_pybind.h"
-#include "drake/bindings/pydrake/common/deprecation_pybind.h"
+#include "drake/bindings/pydrake/common/monostate_pybind.h"
 #include "drake/bindings/pydrake/common/type_pack.h"
 #include "drake/bindings/pydrake/common/value_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/geometry/geometry_frame.h"
 #include "drake/geometry/scene_graph.h"
-
-// TODO(SeanCurtis-TRI) When pybind issue 3019 gets resolved, we won't need to
-//  define this locally anymore. In fact, it will probably cause link errors.
-namespace pybind11 {
-namespace detail {
-template <>
-struct type_caster<std::monostate> {
- public:
-  PYBIND11_TYPE_CASTER(std::monostate, _("None"));
-
-  bool load(handle src, bool) { return src.ptr() == Py_None; }
-
-  static handle cast(
-      std::monostate, return_value_policy /* policy */, handle /* parent */) {
-    Py_RETURN_NONE;
-  }
-};
-}  // namespace detail
-}  // namespace pybind11
 
 namespace drake {
 namespace pydrake {
@@ -379,23 +360,6 @@ void DoScalarDependentDefinitions(py::module m, T) {
         .def("ComputePointPairPenetration",
             &QueryObject<T>::ComputePointPairPenetration,
             cls_doc.ComputePointPairPenetration.doc)
-        .def("ComputeContactSurfaces", &Class::ComputeContactSurfaces,
-            py::arg("representation"), cls_doc.ComputeContactSurfaces.doc)
-        .def(
-            "ComputeContactSurfacesWithFallback",
-            [](const Class* self,
-                HydroelasticContactRepresentation representation) {
-              // For the Python bindings, we'll use return values instead of
-              // output pointers.
-              std::vector<ContactSurface<T>> surfaces;
-              std::vector<PenetrationAsPointPair<T>> point_pairs;
-              self->ComputeContactSurfacesWithFallback(
-                  representation, &surfaces, &point_pairs);
-              return std::make_pair(
-                  std::move(surfaces), std::move(point_pairs));
-            },
-            py::arg("representation"),
-            cls_doc.ComputeContactSurfacesWithFallback.doc)
         .def("ComputeSignedDistanceToPoint",
             &QueryObject<T>::ComputeSignedDistanceToPoint, py::arg("p_WQ"),
             py::arg("threshold") = std::numeric_limits<double>::infinity(),
@@ -441,6 +405,28 @@ void DoScalarDependentDefinitions(py::module m, T) {
             },
             py::arg("camera"), py::arg("parent_frame"), py::arg("X_PC"),
             cls_doc.RenderLabelImage.doc);
+
+    if constexpr (scalar_predicate<T>::is_bool) {
+      cls  // BR
+          .def("ComputeContactSurfaces",
+              &Class::template ComputeContactSurfaces<T>,
+              py::arg("representation"), cls_doc.ComputeContactSurfaces.doc)
+          .def(
+              "ComputeContactSurfacesWithFallback",
+              [](const Class* self,
+                  HydroelasticContactRepresentation representation) {
+                // For the Python bindings, we'll use return values instead of
+                // output pointers.
+                std::vector<ContactSurface<T>> surfaces;
+                std::vector<PenetrationAsPointPair<T>> point_pairs;
+                self->template ComputeContactSurfacesWithFallback<T>(
+                    representation, &surfaces, &point_pairs);
+                return std::make_pair(
+                    std::move(surfaces), std::move(point_pairs));
+              },
+              py::arg("representation"),
+              cls_doc.ComputeContactSurfacesWithFallback.doc);
+    }
 
     AddValueInstantiation<QueryObject<T>>(m);
   }
@@ -510,7 +496,7 @@ void DoScalarDependentDefinitions(py::module m, T) {
   }
 
   // ContactSurface
-  {
+  if constexpr (scalar_predicate<T>::is_bool) {
     using Class = ContactSurface<T>;
     constexpr auto& cls_doc = doc.ContactSurface;
     auto cls = DefineTemplateClassWithDefault<Class>(
@@ -555,7 +541,7 @@ void DefineGeometrySceneGraph(py::module m) {
   py::module::import("pydrake.systems.framework");
   DoScalarIndependentDefinitions(m);
   type_visit([m](auto dummy) { DoScalarDependentDefinitions(m, dummy); },
-      NonSymbolicScalarPack{});
+      CommonScalarPack{});
 }
 }  // namespace pydrake
 }  // namespace drake

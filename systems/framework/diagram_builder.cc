@@ -41,6 +41,14 @@ std::vector<System<T>*> DiagramBuilder<T>::GetMutableSystems() {
 }
 
 template <typename T>
+const std::map<typename DiagramBuilder<T>::InputPortLocator,
+               typename DiagramBuilder<T>::OutputPortLocator>&
+DiagramBuilder<T>::connection_map() const {
+  ThrowIfAlreadyBuilt();
+  return connection_map_;
+}
+
+template <typename T>
 void DiagramBuilder<T>::Connect(
     const OutputPort<T>& src,
     const InputPort<T>& dest) {
@@ -197,6 +205,41 @@ void DiagramBuilder<T>::ConnectInput(
   input_port_ids_.push_back(id);
   input_port_names_.push_back(port_name);
   diagram_input_set_.insert(id);
+}
+
+template <typename T>
+bool DiagramBuilder<T>::ConnectToSame(
+      const InputPort<T>& exemplar, const InputPort<T>& dest) {
+  ThrowIfAlreadyBuilt();
+  ThrowIfSystemNotRegistered(&exemplar.get_system());
+  ThrowIfSystemNotRegistered(&dest.get_system());
+  InputPortLocator dest_id{&dest.get_system(), dest.get_index()};
+  ThrowIfInputAlreadyWired(dest_id);
+
+  // Check if `exemplar` was connected.
+  InputPortLocator exemplar_id{&exemplar.get_system(), exemplar.get_index()};
+  const auto iter = connection_map_.find(exemplar_id);
+  if (iter != connection_map_.end()) {
+    const OutputPortLocator& exemplar_loc = iter->second;
+    const OutputPort<T>& exemplar_port =
+        exemplar_loc.first->get_output_port(exemplar_loc.second);
+    Connect(exemplar_port, dest);
+    return true;
+  }
+
+  // Check if `exemplar` was exported.
+  if (diagram_input_set_.count(exemplar_id) > 0) {
+    for (size_t i = 0; i < input_port_ids_.size(); ++i) {
+      if (input_port_ids_[i] == exemplar_id) {
+        ConnectInput(input_port_names_[i], dest);
+        return true;
+      }
+    }
+    DRAKE_UNREACHABLE();
+  }
+
+  // The `exemplar` input was neither connected nor exported.
+  return false;
 }
 
 template <typename T>

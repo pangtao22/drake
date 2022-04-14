@@ -61,13 +61,6 @@ set(tinyxml2_md5 "03ad292c4b6454702c0cc22de0d196ad")
 set(tinyxml2_dlname "tinyXML2.zip")
 list(APPEND ALL_PROJECTS tinyxml2)
 
-# yaml-cpp
-set(yaml-cpp_version 0.6.0)
-set(yaml-cpp_url "https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-${yaml-cpp_version}.tar.gz")
-set(yaml-cpp_md5 "8adc0ae6c2698a61ab086606cc7cf562")
-set(yaml-cpp_dlname "yaml-cpp-${yaml-cpp_version}.tar.gz")
-list(APPEND ALL_PROJECTS yaml-cpp)
-
 # msgpack
 set(msgpack_version 3.1.0)
 set(msgpack_url "https://github.com/msgpack/msgpack-c/releases/download/cpp-${msgpack_version}/msgpack-${msgpack_version}.tar.gz")
@@ -106,8 +99,23 @@ set(suitesparse_url "http://faculty.cse.tamu.edu/davis/SuiteSparse/SuiteSparse-$
 set(SuiteSparse_md5 "a2926c27f8a5285e4a10265cc68bbc18")
 list(APPEND ALL_PROJECTS suitesparse)
 
-# clp (TODO)
+# coinutils
+set(coinutils_version 2.11.4)
+set(coinutils_url "https://github.com/coin-or/CoinUtils/archive/refs/tags/releases/${coinutils_version}.tar.gz")
+set(coinutils_md5 "dcdb2a327344014de9d8b050575fa90b")
+set(coinutils_dlname "coinutils-${coinutils_version}.tar.gz")
+list(APPEND ALL_PROJECTS coinutils)
+
+# clp
+set(clp_version 1.17.5)
+set(clp_url "https://github.com/coin-or/Clp/archive/refs/tags/releases/${clp_version}.tar.gz")
+set(clp_md5 "f7c25af22d2f03398cbbdf38c8b4f6fd")
+set(clp_dlname "clp-${clp_version}.tar.gz")
 list(APPEND ALL_PROJECTS clp)
 
-# ipopt (TODO)
+# ipopt
+set(ipopt_version 3.11.9)
+set(ipopt_url "https://github.com/coin-or/Ipopt/archive/refs/tags/releases/${ipopt_version}.tar.gz")
+set(ipopt_md5 "55275c202072ad30db25d2b723ef9b7a")
+set(ipopt_dlname "ipopt-${ipopt_version}.tar.gz")
 list(APPEND ALL_PROJECTS ipopt)

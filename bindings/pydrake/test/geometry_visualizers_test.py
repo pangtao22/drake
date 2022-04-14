@@ -88,10 +88,15 @@ class TestGeometryVisualizers(unittest.TestCase):
         draw_subscriber.clear()
 
     def test_meshcat(self):
-        meshcat = mut.Meshcat(port=7051)
-        self.assertEqual(meshcat.port(), 7051)
+        port = 7051
+        params = mut.MeshcatParams(
+            host="*",
+            port=port,
+            web_url_pattern="http://host:{port}")
+        meshcat = mut.Meshcat(params=params)
+        self.assertEqual(meshcat.port(), port)
         with self.assertRaises(RuntimeError):
-            meshcat2 = mut.Meshcat(port=7051)
+            meshcat2 = mut.Meshcat(port=port)
         self.assertIn("http", meshcat.web_url())
         self.assertIn("ws", meshcat.ws_url())
         meshcat.SetObject(path="/test/box",
@@ -99,6 +104,7 @@ class TestGeometryVisualizers(unittest.TestCase):
                           rgba=mut.Rgba(.5, .5, .5))
         meshcat.SetTransform(path="/test/box", X_ParentPath=RigidTransform())
         meshcat.SetTransform(path="/test/box", matrix=np.eye(4))
+        self.assertTrue(meshcat.HasPath("/test/box"))
         cloud = PointCloud(4)
         cloud.mutable_xyzs()[:] = np.zeros((3, 4))
         meshcat.SetObject(path="/test/cloud", cloud=cloud,
@@ -232,7 +238,7 @@ class TestGeometryVisualizers(unittest.TestCase):
                 ad_visualizer, mut.MeshcatPointCloudVisualizerCpp_[AutoDiffXd])
 
     def test_start_meshcat(self):
-        # StartMeshcat only performs interesting work on Deepnote or Google
-        # Colab.  Here we simply ensure that it runs.
+        # StartMeshcat only performs interesting work on cloud notebook hosts.
+        # Here we simply ensure that it runs.
         meshcat = mut.StartMeshcat()
         self.assertIsInstance(meshcat, mut.Meshcat)

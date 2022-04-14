@@ -20,6 +20,9 @@ Drake binary releases incorporate a pre-compiled version of
 [Mathematical Program toolbox](https://drake.mit.edu/doxygen_cxx/group__solvers.html).
 Thanks to Philip E. Gill and Elizabeth Wong for their kind support.
 
+Drake's docker images do not support the MOSEK™ nor Gurobi solvers. To use
+MOSEK™ or Gurobi, you will need to [build Drake from source](/from_source.html).
+
 ## Stable Releases
 
 The latest stable image can be pulled from
@@ -53,11 +56,9 @@ docker pull robotlocomotion/drake:latest
 
 The docker tags for Drake's nightly releases are spelled like:
 
-* ``bionic-YYYYMMDD`` for the Ubuntu 18.04 image of Drake as of date YYYY-MM-DD.
-* ``bionic`` is a synonym for the most recent ``bionic-YYYYMMDD``.
 * ``focal-YYYYMMDD`` for the Ubuntu 20.04 image of Drake as of date YYYY-MM-DD.
 * ``focal`` is a synonym for the most recent ``focal-YYYYMMDD``.
-* ``YYYYMMDD`` is a synonym for one of the above, currently ``bionic-YYYYMMDD``.
+* ``YYYYMMDD`` is a synonym for the most recent ``focal-YYYYMMDD``.
 * ``latest`` is a synonym for the most recent ``YYYYMMDD``.
 
 Refer to [Quickstart](/installation.html#quickstart) for next steps.

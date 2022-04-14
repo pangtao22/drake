@@ -1,13 +1,17 @@
 #include "drake/geometry/optimization/vpolytope.h"
 
+#include <algorithm>
+#include <cmath>
 #include <limits>
 #include <memory>
+#include <numeric>
 
 #include <fmt/format.h>
 #include <libqhullcpp/Qhull.h>
 #include <libqhullcpp/QhullVertexSet.h>
 
 #include "drake/common/is_approx_equal_abstol.h"
+#include "drake/geometry/read_obj.h"
 #include "drake/solvers/solve.h"
 
 namespace drake {
@@ -24,6 +28,54 @@ using solvers::Constraint;
 using solvers::MathematicalProgram;
 using solvers::VectorXDecisionVariable;
 using symbolic::Variable;
+
+namespace {
+
+/* Given a matrix containing a set of 2D vertices, return a copy
+of the matrix where the vertices are ordered counter-clockwise
+from the negative X axis. */
+Eigen::MatrixXd OrderCounterClockwise(const Eigen::MatrixXd& vertices) {
+  const size_t dim = vertices.rows();
+  const size_t num_vertices = vertices.cols();
+
+  DRAKE_DEMAND(dim == 2);
+
+  std::vector<size_t> indices(num_vertices);
+  std::vector<double> angles(num_vertices);
+
+  double center_x = 0;
+  double center_y = 0;
+
+  std::iota(indices.begin(), indices.end(), 0);
+
+  for (const auto& i : indices) {
+    center_x += vertices.col(i)[0];
+    center_y += vertices.col(i)[1];
+  }
+
+  center_x /= num_vertices;
+  center_y /= num_vertices;
+
+  for (const auto& i : indices) {
+    const double x = vertices.col(i)[0] - center_x;
+    const double y = vertices.col(i)[1] - center_y;
+    angles[i] = std::atan2(y, x);
+  }
+
+  std::sort(indices.begin(), indices.end(), [&angles](size_t a, size_t b){
+      return angles[a] > angles[b];
+    });
+
+  Eigen::MatrixXd sorted_vertices(dim, num_vertices);
+
+  for (size_t i = 0; i < num_vertices; ++i) {
+    sorted_vertices.col(i) = vertices.col(indices[i]);
+  }
+
+  return sorted_vertices;
+}
+
+}  // namespace
 
 VPolytope::VPolytope(const Eigen::Ref<const Eigen::MatrixXd>& vertices)
     : ConvexSet(&ConvexSetCloner<VPolytope>, vertices.rows()),
@@ -133,6 +185,55 @@ VPolytope VPolytope::MakeUnitBox(int dim) {
   return MakeBox(VectorXd::Constant(dim, -1.0), VectorXd::Constant(dim, 1.0));
 }
 
+VPolytope VPolytope::GetMinimalRepresentation() const {
+  orgQhull::Qhull qhull;
+  qhull.runQhull("", vertices_.rows(), vertices_.cols(), vertices_.data(), "");
+  if (qhull.qhullStatus() != 0) {
+    throw std::runtime_error(
+        fmt::format("Qhull terminated with status {} and  message:\n{}",
+                    qhull.qhullStatus(), qhull.qhullMessage()));
+  }
+
+  Eigen::MatrixXd minimal_vertices(vertices_.rows(), qhull.vertexCount());
+  size_t j = 0;
+  for (const auto& qhull_vertex : qhull.vertexList()) {
+    size_t i = 0;
+    for (const auto& val : qhull_vertex.point()) {
+      minimal_vertices(i, j) = val;
+      ++i;
+    }
+    ++j;
+  }
+
+  // The qhull C++ interface iterates over the vertices in no specific order.
+  // For the 2D case, reorder the vertices according to the counter-clockwise
+  // convention.
+  if (vertices_.rows() == 2) {
+    minimal_vertices = OrderCounterClockwise(minimal_vertices);
+  }
+
+  return VPolytope(minimal_vertices);
+}
+
+double VPolytope::CalcVolume() const {
+  orgQhull::Qhull qhull;
+  try {
+    qhull.runQhull("", ambient_dimension_, vertices_.cols(), vertices_.data(),
+                   "");
+  } catch (const orgQhull::QhullError& e) {
+    if (e.errorCode() == qh_ERRsingular) {
+      // The convex hull is singular. It has 0 volume.
+      return 0;
+    }
+  }
+  if (qhull.qhullStatus() != 0) {
+    throw std::runtime_error(
+        fmt::format("Qhull terminated with status {} and  message:\n{}",
+                    qhull.qhullStatus(), qhull.qhullMessage()));
+  }
+  return qhull.volume();
+}
+
 bool VPolytope::DoPointInSet(const Eigen::Ref<const Eigen::VectorXd>& x,
                              double tol) const {
   const int n = ambient_dimension();
@@ -212,6 +313,33 @@ VPolytope::DoAddPointInNonnegativeScalingConstraints(
   return constraints;
 }
 
+std::vector<solvers::Binding<solvers::Constraint>>
+VPolytope::DoAddPointInNonnegativeScalingConstraints(
+    solvers::MathematicalProgram* prog, const Eigen::Ref<const MatrixXd>& A,
+    const Eigen::Ref<const VectorXd>& b, const Eigen::Ref<const VectorXd>& c,
+    double d, const Eigen::Ref<const VectorXDecisionVariable>& x,
+    const Eigen::Ref<const VectorXDecisionVariable>& t) const {
+  std::vector<solvers::Binding<solvers::Constraint>> constraints;
+  const int n = ambient_dimension();
+  const int m = vertices_.cols();
+  VectorXDecisionVariable alpha = prog->NewContinuousVariables(m, "a");
+  // αᵢ ≥ 0.
+  constraints.emplace_back(prog->AddBoundingBoxConstraint(
+      0, std::numeric_limits<double>::infinity(), alpha));
+  // v α = A * x + b.
+  MatrixXd A_combination(n, m + x.size());
+  A_combination.leftCols(m) = vertices_;
+  A_combination.rightCols(x.size()) = -A;
+  constraints.emplace_back(
+      prog->AddLinearEqualityConstraint(A_combination, b, {alpha, x}));
+
+  // ∑ αᵢ = c' * t + d.
+  RowVectorXd a = RowVectorXd::Ones(m + t.size());
+  a.tail(t.size()) = -c.transpose();
+  constraints.emplace_back(prog->AddLinearEqualityConstraint(a, d, {alpha, t}));
+  return constraints;
+}
+
 std::pair<std::unique_ptr<Shape>, math::RigidTransformd>
 VPolytope::DoToShapeWithPose() const {
   throw std::runtime_error(
@@ -224,6 +352,7 @@ void VPolytope::ImplementGeometry(const Box& box, void* data) {
   const double x = box.width() / 2.0;
   const double y = box.depth() / 2.0;
   const double z = box.height() / 2.0;
+  DRAKE_ASSERT(data != nullptr);
   Matrix3Xd* vertices = static_cast<Matrix3Xd*>(data);
   vertices->resize(3, 8);
   // clang-format off
@@ -231,6 +360,36 @@ void VPolytope::ImplementGeometry(const Box& box, void* data) {
                 y,  y, -y, -y, -y, -y,  y,  y,
                -z, -z, -z, -z,  z,  z,  z,  z;
   // clang-format on
+}
+
+void VPolytope::ImplementGeometry(const Convex& convex, void* data) {
+  DRAKE_ASSERT(data != nullptr);
+  const auto [tinyobj_vertices, faces, num_faces] = internal::ReadObjFile(
+      convex.filename(), convex.scale(), false /* triangulate */);
+  unused(faces);
+  unused(num_faces);
+  orgQhull::Qhull qhull;
+  const int dim = 3;
+  std::vector<double> tinyobj_vertices_flat(tinyobj_vertices->size() * dim);
+  for (int i = 0; i < static_cast<int>(tinyobj_vertices->size()); ++i) {
+    for (int j = 0; j < dim; ++j) {
+      tinyobj_vertices_flat[dim * i + j] = (*tinyobj_vertices)[i](j);
+    }
+  }
+  qhull.runQhull("", dim, tinyobj_vertices->size(),
+                 tinyobj_vertices_flat.data(), "");
+  if (qhull.qhullStatus() != 0) {
+    throw std::runtime_error(
+        fmt::format("Qhull terminated with status {} and  message:\n{}",
+                    qhull.qhullStatus(), qhull.qhullMessage()));
+  }
+  Matrix3Xd* vertices = static_cast<Matrix3Xd*>(data);
+  vertices->resize(3, qhull.vertexCount());
+  int vertex_count = 0;
+  for (const auto& qhull_vertex : qhull.vertexList()) {
+    vertices->col(vertex_count++) =
+        Eigen::Map<Eigen::Vector3d>(qhull_vertex.point().toStdVector().data());
+  }
 }
 
 }  // namespace optimization

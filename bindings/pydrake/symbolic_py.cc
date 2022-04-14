@@ -13,6 +13,8 @@
 #include "drake/bindings/pydrake/symbolic_py_unapply.h"
 #include "drake/bindings/pydrake/symbolic_types_pybind.h"
 #include "drake/common/symbolic_decompose.h"
+#include "drake/common/symbolic_latex.h"
+#include "drake/common/symbolic_trigonometric_polynomial.h"
 
 #pragma GCC diagnostic push
 // Apple LLVM version 10.0.1 (clang-1001.0.46.3) and Clang version 7.0.0 add
@@ -524,6 +526,26 @@ PYBIND11_MODULE(symbolic, m) {
           const Expression& e) { return Substitute(M, var, e); },
       py::arg("m"), py::arg("var"), py::arg("e"), doc.Substitute.doc_3args);
 
+  py::class_<SinCos>(m, "SinCos", doc.SinCos.doc)
+      .def(py::init<const Variable&, const Variable&>(), py::arg("s"),
+          py::arg("c"), doc.SinCos.ctor.doc)
+      .def_readwrite("s", &SinCos::s, doc.SinCos.s.doc)
+      .def_readwrite("c", &SinCos::c, doc.SinCos.c.doc);
+
+  m.def(
+      "Substitute",
+      [](const Expression& e, const SinCosSubstitution& subs) {
+        return Substitute(e, subs);
+      },
+      py::arg("e"), py::arg("subs"), doc.Substitute.doc_sincos);
+
+  m.def(
+      "Substitute",
+      [](const MatrixX<Expression>& M, const SinCosSubstitution& subs) {
+        return Substitute(M, subs);
+      },
+      py::arg("m"), py::arg("subs"), doc.Substitute.doc_sincos_matrix);
+
   {
     constexpr auto& cls_doc = doc.FormulaKind;
     py::enum_<FormulaKind>(m, "FormulaKind", doc.FormulaKind.doc)
@@ -851,6 +873,26 @@ PYBIND11_MODULE(symbolic, m) {
       },
       py::arg("f"), py::arg("vars"), doc.Jacobian.doc_polynomial);
 
+  m.def("ToLatex",
+      overload_cast_explicit<std::string, const Expression&, int>(&ToLatex),
+      py::arg("e"), py::arg("precision") = 3, doc.ToLatex.doc_expression);
+  m.def("ToLatex",
+      overload_cast_explicit<std::string, const Formula&, int>(&ToLatex),
+      py::arg("f"), py::arg("precision") = 3, doc.ToLatex.doc_formula);
+
+  m.def(
+      "ToLatex",
+      [](const MatrixX<Expression>& M, int precision) {
+        return ToLatex(M, precision);
+      },
+      py::arg("M"), py::arg("precision") = 3, doc.ToLatex.doc_matrix);
+  m.def(
+      "ToLatex",
+      [](const MatrixX<double>& M, int precision) {
+        return ToLatex(M, precision);
+      },
+      py::arg("M"), py::arg("precision") = 3, doc.ToLatex.doc_matrix);
+
   // We have this line because pybind11 does not permit transitive
   // conversions. See
   // https://github.com/pybind/pybind11/blob/289e5d9cc2a4545d832d3c7fb50066476bce3c1d/include/pybind11/pybind11.h#L1629.
@@ -886,9 +928,20 @@ PYBIND11_MODULE(symbolic, m) {
           },
           py::arg("expressions"), py::arg("vars"),
           doc.DecomposeAffineExpressions.doc_4args_expressions_vars_M_v)
-      .def("ExtractVariablesFromExpression",
-          &symbolic::ExtractVariablesFromExpression, py::arg("e"),
-          doc.ExtractVariablesFromExpression.doc)
+      .def(
+          "ExtractVariablesFromExpression",
+          [](const symbolic::Expression& e) {
+            return symbolic::ExtractVariablesFromExpression(e);
+          },
+          py::arg("e"), doc.ExtractVariablesFromExpression.doc_1args_e)
+      .def(
+          "ExtractVariablesFromExpression",
+          [](const Eigen::Ref<const VectorX<symbolic::Expression>>&
+                  expressions) {
+            return symbolic::ExtractVariablesFromExpression(expressions);
+          },
+          py::arg("expressions"),
+          doc.ExtractVariablesFromExpression.doc_1args_expressions)
       .def(
           "DecomposeQuadraticPolynomial",
           [](const symbolic::Polynomial& poly,

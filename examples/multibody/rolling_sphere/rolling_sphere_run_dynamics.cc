@@ -7,6 +7,7 @@
 #include "drake/examples/multibody/rolling_sphere/make_rolling_sphere_plant.h"
 #include "drake/geometry/drake_visualizer.h"
 #include "drake/geometry/geometry_instance.h"
+#include "drake/geometry/proximity_properties.h"
 #include "drake/geometry/scene_graph.h"
 #include "drake/lcm/drake_lcm.h"
 #include "drake/math/random_rotation.h"
@@ -24,6 +25,10 @@ DEFINE_double(simulation_time, 2.0,
 // Contact model parameters.
 DEFINE_string(contact_model, "point",
               "Contact model. Options are: 'point', 'hydroelastic', 'hybrid'.");
+DEFINE_string(hydro_rep, "tri",
+              "Contact-surface representation for hydroelastics. "
+              "Options are: 'tri' for triangles, 'poly' for polygons. "
+              "Default is 'tri'. It has no effect on point contact.");
 DEFINE_double(hydroelastic_modulus, 5.0e4,
               "For hydroelastic (and hybrid) contact, "
               "hydroelastic modulus, [Pa].");
@@ -135,6 +140,17 @@ int do_main() {
                                  std::move(illus_prop));
   }
 
+  if (FLAGS_hydro_rep == "tri") {
+    plant.set_contact_surface_representation(
+        geometry::HydroelasticContactRepresentation::kTriangle);
+  } else if (FLAGS_hydro_rep == "poly") {
+    plant.set_contact_surface_representation(
+        geometry::HydroelasticContactRepresentation::kPolygon);
+  } else {
+    throw std::runtime_error("Invalid choice of contact-surface representation "
+                             "for hydroelastics '" + FLAGS_hydro_rep + "'.");
+  }
+
   // Set contact model and parameters.
   if (FLAGS_contact_model == "hydroelastic") {
     plant.set_contact_model(ContactModel::kHydroelastic);
@@ -197,7 +213,7 @@ int do_main() {
       &plant_context, plant.GetBodyByName("Ball"), V_WB);
 
   auto simulator =
-      systems::MakeSimulatorFromGflags(*diagram, std::move(diagram_context));
+      MakeSimulatorFromGflags(*diagram, std::move(diagram_context));
 
   using clock = std::chrono::steady_clock;
   const clock::time_point start = clock::now();

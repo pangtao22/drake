@@ -251,9 +251,10 @@ const auto& GetElementByName(
   // We fetch the model instance name as the first operation in this function
   // (even though we'll only need it for error messages) because it throws an
   // exception when the model_instance index is invalid.
+  const std::string empty_name;
   const std::string& model_instance_name =
       model_instance ? tree.GetModelInstanceName(*model_instance)
-                     : std::string();
+                     : empty_name;
   const std::string_view element_classname =
       GetElementClassname<ElementIndex>();
 
@@ -3159,6 +3160,38 @@ VectorX<double> MultibodyTree<T>::GetAccelerationUpperLimits() const {
         joint.acceleration_upper_limits();
   }
   return vd_upper;
+}
+
+template <typename T>
+VectorX<double> MultibodyTree<T>::GetEffortLowerLimits() const {
+  DRAKE_MBT_THROW_IF_NOT_FINALIZED();
+  Eigen::VectorXd lower = Eigen::VectorXd::Constant(
+      num_actuated_dofs(), -std::numeric_limits<double>::infinity());
+  for (JointActuatorIndex i{0}; i < num_actuators(); ++i) {
+    const auto& actuator = get_joint_actuator(i);
+    for (int j = actuator.input_start();
+         j < actuator.input_start() + actuator.num_inputs(); ++j) {
+      DRAKE_ASSERT(j < num_actuated_dofs());
+      lower[j] = -actuator.effort_limit();
+    }
+  }
+  return lower;
+}
+
+template <typename T>
+VectorX<double> MultibodyTree<T>::GetEffortUpperLimits() const {
+  DRAKE_MBT_THROW_IF_NOT_FINALIZED();
+  Eigen::VectorXd upper = Eigen::VectorXd::Constant(
+      num_actuated_dofs(), std::numeric_limits<double>::infinity());
+  for (JointActuatorIndex i{0}; i < num_actuators(); ++i) {
+    const auto& actuator = get_joint_actuator(i);
+    for (int j = actuator.input_start();
+         j < actuator.input_start() + actuator.num_inputs(); ++j) {
+      DRAKE_ASSERT(j < num_actuated_dofs());
+      upper[j] = actuator.effort_limit();
+    }
+  }
+  return upper;
 }
 
 template <typename T>

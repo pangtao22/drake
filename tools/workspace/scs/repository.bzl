@@ -9,8 +9,8 @@ def scs_repository(
         name = name,
         repository = "cvxgrp/scs",
         # When updating this commit, see drake/tools/workspace/qdldl/README.md.
-        commit = "v3.0.0",
-        sha256 = "95ab61495db72b18d6bb690cd2ae2ce88134d078c473da6cb8750857ea17f732",  # noqa
+        commit = "3.2.0",
+        sha256 = "df546b8b8764cacaa0e72bfeb9183586e1c64bc815174cbbecd4c9c1ef18e122",  # noqa
         build_file = "@drake//tools/workspace/scs:package.BUILD.bazel",
         patches = [
             # Fix some include paths for our build of QDLDL.

@@ -56,7 +56,7 @@ class ShaderCallback : public vtkCommand {
   static ShaderCallback* New() { return new ShaderCallback; }
 
   // NOLINTNEXTLINE(runtime/int): To match pre-existing APIs.
-  void Execute(vtkObject*, unsigned long, void* callback_object) VTK_OVERRIDE {
+  void Execute(vtkObject*, unsigned long, void* callback_object) override {
     vtkShaderProgram* program =
         reinterpret_cast<vtkShaderProgram*>(callback_object);
     program->SetUniformf("z_near", z_near_);
@@ -76,6 +76,14 @@ class ShaderCallback : public vtkCommand {
   float z_far_{0.f};
 };
 
+// Not for external use, RenderEngineVtk uses this to index pipelines_ member.
+// Do not change, remove, or add any values.
+enum ImageType {
+  kColor = 0,
+  kLabel = 1,
+  kDepth = 2,
+};
+
 }  // namespace internal
 
 #endif  // !DRAKE_DOXYGEN_CXX
@@ -84,7 +92,7 @@ class ShaderCallback : public vtkCommand {
 class RenderEngineVtk : public RenderEngine,
                         private internal::ModuleInitVtkRenderingOpenGL2 {
  public:
-  /** \name Does not allow copy, move, or assignment  */
+  /** @name Does not allow copy, move, or assignment  */
   //@{
 #ifdef DRAKE_DOXYGEN_CXX
   // Note: the copy constructor operator is actually protected to serve as the
@@ -144,6 +152,37 @@ class RenderEngineVtk : public RenderEngine,
   /** Copy constructor for the purpose of cloning. */
   RenderEngineVtk(const RenderEngineVtk& other);
 
+  /** The rendering pipeline for a single image type (color, depth, or label).
+   */
+  struct RenderingPipeline {
+    vtkNew<vtkRenderer> renderer;
+    vtkNew<vtkRenderWindow> window;
+    vtkNew<vtkWindowToImageFilter> filter;
+    vtkNew<vtkImageExport> exporter;
+  };
+
+  /** Configures the VTK model to reflect the given `camera`, this includes
+   render size camera intrinsics, visible windows, etc. If `show_window` is set
+   to true, a named VTK window will be displayed. */
+  void UpdateWindow(const RenderCameraCore& camera,
+                    bool show_window, const RenderingPipeline& p,
+                    const char* name) const;
+
+  /** Variant of configuring the VTK model (see previous function) that *also*
+   configures the depth range. */
+  void UpdateWindow(const DepthRenderCamera& camera,
+                    const RenderingPipeline& p) const;
+
+  /** Updates VTK rendering related objects including vtkRenderWindow,
+   vtkWindowToImageFilter and vtkImageExporter, so that VTK reflects
+   vtkActors' pose update for rendering. */
+  static void PerformVtkUpdate(const RenderingPipeline& p);
+
+  /** Provides access to the private data member pipelines_ by returning a
+   mutable RenderingPipeline reference. Only image types in internal::ImageType
+   enum are valid. */
+  RenderingPipeline& get_mutable_pipeline(internal::ImageType image_type) const;
+
  private:
   // @see RenderEngine::DoRegisterVisual().
   bool DoRegisterVisual(GeometryId id, const Shape& shape,
@@ -185,30 +224,6 @@ class RenderEngineVtk : public RenderEngine,
 
   // Performs the common setup for all shape types.
   void ImplementGeometry(vtkPolyDataAlgorithm* source, void* user_data);
-
-  // The rendering pipeline for a single image type (color, depth, or label).
-  struct RenderingPipeline {
-    vtkNew<vtkRenderer> renderer;
-    vtkNew<vtkRenderWindow> window;
-    vtkNew<vtkWindowToImageFilter> filter;
-    vtkNew<vtkImageExport> exporter;
-  };
-
-  // Updates VTK rendering related objects including vtkRenderWindow,
-  // vtkWindowToImageFilter and vtkImageExporter, so that VTK reflects
-  // vtkActors' pose update for rendering.
-  static void PerformVtkUpdate(const RenderingPipeline& p);
-
-  // Configures the VTK model to reflect the given `camera`, this includes
-  // render size camera intrinsics, visible windows, etc.
-  void UpdateWindow(const RenderCameraCore& camera,
-                    bool show_window, const RenderingPipeline* p,
-                    const char* name) const;
-
-  // Variant of configuring the VTK model (see previous method) that *also*
-  // configures the depth range.
-  void UpdateWindow(const DepthRenderCamera& camera,
-                    const RenderingPipeline* p) const;
 
   void SetDefaultLightPosition(const Vector3<double>& X_DL) override;
 

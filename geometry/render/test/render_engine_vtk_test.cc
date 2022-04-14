@@ -493,7 +493,7 @@ TEST_F(RenderEngineVtkTest, NoBodyTest) {
   Init(RigidTransformd::Identity());
   Render();
 
-  VerifyUniformColor(kBgColor, 0u);
+  VerifyUniformColor(kBgColor, 255u);
   VerifyUniformLabel(RenderLabel::kEmpty);
   VerifyUniformDepth(std::numeric_limits<float>::infinity());
 }
@@ -506,7 +506,7 @@ TEST_F(RenderEngineVtkTest, ControlBackgroundColor) {
         {}, {}, Vector3d{bg.r / 255., bg.g / 255., bg.b / 255.}};
     RenderEngineVtk engine(params);
     Render(&engine);
-    VerifyUniformColor(bg, 0u);
+    VerifyUniformColor(bg, 255u);
   }
 }
 
@@ -1223,7 +1223,6 @@ TEST_F(RenderEngineVtkTest, DefaultProperties_RenderLabel) {
 
     DRAKE_EXPECT_THROWS_MESSAGE(
         populate_default_sphere(&renderer),
-        std::logic_error,
         ".* geometry with the 'unspecified' or 'empty' render labels.*");
   }
 
@@ -1235,7 +1234,6 @@ TEST_F(RenderEngineVtkTest, DefaultProperties_RenderLabel) {
 
     DRAKE_EXPECT_THROWS_MESSAGE(
         populate_default_sphere(&renderer),
-        std::logic_error,
         ".* geometry with the 'unspecified' or 'empty' render labels.*");
   }
 
@@ -1259,7 +1257,7 @@ TEST_F(RenderEngineVtkTest, DefaultProperties_RenderLabel) {
     for (RenderLabel label :
         {RenderLabel::kEmpty, RenderLabel(1), RenderLabel::kDoNotRender}) {
       DRAKE_EXPECT_THROWS_MESSAGE(
-          RenderEngineVtk({label, {}}), std::logic_error,
+          RenderEngineVtk({label, {}}),
           ".* default render label .* either 'kUnspecified' or 'kDontCare'.*");
     }
   }

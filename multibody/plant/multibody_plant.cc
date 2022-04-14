@@ -15,11 +15,13 @@
 #include "drake/geometry/geometry_frame.h"
 #include "drake/geometry/geometry_instance.h"
 #include "drake/geometry/geometry_roles.h"
+#include "drake/geometry/proximity_properties.h"
 #include "drake/geometry/query_results/contact_surface.h"
 #include "drake/geometry/render/render_label.h"
 #include "drake/math/random_rotation.h"
 #include "drake/math/rotation_matrix.h"
 #include "drake/multibody/contact_solvers/sparse_linear_operator.h"
+#include "drake/multibody/hydroelastics/hydroelastic_engine.h"
 #include "drake/multibody/plant/discrete_contact_pair.h"
 #include "drake/multibody/plant/externally_applied_spatial_force.h"
 #include "drake/multibody/plant/hydroelastic_traction_calculator.h"
@@ -242,7 +244,8 @@ struct JointLimitsPenaltyParametersEstimator {
 namespace {
 
 // Hack to fully qualify frame names, pending resolution of #9128. Used by
-// geometry registration routines.
+// geometry registration routines. When this hack is removed, also undo the
+// de-hacking step within internal_geometry_names.cc.
 template <typename T>
 std::string GetScopedName(
     const MultibodyPlant<T>& plant,
@@ -358,8 +361,9 @@ template <typename T>
 MultibodyPlant<T>::MultibodyPlant(double time_step)
     : MultibodyPlant(nullptr, time_step) {
   // Cross-check that the Config default matches our header file default.
-  DRAKE_DEMAND(contact_model_ == ContactModel::kPoint);
-  DRAKE_DEMAND(MultibodyPlantConfig{}.contact_model == "point");
+  DRAKE_DEMAND(contact_model_ == ContactModel::kHydroelasticWithFallback);
+  DRAKE_DEMAND(MultibodyPlantConfig{}.contact_model ==
+               "hydroelastic_with_fallback");
 }
 
 template <typename T>
@@ -451,9 +455,8 @@ geometry::SourceId MultibodyPlant<T>::RegisterAsSourceForSceneGraph(
   // Save the GS pointer so that on later geometry registrations can use this
   // instance. This will be nullified at Finalize().
   scene_graph_ = scene_graph;
-  source_id_ = member_scene_graph().RegisterSource(this->get_name());
-  const geometry::FrameId world_frame_id =
-      member_scene_graph().world_frame_id();
+  source_id_ = scene_graph_->RegisterSource(this->get_name());
+  const geometry::FrameId world_frame_id = scene_graph_->world_frame_id();
   body_index_to_frame_id_[world_index()] = world_frame_id;
   frame_id_to_body_index_[world_frame_id] = world_index();
   // In case any bodies were added before registering scene graph, make sure the
@@ -499,7 +502,7 @@ geometry::GeometryId MultibodyPlant<T>::RegisterVisualGeometry(
   GeometryId id =
       RegisterGeometry(body, X_BG, shape,
                        GetScopedName(*this, body.model_instance(), name));
-  member_scene_graph().AssignRole(*source_id_, id, properties);
+  scene_graph_->AssignRole(*source_id_, id, properties);
 
   // TODO(SeanCurtis-TRI): Eliminate the automatic assignment of perception
   //  and illustration in favor of a protocol that allows definition.
@@ -519,12 +522,11 @@ geometry::GeometryId MultibodyPlant<T>::RegisterVisualGeometry(
       "renderer", "accepting",
       properties.GetProperty<std::set<std::string>>("renderer", "accepting"));
   }
-  member_scene_graph().AssignRole(*source_id_, id, perception_props);
+  scene_graph_->AssignRole(*source_id_, id, perception_props);
 
-  const int visual_index = geometry_id_to_visual_index_.size();
-  geometry_id_to_visual_index_[id] = visual_index;
-  DRAKE_ASSERT(num_bodies() == static_cast<int>(visual_geometries_.size()));
+  DRAKE_ASSERT(static_cast<int>(visual_geometries_.size()) == num_bodies());
   visual_geometries_[body.index()].push_back(id);
+  ++num_visual_geometries_;
   return id;
 }
 
@@ -544,26 +546,16 @@ geometry::GeometryId MultibodyPlant<T>::RegisterCollisionGeometry(
   DRAKE_THROW_UNLESS(properties.HasProperty(geometry::internal::kMaterialGroup,
                                             geometry::internal::kFriction));
 
-  const CoulombFriction<double> coulomb_friction =
-      properties.GetProperty<CoulombFriction<double>>(
-          geometry::internal::kMaterialGroup, geometry::internal::kFriction);
-
   // TODO(amcastro-tri): Consider doing this after finalize so that we can
   // register geometry that has a fixed path to world to the world body (i.e.,
   // as anchored geometry).
   GeometryId id = RegisterGeometry(
       body, X_BG, shape, GetScopedName(*this, body.model_instance(), name));
 
-  member_scene_graph().AssignRole(*source_id_, id, std::move(properties));
-  const int collision_index = geometry_id_to_collision_index_.size();
-  geometry_id_to_collision_index_[id] = collision_index;
-  DRAKE_ASSERT(
-      static_cast<int>(default_coulomb_friction_.size()) == collision_index);
-  // TODO(SeanCurtis-TRI): Stop storing coulomb friction in MBP and simply
-  //  acquire it from SceneGraph.
-  default_coulomb_friction_.push_back(coulomb_friction);
-  DRAKE_ASSERT(num_bodies() == static_cast<int>(collision_geometries_.size()));
+  scene_graph_->AssignRole(*source_id_, id, std::move(properties));
+  DRAKE_ASSERT(static_cast<int>(collision_geometries_.size()) == num_bodies());
   collision_geometries_[body.index()].push_back(id);
+  ++num_collision_geometries_;
   return id;
 }
 
@@ -636,7 +628,7 @@ geometry::GeometryId MultibodyPlant<T>::RegisterGeometry(
   // Register geometry in the body frame.
   std::unique_ptr<geometry::GeometryInstance> geometry_instance =
       std::make_unique<GeometryInstance>(X_BG, shape.Clone(), name);
-  GeometryId geometry_id = member_scene_graph().RegisterGeometry(
+  GeometryId geometry_id = scene_graph_->RegisterGeometry(
       source_id_.value(), body_index_to_frame_id_[body.index()],
       std::move(geometry_instance));
   geometry_id_to_body_index_[geometry_id] = body.index();
@@ -660,7 +652,7 @@ void MultibodyPlant<T>::RegisterRigidBodyWithSceneGraph(
   if (geometry_source_is_registered()) {
     // If not already done, register a frame for this body.
     if (!body_has_registered_frame(body)) {
-      FrameId frame_id = member_scene_graph().RegisterFrame(
+      FrameId frame_id = scene_graph_->RegisterFrame(
           source_id_.value(),
           GeometryFrame(
               GetScopedName(*this, body.model_instance(), body.name()),
@@ -746,7 +738,7 @@ void MultibodyPlant<T>::Finalize() {
   // After finalizing the base class, tree is read-only.
   internal::MultibodyTreeSystem<T>::Finalize();
   if (geometry_source_is_registered()) {
-    FilterAdjacentBodies();
+    ApplyDefaultCollisionFilters();
     ExcludeCollisionsWithVisualGeometry();
   }
   FinalizePlantOnly();
@@ -866,71 +858,54 @@ MatrixX<T> MultibodyPlant<T>::MakeActuationMatrix() const {
 }
 
 template <typename T>
-struct MultibodyPlant<T>::SceneGraphStub {
-  struct StubSceneGraphInspector {
-    const geometry::ProximityProperties* GetProximityProperties(
-        GeometryId) const {
-      return nullptr;
-    }
-    const geometry::IllustrationProperties* GetIllustrationProperties(
-        GeometryId) const {
-      return nullptr;
-    }
-  };
-
-  struct StubCollisionFilterManager {
-    void Apply(const geometry::CollisionFilterDeclaration&) {
-      return;
-    }
-  };
-
-  static void Throw(const char* operation_name) {
-    throw std::logic_error(fmt::format(
-        "Cannot {} on a SceneGraph<symbolic::Expression>", operation_name));
+const geometry::QueryObject<T>& MultibodyPlant<T>::EvalGeometryQueryInput(
+    const systems::Context<T>& context) const {
+  this->ValidateContext(context);
+  if (!get_geometry_query_input_port().HasValue(context)) {
+    throw std::logic_error(
+        "The geometry query input port (see "
+        "MultibodyPlant::get_geometry_query_input_port()) "
+        "of this MultibodyPlant is not connected. Please connect the"
+        "geometry query output port of a SceneGraph object "
+        "(see SceneGraph::get_query_output_port()) to this plants input "
+        "port in a Diagram.");
   }
-
-  static FrameId world_frame_id() {
-    return SceneGraph<double>::world_frame_id();
-  }
-
-#define DRAKE_STUB(Ret, Name)                   \
-  template <typename... Args>                   \
-  Ret Name(Args...) const { Throw(#Name); return Ret(); }
-
-  DRAKE_STUB(void, AssignRole)
-  DRAKE_STUB(FrameId, RegisterFrame)
-  DRAKE_STUB(GeometryId, RegisterGeometry)
-  DRAKE_STUB(SourceId, RegisterSource)
-  const StubSceneGraphInspector model_inspector() const {
-    Throw("model_inspector");
-    return StubSceneGraphInspector();
-  }
-  StubCollisionFilterManager collision_filter_manager() {
-    Throw("collision_filter_manager");
-    return StubCollisionFilterManager();
-  }
-
-#undef DRAKE_STUB
-};
-
-template <typename T>
-typename MultibodyPlant<T>::MemberSceneGraph&
-MultibodyPlant<T>::member_scene_graph() {
-  DRAKE_THROW_UNLESS(scene_graph_ != nullptr);
-  return *scene_graph_;
-}
-
-// Specialize this function so that we can use our Stub class; we cannot call
-// methods on SceneGraph<Expression> because they do not exist.
-template <>
-typename MultibodyPlant<symbolic::Expression>::MemberSceneGraph&
-MultibodyPlant<symbolic::Expression>::member_scene_graph() {
-  static never_destroyed<SceneGraphStub> stub_;
-  return stub_.access();
+  return get_geometry_query_input_port()
+      .template Eval<geometry::QueryObject<T>>(context);
 }
 
 template <typename T>
-void MultibodyPlant<T>::FilterAdjacentBodies() {
+std::pair<T, T> MultibodyPlant<T>::GetPointContactParameters(
+    geometry::GeometryId id,
+    const geometry::SceneGraphInspector<T>& inspector) const {
+  const geometry::ProximityProperties* prop =
+      inspector.GetProximityProperties(id);
+  DRAKE_DEMAND(prop != nullptr);
+  return std::pair(prop->template GetPropertyOrDefault<T>(
+                       geometry::internal::kMaterialGroup,
+                       geometry::internal::kPointStiffness,
+                       penalty_method_contact_parameters_.geometry_stiffness),
+                   prop->template GetPropertyOrDefault<T>(
+                       geometry::internal::kMaterialGroup,
+                       geometry::internal::kHcDissipation,
+                       penalty_method_contact_parameters_.dissipation));
+}
+
+template <typename T>
+const CoulombFriction<double>& MultibodyPlant<T>::GetCoulombFriction(
+    geometry::GeometryId id,
+    const geometry::SceneGraphInspector<T>& inspector) const {
+  const geometry::ProximityProperties* prop =
+      inspector.GetProximityProperties(id);
+  DRAKE_DEMAND(prop != nullptr);
+  DRAKE_THROW_UNLESS(prop->HasProperty(geometry::internal::kMaterialGroup,
+                                       geometry::internal::kFriction));
+  return prop->GetProperty<CoulombFriction<double>>(
+      geometry::internal::kMaterialGroup, geometry::internal::kFriction);
+}
+
+template <typename T>
+void MultibodyPlant<T>::ApplyDefaultCollisionFilters() {
   DRAKE_DEMAND(geometry_source_is_registered());
   // Disallow collisions between adjacent bodies. Adjacency is implied by the
   // existence of a joint between bodies.
@@ -943,18 +918,27 @@ void MultibodyPlant<T>::FilterAdjacentBodies() {
     std::optional<FrameId> parent_id = GetBodyFrameIdIfExists(parent.index());
 
     if (child_id && parent_id) {
-      member_scene_graph().collision_filter_manager().Apply(
+      scene_graph_->collision_filter_manager().Apply(
         CollisionFilterDeclaration().ExcludeBetween(
           geometry::GeometrySet(*child_id),
           geometry::GeometrySet(*parent_id)));
     }
   }
-  // We must explicitly exclude collisions between all geometries registered
-  // against the world.
-  // TODO(eric.cousineau): Do this in a better fashion (#11117).
-  auto g_world = CollectRegisteredGeometries(GetBodiesWeldedTo(world_body()));
-  member_scene_graph().collision_filter_manager().Apply(
-      CollisionFilterDeclaration().ExcludeWithin(g_world));
+  // We explicitly exclude collisions within welded subgraphs.
+  std::vector<std::set<BodyIndex>> subgraphs =
+      multibody_graph_.FindSubgraphsOfWeldedBodies();
+  for (const auto& subgraph : subgraphs) {
+    // Only operate on non-trivial weld subgraphs.
+    if (subgraph.size() <= 1) { continue; }
+    // Map body indices to pointers.
+    std::vector<const Body<T>*> subgraph_bodies;
+    for (BodyIndex body_index : subgraph) {
+      subgraph_bodies.push_back(&get_body(body_index));
+    }
+    auto geometries = CollectRegisteredGeometries(subgraph_bodies);
+    scene_graph_->collision_filter_manager().Apply(
+        CollisionFilterDeclaration().ExcludeWithin(geometries));
+  }
 }
 
 template <typename T>
@@ -969,7 +953,7 @@ void MultibodyPlant<T>::ExcludeCollisionsWithVisualGeometry() {
     collision.Add(body_geometries);
   }
   // clang-format off
-  member_scene_graph().collision_filter_manager().Apply(
+  scene_graph_->collision_filter_manager().Apply(
       CollisionFilterDeclaration()
           .ExcludeWithin(visual)
           .ExcludeBetween(visual, collision));
@@ -986,11 +970,11 @@ void MultibodyPlant<T>::ExcludeCollisionGeometriesWithCollisionFilterGroupPair(
   DRAKE_DEMAND(geometry_source_is_registered());
 
   if (collision_filter_group_a.first == collision_filter_group_b.first) {
-    member_scene_graph().collision_filter_manager().Apply(
+    scene_graph_->collision_filter_manager().Apply(
         CollisionFilterDeclaration().ExcludeWithin(
             collision_filter_group_a.second));
   } else {
-    member_scene_graph().collision_filter_manager().Apply(
+    scene_graph_->collision_filter_manager().Apply(
         CollisionFilterDeclaration().ExcludeBetween(
             collision_filter_group_a.second, collision_filter_group_b.second));
   }
@@ -1029,9 +1013,9 @@ void MultibodyPlant<T>::CalcNormalAndTangentContactJacobians(
     const GeometryId geometryA_id = point_pair.id_A;
     const GeometryId geometryB_id = point_pair.id_B;
 
-    BodyIndex bodyA_index = geometry_id_to_body_index_.at(geometryA_id);
+    const BodyIndex bodyA_index = FindBodyByGeometryId(geometryA_id);
+    const BodyIndex bodyB_index = FindBodyByGeometryId(geometryB_id);
     const Body<T>& bodyA = get_body(bodyA_index);
-    BodyIndex bodyB_index = geometry_id_to_body_index_.at(geometryB_id);
     const Body<T>& bodyB = get_body(bodyB_index);
 
     // Penetration depth > 0 if bodies interpenetrate.
@@ -1119,6 +1103,22 @@ void MultibodyPlant<T>::CalcContactJacobiansCache(
     Jc.row(3 * i + 1) = Jt.row(2 * i + 1);
     Jc.row(3 * i + 2) = Jn.row(i);
   }
+}
+
+template <typename T>
+BodyIndex MultibodyPlant<T>::FindBodyByGeometryId(
+    GeometryId geometry_id) const {
+  if (!geometry_id.is_valid()) {
+    throw std::logic_error(
+        "MultibodyPlant received contact results for a null GeometryId");
+  }
+  const auto iter = geometry_id_to_body_index_.find(geometry_id);
+  if (iter != geometry_id_to_body_index_.end()) {
+    return iter->second;
+  }
+  throw std::logic_error(fmt::format(
+      "MultibodyPlant received contact results for GeometryId {}, but that"
+      " ID is not known to this plant", geometry_id));
 }
 
 template <typename T>
@@ -1255,25 +1255,6 @@ void MultibodyPlant<T>::CalcPointPairPenetrations(
   }
 }
 
-// Specialize this function so that symbolic::Expression throws an error.
-template <>
-void MultibodyPlant<symbolic::Expression>::CalcPointPairPenetrations(
-    const systems::Context<symbolic::Expression>&,
-    std::vector<PenetrationAsPointPair<symbolic::Expression>>*) const {
-  throw std::logic_error(
-      "This method doesn't support T = symbolic::Expression.");
-}
-
-template <>
-std::vector<CoulombFriction<double>>
-MultibodyPlant<symbolic::Expression>::CalcCombinedFrictionCoefficients(
-    const drake::systems::Context<symbolic::Expression>&,
-    const std::vector<internal::DiscreteContactPair<symbolic::Expression>>&)
-    const {
-  throw std::logic_error(
-      "This method doesn't support T = symbolic::Expression.");
-}
-
 template<typename T>
 std::vector<CoulombFriction<double>>
 MultibodyPlant<T>::CalcCombinedFrictionCoefficients(
@@ -1321,11 +1302,12 @@ void MultibodyPlant<T>::CalcContactResultsContinuous(
   this->ValidateContext(context);
   DRAKE_DEMAND(contact_results != nullptr);
   contact_results->Clear();
+  contact_results->set_plant(this);
   if (num_collision_geometries() == 0) return;
 
   switch (contact_model_) {
     case ContactModel::kPoint:
-      CalcContactResultsContinuousPointPair(context, contact_results);
+      AppendContactResultsContinuousPointPair(context, contact_results);
       break;
 
     case ContactModel::kHydroelastic:
@@ -1334,7 +1316,7 @@ void MultibodyPlant<T>::CalcContactResultsContinuous(
 
     case ContactModel::kHydroelasticWithFallback:
       // Simply merge the contributions of each contact representation.
-      CalcContactResultsContinuousPointPair(context, contact_results);
+      AppendContactResultsContinuousPointPair(context, contact_results);
       AppendContactResultsContinuousHydroelastic(context, contact_results);
       break;
   }
@@ -1354,6 +1336,8 @@ void MultibodyPlant<T>::AppendContactResultsContinuousHydroelastic(
     const systems::Context<T>& context,
     ContactResults<T>* contact_results) const {
   this->ValidateContext(context);
+  DRAKE_DEMAND(contact_results != nullptr);
+  DRAKE_DEMAND(contact_results->plant() == this);
   const internal::HydroelasticContactInfoAndBodySpatialForces<T>&
       contact_info_and_spatial_body_forces =
           EvalHydroelasticContactForces(context);
@@ -1366,10 +1350,12 @@ void MultibodyPlant<T>::AppendContactResultsContinuousHydroelastic(
 }
 
 template <typename T>
-void MultibodyPlant<T>::CalcContactResultsContinuousPointPair(
+void MultibodyPlant<T>::AppendContactResultsContinuousPointPair(
     const systems::Context<T>& context,
     ContactResults<T>* contact_results) const {
   this->ValidateContext(context);
+  DRAKE_DEMAND(contact_results != nullptr);
+  DRAKE_DEMAND(contact_results->plant() == this);
 
   const std::vector<PenetrationAsPointPair<T>>& point_pairs =
       EvalPointPairPenetrations(context);
@@ -1383,14 +1369,13 @@ void MultibodyPlant<T>::CalcContactResultsContinuousPointPair(
       EvalGeometryQueryInput(context);
   const geometry::SceneGraphInspector<T>& inspector = query_object.inspector();
 
-  contact_results->Clear();
   for (size_t icontact = 0; icontact < point_pairs.size(); ++icontact) {
     const auto& pair = point_pairs[icontact];
     const GeometryId geometryA_id = pair.id_A;
     const GeometryId geometryB_id = pair.id_B;
 
-    BodyIndex bodyA_index = geometry_id_to_body_index_.at(geometryA_id);
-    BodyIndex bodyB_index = geometry_id_to_body_index_.at(geometryB_id);
+    const BodyIndex bodyA_index = FindBodyByGeometryId(geometryA_id);
+    const BodyIndex bodyB_index = FindBodyByGeometryId(geometryB_id);
 
     internal::BodyNodeIndex bodyA_node_index =
         get_body(bodyA_index).node_index();
@@ -1485,11 +1470,12 @@ void MultibodyPlant<T>::CalcContactResultsDiscrete(
     ContactResults<T>* contact_results) const {
   DRAKE_DEMAND(contact_results != nullptr);
   contact_results->Clear();
+  contact_results->set_plant(this);
   if (num_collision_geometries() == 0) return;
 
   switch (contact_model_) {
     case ContactModel::kPoint:
-      CalcContactResultsDiscretePointPair(context, contact_results);
+      AppendContactResultsDiscretePointPair(context, contact_results);
       break;
 
     case ContactModel::kHydroelastic:
@@ -1500,7 +1486,7 @@ void MultibodyPlant<T>::CalcContactResultsDiscrete(
 
     case ContactModel::kHydroelasticWithFallback:
       // Simply merge the contributions of each contact representation.
-      CalcContactResultsDiscretePointPair(context, contact_results);
+      AppendContactResultsDiscretePointPair(context, contact_results);
 
       // N.B. We are simply computing the hydro force as function of the state,
       // not the actual discrete approximation used by the contact solver.
@@ -1510,11 +1496,12 @@ void MultibodyPlant<T>::CalcContactResultsDiscrete(
 }
 
 template <typename T>
-void MultibodyPlant<T>::CalcContactResultsDiscretePointPair(
+void MultibodyPlant<T>::AppendContactResultsDiscretePointPair(
     const systems::Context<T>& context,
     ContactResults<T>* contact_results) const {
   this->ValidateContext(context);
   DRAKE_DEMAND(contact_results != nullptr);
+  DRAKE_DEMAND(contact_results->plant() == this);
   if (num_collision_geometries() == 0) return;
 
   const std::vector<PenetrationAsPointPair<T>>& point_pairs =
@@ -1537,14 +1524,13 @@ void MultibodyPlant<T>::CalcContactResultsDiscretePointPair(
   DRAKE_DEMAND(vn.size() >= num_contacts);
   DRAKE_DEMAND(vt.size() >= 2 * num_contacts);
 
-  contact_results->Clear();
   for (size_t icontact = 0; icontact < point_pairs.size(); ++icontact) {
     const auto& pair = point_pairs[icontact];
     const GeometryId geometryA_id = pair.id_A;
     const GeometryId geometryB_id = pair.id_B;
 
-    const BodyIndex bodyA_index = geometry_id_to_body_index_.at(geometryA_id);
-    const BodyIndex bodyB_index = geometry_id_to_body_index_.at(geometryB_id);
+    const BodyIndex bodyA_index = FindBodyByGeometryId(geometryA_id);
+    const BodyIndex bodyB_index = FindBodyByGeometryId(geometryB_id);
 
     const Vector3<T> p_WC = 0.5 * (pair.p_WCa + pair.p_WCb);
 
@@ -1613,8 +1599,8 @@ void MultibodyPlant<T>::CalcAndAddContactForcesByPenaltyMethod(
     const GeometryId geometryA_id = pair.id_A;
     const GeometryId geometryB_id = pair.id_B;
 
-    const BodyIndex bodyA_index = geometry_id_to_body_index_.at(geometryA_id);
-    const BodyIndex bodyB_index = geometry_id_to_body_index_.at(geometryB_id);
+    const BodyIndex bodyA_index = FindBodyByGeometryId(geometryA_id);
+    const BodyIndex bodyB_index = FindBodyByGeometryId(geometryB_id);
 
     internal::BodyNodeIndex bodyA_node_index =
         get_body(bodyA_index).node_index();
@@ -1720,8 +1706,8 @@ void MultibodyPlant<T>::CalcHydroelasticContactForces(
 
     // Get the bodies that the two geometries are affixed to. We'll call these
     // A and B.
-    const BodyIndex bodyA_index = geometry_id_to_body_index_.at(geometryM_id);
-    const BodyIndex bodyB_index = geometry_id_to_body_index_.at(geometryN_id);
+    const BodyIndex bodyA_index = FindBodyByGeometryId(geometryM_id);
+    const BodyIndex bodyB_index = FindBodyByGeometryId(geometryN_id);
     const Body<T>& bodyA = get_body(bodyA_index);
     const Body<T>& bodyB = get_body(bodyB_index);
 
@@ -1736,7 +1722,8 @@ void MultibodyPlant<T>::CalcHydroelasticContactForces(
         X_WA, X_WB, V_WA, V_WB, &surface);
 
     // Combined Hunt & Crossley dissipation.
-    const double dissipation = hydroelastics_engine_.CalcCombinedDissipation(
+    const hydroelastics::internal::HydroelasticEngine<T> hydroelastics_engine;
+    const double dissipation = hydroelastics_engine.CalcCombinedDissipation(
         geometryM_id, geometryN_id, inspector);
 
     // Integrate the hydroelastic traction field over the contact surface.
@@ -2023,6 +2010,8 @@ void MultibodyPlant<symbolic::Expression>::CalcHydroelasticWithFallback(
                   NiceTypeName::Get<symbolic::Expression>()));
 }
 
+// TODO(16106): This code will go into:
+// CompliantContactManager<T>::AppendDiscreteContactPairsForHydroelasticContact.
 template <typename T>
 void MultibodyPlant<T>::CalcDiscreteContactPairs(
     const systems::Context<T>& context,
@@ -2102,8 +2091,14 @@ void MultibodyPlant<T>::CalcDiscreteContactPairs(
       const std::vector<geometry::ContactSurface<T>>& surfaces =
           EvalContactSurfaces(context);
       for (const auto& s : surfaces) {
+        const bool M_is_compliant = s.HasGradE_M();
+        const bool N_is_compliant = s.HasGradE_N();
+        DRAKE_DEMAND(M_is_compliant || N_is_compliant);
+
         // Combined Hunt & Crossley dissipation.
-        const T dissipation = hydroelastics_engine_.CalcCombinedDissipation(
+        const hydroelastics::internal::HydroelasticEngine<T>
+            hydroelastics_engine;
+        const T dissipation = hydroelastics_engine.CalcCombinedDissipation(
             s.id_M(), s.id_N(), inspector);
 
         for (int face = 0; face < s.num_faces(); ++face) {
@@ -2119,77 +2114,65 @@ void MultibodyPlant<T>::CalcDiscreteContactPairs(
           // We therefore ignore infinitesimally small triangles. The tolerance
           // below is somewhat arbitrary and could possibly be tightened.
           if (Ae > 1.0e-14) {
-            // N.B Assuming rigid-soft contact, and thus only a single pressure
-            // gradient is considered to be valid. We first verify this indeed
-            // is the case by checking that only one side has gradient
-            // information (the volumetric side).
-            const bool M_is_soft = s.HasGradE_M();
-            const bool N_is_soft = s.HasGradE_N();
-            DRAKE_DEMAND(M_is_soft != N_is_soft);
-
-            // Pressure gradient always points into the soft geometry by
-            // construction.
-            const Vector3<T>& grad_pres_W = M_is_soft
-                                                ? s.EvaluateGradE_M_W(face)
-                                                : s.EvaluateGradE_N_W(face);
-
             // From ContactSurface's documentation: The normal of each face is
             // guaranteed to point "out of" N and "into" M.
             const Vector3<T>& nhat_W = s.face_normal(face);
 
+            // One dimensional pressure gradient (in Pa/m). Unlike [Masterjohn
+            // et al. 2021], for convenience we define both pressure gradients
+            // to be positive in the direction "into" the bodies. Therefore,
+            // we use the minus sign for gN.
+            // [Masterjohn et al., 2021] Discrete Approximation of Pressure
+            // Field Contact Patches.
+            const T gM = M_is_compliant
+                             ? s.EvaluateGradE_M_W(face).dot(nhat_W)
+                             : T(std::numeric_limits<double>::infinity());
+            const T gN = N_is_compliant
+                             ? -s.EvaluateGradE_N_W(face).dot(nhat_W)
+                             : T(std::numeric_limits<double>::infinity());
+
+            constexpr double kGradientEpsilon = 1.0e-14;
+            if (gM < kGradientEpsilon || gN < kGradientEpsilon) {
+              // Mathematically g = gN*gM/(gN+gM) and therefore g = 0 when
+              // either gradient on one of the bodies is zero. A zero gradient
+              // means there is no contact constraint, and therefore we
+              // ignore it to avoid numerical problems in the discrete solver.
+              continue;
+            }
+
+            // Effective hydroelastic pressure gradient g result of
+            // compliant-compliant interaction, see [Masterjohn et al., 2021].
+            // The expression below is mathematically equivalent to g =
+            // gN*gM/(gN+gM) but it has the advantage of also being valid if
+            // one of the gradients is infinity.
+            const T g = 1.0 / (1.0 / gM + 1.0 / gN);
+
             // Position of quadrature point Q in the world frame (since mesh_W
             // is measured and expressed in W).
             const Vector3<T>& p_WQ = s.centroid(face);
-            // TODO(DamrongGuoy) EvaluateCartesian() on the triangle mesh field
-            //  is expensive if the field doesn't have the gradients. The
-            //  field computation for triangle representation should capture
-            //  the field gradients, just like the polygon field does. (That
-            //  also unifies the APIs and logic on the geometry side better.)
+            // For a triangle, its centroid has the fixed barycentric
+            // coordinates independent of the shape of the triangle. Using
+            // barycentric coordinates to evaluate field value could be
+            // faster than using Cartesian coordiantes, especially if the
+            // TriangleSurfaceMeshFieldLinear<> does not store gradients and
+            // has to solve linear equations to convert Cartesian to
+            // barycentric coordinates.
+            const Vector3<T> tri_centroid_barycentric(1 / 3., 1 / 3., 1 / 3.);
             // Pressure at the quadrature point.
             const T p0 = s.is_triangle()
-                             ? s.tri_e_MN().EvaluateCartesian(face, p_WQ)
+                             ? s.tri_e_MN().Evaluate(
+                                   face, tri_centroid_barycentric)
                              : s.poly_e_MN().EvaluateCartesian(face, p_WQ);
 
             // Force contribution by this quadrature point.
             const T fn0 = Ae * p0;
 
-            // Since the normal always points into M, regardless of which body
-            // is soft, we must take into account the change of sign when body
-            // N is soft and M is rigid.
-            const T sign = M_is_soft ? 1.0 : -1.0;
-
-            // In order to provide some intuition, and though not entirely
-            // complete, here we document the first order idea that leads to
-            // the discrete hydroelastic approximation used below. In
-            // hydroelastics, each quadrature point contributes to the total
-            // "elastic" force along the normal direction as:
-            //   f₀ₚ = ωₚ Aₑ pₚ
-            // where subindex p denotes a quantity evaluated at quadrature
-            // point P and subindex e identifies the e-th contact surface
-            // element in which the quadrature is being evaluated.
-            // Notice f₀ only includes the "elastic" contribution. Dissipation
-            // is dealt with by a separate multiplicative factor. Given the
-            // local stiffness for the normal forces contribution, our
-            // discrete TAMSI solver implicitly handles the dissipative Hunt &
-            // Crossley forces.
-            // In point contact, stiffness is related to changes in the normal
-            // force with changes in the penetration distance. In that spirit,
-            // the approximation used here is to define the discrete
-            // hydroelastics stiffness as the directional derivative of the
-            // scalar force f₀ₚ along the normal direction n̂:
-            //   k := ∂f₀ₚ/∂n̂ ≈ ωₚ⋅Aₑ⋅∇pₚ⋅n̂ₚ
-            // that is, the variation of the normal force experiences if the
-            // quadrature point is pushed inwards in the direction of the
-            // normal. Notice that this expression approximates the element
-            // area and normal as constant. Keeping normals and Jacobians
-            // is a very common approximation in first order methods. Keeping
-            // the area constant here is a higher order approximation for
-            // inner triangles given that shrinkage of a triangle is related
-            // the growth of a neighboring triangle (i.e. the contact surface
-            // does not stretch nor shrink). For triangles close to the
-            // boundary of the contact surface, this is only a first order
-            // approximation.
-            const T k = sign * Ae * grad_pres_W.dot(nhat_W);
+            // Effective compliance in the normal direction for the given
+            // discrete patch, refer to [Masterjohn et al., 2021] for details.
+            // [Masterjohn, 2021] Masterjohn J., Guoy D., Shepherd J. and
+            // Castro A., 2021. Discrete Approximation of Pressure Field
+            // Contact Patches. Available at https://arxiv.org/abs/2110.04157.
+            const T k = Ae * g;
 
             // N.B. The normal is guaranteed to point into M. However, when M
             // is soft, the gradient is not guaranteed to be in the direction
@@ -2390,37 +2373,32 @@ void MultibodyPlant<T>::CalcJointLockingIndices(
   auto& indices = *unlocked_velocity_indices;
   indices.resize(num_velocities());
 
-  int velocity_cursor = 0;
   int unlocked_cursor = 0;
   for (JointIndex joint_index(0); joint_index < num_joints(); ++joint_index) {
     const Joint<T>& joint = get_joint(joint_index);
-    if (joint.is_locked(context)) {
-      velocity_cursor += joint.num_velocities();
-    } else {
+    if (!joint.is_locked(context)) {
       for (int k = 0; k < joint.num_velocities(); ++k) {
-        indices[unlocked_cursor++] = velocity_cursor++;
+        indices[unlocked_cursor++] = joint.velocity_start() + k;
       }
     }
   }
 
   for (BodyIndex body_index(1); body_index < num_bodies(); ++body_index) {
     const Body<T>& body = get_body(body_index);
-    if (!body.is_floating()) {
-      continue;
-    }
-    if (body.is_locked(context)) {
-      velocity_cursor += 6;
-    } else {
+    if (body.is_floating() && !body.is_locked(context)) {
       for (int k = 0; k < 6; ++k) {
-        indices[unlocked_cursor++] = velocity_cursor++;
+        indices[unlocked_cursor++] =
+            body.floating_velocities_start() - num_positions() + k;
       }
     }
   }
-  DRAKE_ASSERT(velocity_cursor == num_velocities());
   DRAKE_ASSERT(unlocked_cursor <= num_velocities());
 
   // Use size to indicate exactly how many velocities are unlocked.
   indices.resize(unlocked_cursor);
+  // Sort the unlocked indices to keep the original DOF ordering established by
+  // the plant stable.
+  std::sort(indices.begin(), indices.end());
   DemandIndicesValid(indices, num_velocities());
   DRAKE_DEMAND(static_cast<int>(indices.size()) == unlocked_cursor);
 }
@@ -3296,20 +3274,10 @@ MultibodyPlant<T>::get_reaction_forces_output_port() const {
   return this->get_output_port(reaction_forces_port_);
 }
 
-namespace {
-// A dummy, placeholder type.
-struct SymbolicGeometryValue {};
-// An alias for QueryObject<T>, except when T = Expression.
-template <typename T>
-using ModelQueryObject = typename std::conditional_t<
-    std::is_same_v<T, symbolic::Expression>,
-    SymbolicGeometryValue, geometry::QueryObject<T>>;
-}  // namespace
-
 template <typename T>
 void MultibodyPlant<T>::DeclareSceneGraphPorts() {
   geometry_query_port_ = this->DeclareAbstractInputPort(
-      "geometry_query", Value<ModelQueryObject<T>>{}).get_index();
+      "geometry_query", Value<geometry::QueryObject<T>>{}).get_index();
   geometry_pose_port_ = this->DeclareAbstractOutputPort(
       "geometry_pose", &MultibodyPlant<T>::CalcFramePoseOutput,
       {this->configuration_ticket()}).get_index();
@@ -3624,7 +3592,7 @@ AddMultibodyPlantSceneGraphResult<T> AddMultibodyPlantSceneGraph(
                                      std::move(scene_graph));
 }
 
-DRAKE_DEFINE_FUNCTION_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_NONSYMBOLIC_SCALARS((
+DRAKE_DEFINE_FUNCTION_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_SCALARS((
     /* Use static_cast to disambiguate the two different overloads. */
     static_cast<AddMultibodyPlantSceneGraphResult<T>(*)(
         systems::DiagramBuilder<T>*, double,

@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 
+#include "drake/common/yaml/yaml_io_options.h"
 #include "drake/common/yaml/yaml_read_archive.h"
 #include "drake/common/yaml/yaml_write_archive.h"
 
@@ -28,14 +29,14 @@ examples.
 
 @returns the loaded user data.
 
-@tparam Serializable must implement a
-  @ref serialize_tips "Serialize" function and be default constructible. */
+@tparam Serializable must implement a @ref implementing_serialize "Serialize"
+  function and be default constructible. */
 template <typename Serializable>
 static Serializable LoadYamlFile(
     const std::string& filename,
     const std::optional<std::string>& child_name = std::nullopt,
     const std::optional<Serializable>& defaults = std::nullopt,
-    const std::optional<YamlReadArchive::Options>& options = std::nullopt);
+    const std::optional<LoadYamlOptions>& options = std::nullopt);
 
 /** Loads data from a YAML-formatted string.
 
@@ -55,14 +56,14 @@ examples.
 
 @returns the loaded user data.
 
-@tparam Serializable must implement a
-  @ref serialize_tips "Serialize" function and be default constructible. */
+@tparam Serializable must implement a @ref implementing_serialize "Serialize"
+  function and be default constructible. */
 template <typename Serializable>
 static Serializable LoadYamlString(
     const std::string& data,
     const std::optional<std::string>& child_name = std::nullopt,
     const std::optional<Serializable>& defaults = std::nullopt,
-    const std::optional<YamlReadArchive::Options>& options = std::nullopt);
+    const std::optional<LoadYamlOptions>& options = std::nullopt);
 
 /** Saves data as a YAML-formatted file.
 
@@ -81,8 +82,8 @@ only one entry, whose key is `child_name` and value is the serialized `data`.
 @param defaults (optional) If provided, then only data that differs from
   the given defaults will be serialized.
 
-@tparam Serializable must implement a
-  @ref serialize_tips "Serialize" function. */
+@tparam Serializable must implement a @ref implementing_serialize "Serialize"
+  function. */
 template <typename Serializable>
 void SaveYamlFile(
     const std::string& filename,
@@ -108,8 +109,8 @@ only one entry, whose key is `child_name` and value is the serialized `data`.
 
 @returns the YAML document as a string.
 
-@tparam Serializable must implement a
-  @ref serialize_tips "Serialize" function. */
+@tparam Serializable must implement a @ref implementing_serialize "Serialize"
+  function. */
 template <typename Serializable>
 std::string SaveYamlString(
     const Serializable& data,
@@ -124,11 +125,10 @@ template <typename Serializable>
 static Serializable LoadNode(
     internal::Node node,
     const std::optional<Serializable>& defaults,
-    const std::optional<YamlReadArchive::Options>& options) {
+    const std::optional<LoadYamlOptions>& options) {
   // Reify our optional arguments.
   Serializable result = defaults.value_or(Serializable{});
-  YamlReadArchive::Options new_options = options.value_or(
-      YamlReadArchive::Options{});
+  LoadYamlOptions new_options = options.value_or(LoadYamlOptions{});
   if (defaults.has_value() && !options.has_value()) {
     // Do not overwrite existing values.
     new_options.allow_cpp_with_no_yaml = true;
@@ -148,7 +148,7 @@ static Serializable LoadYamlFile(
     const std::string& filename,
     const std::optional<std::string>& child_name,
     const std::optional<Serializable>& defaults,
-    const std::optional<YamlReadArchive::Options>& options) {
+    const std::optional<LoadYamlOptions>& options) {
   internal::Node node = YamlReadArchive::LoadFileAsNode(filename, child_name);
   return internal::LoadNode(std::move(node), defaults, options);
 }
@@ -160,7 +160,7 @@ static Serializable LoadYamlString(
     const std::string& data,
     const std::optional<std::string>& child_name,
     const std::optional<Serializable>& defaults,
-    const std::optional<YamlReadArchive::Options>& options) {
+    const std::optional<LoadYamlOptions>& options) {
   internal::Node node = YamlReadArchive::LoadStringAsNode(data, child_name);
   return internal::LoadNode(std::move(node), defaults, options);
 }

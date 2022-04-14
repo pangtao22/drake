@@ -2,6 +2,7 @@
 
 load("@drake//tools/workspace:mirrors.bzl", "DEFAULT_MIRRORS")
 load("@drake//tools/workspace:os.bzl", "os_repository")
+load("@drake//tools/workspace/abseil_cpp_internal:repository.bzl", "abseil_cpp_internal_repository")  # noqa
 load("@drake//tools/workspace/bazel_skylib:repository.bzl", "bazel_skylib_repository")  # noqa
 load("@drake//tools/workspace/blas:repository.bzl", "blas_repository")
 load("@drake//tools/workspace/boost:repository.bzl", "boost_repository")
@@ -18,6 +19,7 @@ load("@drake//tools/workspace/conex:repository.bzl", "conex_repository")
 load("@drake//tools/workspace/csdp:repository.bzl", "csdp_repository")
 load("@drake//tools/workspace/double_conversion:repository.bzl", "double_conversion_repository")  # noqa
 load("@drake//tools/workspace/doxygen:repository.bzl", "doxygen_repository")
+load("@drake//tools/workspace/dm_control:repository.bzl", "dm_control_repository")  # noqa
 load("@drake//tools/workspace/drake_visualizer:repository.bzl", "drake_visualizer_repository")  # noqa
 load("@drake//tools/workspace/dreal:repository.bzl", "dreal_repository")
 load("@drake//tools/workspace/eigen:repository.bzl", "eigen_repository")
@@ -43,6 +45,7 @@ load("@drake//tools/workspace/json:repository.bzl", "json_repository")
 load("@drake//tools/workspace/lapack:repository.bzl", "lapack_repository")
 load("@drake//tools/workspace/lcm:repository.bzl", "lcm_repository")
 load("@drake//tools/workspace/libblas:repository.bzl", "libblas_repository")
+load("@drake//tools/workspace/libcmaes:repository.bzl", "libcmaes_repository")
 load("@drake//tools/workspace/libcurl:repository.bzl", "libcurl_repository")
 load("@drake//tools/workspace/libjpeg:repository.bzl", "libjpeg_repository")
 load("@drake//tools/workspace/liblapack:repository.bzl", "liblapack_repository")  # noqa
@@ -92,6 +95,7 @@ load("@drake//tools/workspace/vtk:repository.bzl", "vtk_repository")
 load("@drake//tools/workspace/x11:repository.bzl", "x11_repository")
 load("@drake//tools/workspace/xmlrunner_py:repository.bzl", "xmlrunner_py_repository")  # noqa
 load("@drake//tools/workspace/yaml_cpp:repository.bzl", "yaml_cpp_repository")
+load("@drake//tools/workspace/yaml_cpp_internal:repository.bzl", "yaml_cpp_internal_repository")  # noqa
 load("@drake//tools/workspace/zlib:repository.bzl", "zlib_repository")
 
 def add_default_repositories(excludes = [], mirrors = DEFAULT_MIRRORS):
@@ -104,6 +108,8 @@ def add_default_repositories(excludes = [], mirrors = DEFAULT_MIRRORS):
           be useful if a WORKSPACE file has already supplied its own external
           of a given name.
     """
+    if "abseil_cpp_internal" not in excludes:
+        abseil_cpp_internal_repository(name = "abseil_cpp_internal", mirrors = mirrors)  # noqa
     if "bazel_skylib" not in excludes:
         bazel_skylib_repository(name = "bazel_skylib", mirrors = mirrors)
     if "blas" not in excludes:
@@ -136,6 +142,8 @@ def add_default_repositories(excludes = [], mirrors = DEFAULT_MIRRORS):
         double_conversion_repository(name = "double_conversion")
     if "doxygen" not in excludes:
         doxygen_repository(name = "doxygen", mirrors = mirrors)
+    if "dm_control" not in excludes:
+        dm_control_repository(name = "dm_control", mirrors = mirrors)
     if "drake_detected_os" not in excludes:
         os_repository(name = "drake_detected_os")
     if "drake_visualizer" not in excludes:
@@ -188,6 +196,8 @@ def add_default_repositories(excludes = [], mirrors = DEFAULT_MIRRORS):
         lcm_repository(name = "lcm", mirrors = mirrors)
     if "libblas" not in excludes:
         libblas_repository(name = "libblas")
+    if "libcmaes" not in excludes:
+        libcmaes_repository(name = "libcmaes", mirrors = mirrors)
     if "libcurl" not in excludes:
         libcurl_repository(name = "libcurl")
     if "libjpeg" not in excludes:
@@ -286,6 +296,8 @@ def add_default_repositories(excludes = [], mirrors = DEFAULT_MIRRORS):
         xmlrunner_py_repository(name = "xmlrunner_py", mirrors = mirrors)
     if "yaml_cpp" not in excludes:
         yaml_cpp_repository(name = "yaml_cpp")
+    if "yaml_cpp_internal" not in excludes:
+        yaml_cpp_internal_repository(name = "yaml_cpp_internal", mirrors = mirrors)  # noqa
     if "zlib" not in excludes:
         zlib_repository(name = "zlib")
 
@@ -304,7 +316,8 @@ def add_default_toolchains(excludes = []):
         # --extra_toolchains=//tools/py_toolchain:linux_dbg_toolchain
         native.register_toolchains(
             "@drake//tools/py_toolchain:linux_toolchain",
-            "@drake//tools/py_toolchain:macos_toolchain",
+            "@drake//tools/py_toolchain:macos_i386_toolchain",
+            "@drake//tools/py_toolchain:macos_arm64_toolchain",
         )
 
 def add_default_workspace(

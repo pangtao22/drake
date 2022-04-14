@@ -420,47 +420,47 @@ GTEST_TEST(BoxTest, Cube) {
 
 // Confirms that shape parameters are validated.
 GTEST_TEST(ShapeTest, NumericalValidation) {
-  DRAKE_EXPECT_THROWS_MESSAGE(Sphere(-0.5), std::logic_error,
+  DRAKE_EXPECT_THROWS_MESSAGE(Sphere(-0.5),
                               "Sphere radius should be >= 0.+");
   DRAKE_EXPECT_NO_THROW(Sphere(0));  // Special case for 0 radius.
 
   DRAKE_EXPECT_THROWS_MESSAGE(
-      Cylinder(0, 1), std::logic_error, "Cylinder radius and length should "
+      Cylinder(0, 1), "Cylinder radius and length should "
       "both be > 0.+");
   DRAKE_EXPECT_THROWS_MESSAGE(
-      Cylinder(0.5, -1), std::logic_error, "Cylinder radius and length should "
+      Cylinder(0.5, -1), "Cylinder radius and length should "
       "both be > 0.+");
 
   DRAKE_EXPECT_THROWS_MESSAGE(
-      Box(2, 0, 2), std::logic_error, "Box width, depth, and height should "
+      Box(2, 0, 2), "Box width, depth, and height should "
       "all be > 0.+");
   DRAKE_EXPECT_THROWS_MESSAGE(
-      Box(3, 1, -1), std::logic_error, "Box width, depth, and height should "
+      Box(3, 1, -1), "Box width, depth, and height should "
       "all be > 0.+");
-  DRAKE_EXPECT_THROWS_MESSAGE(Box::MakeCube(0), std::logic_error,
+  DRAKE_EXPECT_THROWS_MESSAGE(Box::MakeCube(0),
                               "Box width, depth, and height should "
                               "all be > 0.+");
 
-  DRAKE_EXPECT_THROWS_MESSAGE(Capsule(0, 1), std::logic_error,
+  DRAKE_EXPECT_THROWS_MESSAGE(Capsule(0, 1),
                               "Capsule radius and length should both be > 0.+");
-  DRAKE_EXPECT_THROWS_MESSAGE(Capsule(0.5, -1), std::logic_error,
+  DRAKE_EXPECT_THROWS_MESSAGE(Capsule(0.5, -1),
                               "Capsule radius and length should both be > 0.+");
 
-  DRAKE_EXPECT_THROWS_MESSAGE(Ellipsoid(0, 1, 1), std::logic_error,
+  DRAKE_EXPECT_THROWS_MESSAGE(Ellipsoid(0, 1, 1),
                               "Ellipsoid lengths of principal semi-axes a, b, "
                               "and c should all be > 0.+");
-  DRAKE_EXPECT_THROWS_MESSAGE(Ellipsoid(1, 0, 1), std::logic_error,
+  DRAKE_EXPECT_THROWS_MESSAGE(Ellipsoid(1, 0, 1),
                               "Ellipsoid lengths of principal semi-axes a, b, "
                               "and c should all be > 0.+");
-  DRAKE_EXPECT_THROWS_MESSAGE(Ellipsoid(1, 1, 0), std::logic_error,
+  DRAKE_EXPECT_THROWS_MESSAGE(Ellipsoid(1, 1, 0),
                               "Ellipsoid lengths of principal semi-axes a, b, "
                               "and c should all be > 0.+");
 
-  DRAKE_EXPECT_THROWS_MESSAGE(Mesh("foo", 1e-9), std::logic_error,
+  DRAKE_EXPECT_THROWS_MESSAGE(Mesh("foo", 1e-9),
                               "Mesh .scale. cannot be < 1e-8.");
   DRAKE_EXPECT_NO_THROW(Mesh("foo", -1));  // Special case for negative scale.
 
-  DRAKE_EXPECT_THROWS_MESSAGE(Convex("bar", 0), std::logic_error,
+  DRAKE_EXPECT_THROWS_MESSAGE(Convex("bar", 0),
                               "Convex .scale. cannot be < 1e-8.");
   DRAKE_EXPECT_NO_THROW(Convex("foo", -1));  // Special case for negative scale.
 }
@@ -470,28 +470,21 @@ class DefaultReifierTest : public ShapeReifier, public ::testing::Test {};
 // Tests default implementation of virtual functions for each shape.
 TEST_F(DefaultReifierTest, UnsupportedGeometry) {
   DRAKE_EXPECT_THROWS_MESSAGE(this->ImplementGeometry(Sphere(0.5), nullptr),
-                              std::runtime_error,
                               "This class (.+) does not support Sphere.");
   DRAKE_EXPECT_THROWS_MESSAGE(this->ImplementGeometry(Cylinder(1, 2), nullptr),
-                              std::runtime_error,
                               "This class (.+) does not support Cylinder.");
   DRAKE_EXPECT_THROWS_MESSAGE(this->ImplementGeometry(HalfSpace(), nullptr),
-                              std::runtime_error,
                               "This class (.+) does not support HalfSpace.");
   DRAKE_EXPECT_THROWS_MESSAGE(this->ImplementGeometry(Box(1, 1, 1), nullptr),
-                              std::runtime_error,
                               "This class (.+) does not support Box.");
   DRAKE_EXPECT_THROWS_MESSAGE(this->ImplementGeometry(Capsule(1, 2), nullptr),
-                              std::runtime_error,
                               "This class (.+) does not support Capsule.");
   DRAKE_EXPECT_THROWS_MESSAGE(this->ImplementGeometry(Ellipsoid(1, 1, 1),
-                              nullptr), std::runtime_error,
+                              nullptr),
                               "This class (.+) does not support Ellipsoid.");
   DRAKE_EXPECT_THROWS_MESSAGE(this->ImplementGeometry(Mesh("foo", 1), nullptr),
-                              std::runtime_error,
                               "This class (.+) does not support Mesh.");
   DRAKE_EXPECT_THROWS_MESSAGE(this->ImplementGeometry(Convex("a", 1), nullptr),
-                              std::runtime_error,
                               "This class (.+) does not support Convex.");
 }
 
@@ -542,6 +535,24 @@ GTEST_TEST(ShapeName, Streaming) {
   ss << name;
   EXPECT_EQ(name.name(), "Sphere");
   EXPECT_EQ(ss.str(), name.name());
+}
+
+GTEST_TEST(ShapeTest, Volume) {
+  EXPECT_NEAR(CalcVolume(Sphere(3)), 36.0 * M_PI, 1e-13);
+  EXPECT_NEAR(CalcVolume(Cylinder(1.3, 2.1)), M_PI * 1.3 * 1.3 * 2.1, 1e-14);
+  EXPECT_NEAR(CalcVolume(Box(1, 2, 3)), 6.0, 1e-14);
+  EXPECT_NEAR(CalcVolume(Capsule(1.23, 2.4)),
+              CalcVolume(Cylinder(1.23, 2.4)) + CalcVolume(Sphere(1.23)),
+              1e-14);
+  EXPECT_NEAR(CalcVolume(Ellipsoid(1, 2, 3)), 8.0 * M_PI, 1e-14);
+  EXPECT_EQ(CalcVolume(HalfSpace()), std::numeric_limits<double>::infinity());
+
+  DRAKE_EXPECT_THROWS_MESSAGE(CalcVolume(Mesh("filepath", 1.0)),
+                              ".*does not support.*");
+  DRAKE_EXPECT_THROWS_MESSAGE(CalcVolume(Convex("filepath", 1.0)),
+                              ".*does not support.*");
+
+  EXPECT_NEAR(CalcVolume(MeshcatCone(4, 2, 3)), 8.0 * M_PI, 1e-14);
 }
 
 }  // namespace

@@ -8,6 +8,7 @@
 
 #include "drake/common/default_scalars.h"
 #include "drake/geometry/geometry_roles.h"
+#include "drake/geometry/proximity_properties.h"
 
 namespace drake {
 namespace multibody {
@@ -31,11 +32,23 @@ MaterialProperties GetMaterials(GeometryId id,
   MaterialProperties material;
   if (const ProximityProperties* properties =
           inspector.GetProximityProperties(id)) {
-    material.hydroelastic_modulus = properties->GetPropertyOrDefault(
-        geometry::internal::kHydroGroup, geometry::internal::kElastic, kInf);
+    // If the geometry is defined to be rigid, force an elastic modulus of
+    // infinity.
+    if (properties->GetPropertyOrDefault(
+            geometry::internal::kHydroGroup,
+            geometry::internal::kComplianceType,
+            geometry::internal::HydroelasticType::kUndefined) ==
+        geometry::internal::HydroelasticType::kRigid) {
+      material.hydroelastic_modulus = kInf;
+    } else {
+      material.hydroelastic_modulus = properties->GetPropertyOrDefault(
+          geometry::internal::kHydroGroup, geometry::internal::kElastic, kInf);
+    }
+
     material.dissipation = properties->GetPropertyOrDefault(
         geometry::internal::kMaterialGroup, geometry::internal::kHcDissipation,
         0.0);
+
     DRAKE_DEMAND(material.hydroelastic_modulus > 0);
     DRAKE_DEMAND(material.dissipation >= 0);
   } else {

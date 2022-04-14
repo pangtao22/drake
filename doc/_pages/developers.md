@@ -165,6 +165,7 @@ make the review faster.
 * @rpoyner-tri (Toyota Research Institute)
 * @sammy-tri (Toyota Research Institute)
 * @sherm1 (Toyota Research Institute)
+* @xuchenhan-tri (Toyota Research Institute)
 * @RussTedrake (MIT / Toyota Research Institute)
 
 **Merge.** Once the PR is fully reviewed and passes CI, the assigned platform
@@ -219,8 +220,12 @@ can look into the question.
 * [GitHub PR Interaction with Jenkins](/jenkins.html)
 * [Build Cop](/buildcop.html)
 
-# Documentation Instructions
+# Programming Tools
 
+* [Profiling Tools](/profiling.html)
+* [Coverage Tools](/bazel.html#kcov)
+
+# Documentation Instructions
 
 * [Documentation Generation Instructions](/documentation_instructions.html)
 * [Doxygen Instructions](/doxygen_instructions.html)

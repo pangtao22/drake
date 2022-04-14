@@ -28,6 +28,7 @@
 #include "drake/common/test_utilities/symbolic_test_util.h"
 #include "drake/math/matrix_util.h"
 #include "drake/solvers/constraint.h"
+#include "drake/solvers/decision_variable.h"
 #include "drake/solvers/program_attribute.h"
 #include "drake/solvers/snopt_solver.h"
 #include "drake/solvers/solve.h"
@@ -82,6 +83,7 @@ namespace test {
 
 namespace {
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+constexpr double kInf = std::numeric_limits<double>::infinity();
 }  // namespace
 
 struct Movable {
@@ -427,6 +429,7 @@ GTEST_TEST(TestAddDecisionVariables, AddVariable2) {
   const Variable x2("x2", Variable::Type::BINARY);
   prog.AddDecisionVariables(VectorDecisionVariable<3>(x0, x1, x2));
   EXPECT_EQ(prog.num_vars(), 6);
+  EXPECT_EQ(prog.num_indeterminates(), 0);
   EXPECT_EQ(prog.FindDecisionVariableIndex(x0), 3);
   EXPECT_EQ(prog.FindDecisionVariableIndex(x1), 4);
   EXPECT_EQ(prog.FindDecisionVariableIndex(x2), 5);
@@ -470,12 +473,35 @@ GTEST_TEST(TestAddDecisionVariables, AddVariable3) {
     const symbolic::Variable unsupported_var("b", unsupported_type);
     DRAKE_EXPECT_THROWS_MESSAGE(
         prog.AddDecisionVariables(VectorDecisionVariable<1>(unsupported_var)),
-        std::runtime_error,
         "MathematicalProgram does not support .* variables.");
   }
 }
 
-GTEST_TEST(TestAddIndeterminates, TestAddIndeterminates1) {
+GTEST_TEST(TestAddDecisionVariables, TestMatrixInput) {
+  // AddDecisionVariables with a matrix of variables instead of a vector.
+  Eigen::Matrix<symbolic::Variable, 2, 3> vars;
+  for (int i = 0; i < vars.rows(); ++i) {
+    for (int j = 0; j < vars.cols(); ++j) {
+      vars(i, j) = symbolic::Variable(fmt::format("x({},{})", i, j));
+    }
+  }
+  MathematicalProgram prog;
+  prog.NewContinuousVariables<1>();
+  const int num_existing_decision_vars = prog.num_vars();
+  prog.AddDecisionVariables(vars);
+  EXPECT_EQ(prog.num_vars(), 6 + num_existing_decision_vars);
+  EXPECT_EQ(prog.GetInitialGuess(vars).rows(), 2);
+  EXPECT_EQ(prog.GetInitialGuess(vars).cols(), 3);
+  EXPECT_TRUE(prog.GetInitialGuess(vars).array().isNaN().all());
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      // Make sure that the variable has been registered in prog.
+      EXPECT_NO_THROW(prog.FindDecisionVariableIndex(vars(i, j)));
+    }
+  }
+}
+
+GTEST_TEST(NewIndeterminates, DynamicSizeMatrix) {
   // Adds a dynamic-sized matrix of Indeterminates.
   MathematicalProgram prog;
   auto X = prog.NewIndeterminates(2, 3, "X");
@@ -487,7 +513,7 @@ GTEST_TEST(TestAddIndeterminates, TestAddIndeterminates1) {
                            "X(0,0) X(0,1) X(0,2)\nX(1,0) X(1,1) X(1,2)\n");
 }
 
-GTEST_TEST(TestAddIndeterminates, TestAddIndeterminates2) {
+GTEST_TEST(NewIndeterminates, StaticSizeMatrix) {
   // Adds a static-sized matrix of Indeterminates.
   MathematicalProgram prog;
   auto X = prog.NewIndeterminates<2, 3>("X");
@@ -497,7 +523,7 @@ GTEST_TEST(TestAddIndeterminates, TestAddIndeterminates2) {
                            "X(0,0) X(0,1) X(0,2)\nX(1,0) X(1,1) X(1,2)\n");
 }
 
-GTEST_TEST(TestAddIndeterminates, TestAddIndeterminates3) {
+GTEST_TEST(NewIndeterminates, DynamicSizeVector) {
   // Adds a dynamic-sized vector of Indeterminates.
   MathematicalProgram prog;
   auto x = prog.NewIndeterminates(4, "x");
@@ -507,7 +533,7 @@ GTEST_TEST(TestAddIndeterminates, TestAddIndeterminates3) {
   CheckAddedIndeterminates(prog, x, "x(0)\nx(1)\nx(2)\nx(3)\n");
 }
 
-GTEST_TEST(TestAddIndeterminates, TestAddIndeterminates4) {
+GTEST_TEST(NewIndeterminates, StaticSizeVector) {
   // Adds a static-sized vector of Indeterminate variables.
   MathematicalProgram prog;
   auto x = prog.NewIndeterminates<4>("x");
@@ -580,6 +606,26 @@ GTEST_TEST(TestAddIndeterminates, AddIndeterminates3) {
                std::runtime_error);
 }
 
+GTEST_TEST(TestAddIndeterminates, MatrixInput) {
+  Eigen::Matrix<symbolic::Variable, 2, 3, Eigen::RowMajor> vars;
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      vars(i, j) = symbolic::Variable(fmt::format("x({},{})", i, j));
+    }
+  }
+  MathematicalProgram prog;
+  prog.NewIndeterminates<2>();
+  const int num_existing_indeterminates = prog.num_indeterminates();
+  prog.AddIndeterminates(vars);
+  EXPECT_EQ(prog.num_indeterminates(), num_existing_indeterminates + 6);
+  EXPECT_EQ(prog.num_vars(), 0);
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      EXPECT_NO_THROW(prog.FindIndeterminateIndex(vars(i, j)));
+    }
+  }
+}
+
 namespace {
 
 // Overloads to permit `ExpectBadVar` call `AddItem` for both `Cost` and
@@ -602,7 +648,9 @@ void ExpectBadVar(MathematicalProgram* prog, int num_var, Args&&... args) {
   // Use minimal call site (directly on adding Binding<C>).
   // TODO(eric.cousineau): Check if there is a way to parse the error text to
   // ensure that we are capturing the correct error.
-  EXPECT_THROW(AddItem(prog, CreateBinding(c, x)), std::runtime_error);
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      AddItem(prog, CreateBinding(c, x)),
+      ".*is not a decision variable.*");
 }
 
 }  // namespace
@@ -749,6 +797,49 @@ GTEST_TEST(TestMathematicalProgram, BoundingBoxTest2) {
       CompareMatrices(constraint5->upper_bound(), constraint6->upper_bound()));
 }
 
+GTEST_TEST(TestMathematicalProgram, BoundingBoxTest3) {
+  // The bounds and variables are matrices.
+  MathematicalProgram prog;
+  auto X = prog.NewContinuousVariables(3, 2, "X");
+  Eigen::MatrixXd X_lo(3, 2);
+  X_lo << 1, 2, 3, 4, 5, 6;
+  // Use a row-major matrix to make sure that our code works for different types
+  // of matrix.
+  Eigen::Matrix<double, 3, 2, Eigen::RowMajor> X_up =
+      (X_lo.array() + 1).matrix();
+  auto cnstr = prog.AddBoundingBoxConstraint(X_lo, X_up, X);
+  EXPECT_EQ(cnstr.evaluator()->num_constraints(), 6);
+  std::unordered_map<symbolic::Variable, std::pair<double, double>> X_bounds;
+  for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 2; j++) {
+      X_bounds.emplace(X(i, j), std::make_pair(X_lo(i, j), X_up(i, j)));
+    }
+  }
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(cnstr.evaluator()->lower_bound()(i),
+              X_bounds.at(cnstr.variables()(i)).first);
+    EXPECT_EQ(cnstr.evaluator()->upper_bound()(i),
+              X_bounds.at(cnstr.variables()(i)).second);
+  }
+
+  // Now add constraint on X.topRows<2>(). It doesn't occupy contiguous memory.
+  auto cnstr2 = prog.AddBoundingBoxConstraint(
+      X_lo.topRows<2>(), X_up.topRows<2>(), X.topRows<2>());
+  EXPECT_EQ(cnstr2.variables().rows(), 4);
+  X_bounds.clear();
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < X.cols(); j++) {
+      X_bounds.emplace(X(i, j), std::make_pair(X_lo(i, j), X_up(i, j)));
+    }
+  }
+  for (int i = 0; i < cnstr2.variables().rows(); ++i) {
+    const auto it = X_bounds.find(cnstr2.variables()(i));
+    EXPECT_NE(it, X_bounds.end());
+    EXPECT_EQ(it->second.first, cnstr2.evaluator()->lower_bound()(i));
+    EXPECT_EQ(it->second.second, cnstr2.evaluator()->upper_bound()(i));
+  }
+}
+
 // Verifies if the added cost evaluates the same as the original cost.
 // This function is supposed to test these costs added as a derived class
 // from Constraint.
@@ -841,6 +932,70 @@ GTEST_TEST(TestMathematicalProgram, AddCostTest) {
   ++num_generic_costs;
   VerifyAddedCost2(prog, generic_trivial_cost2, returned_cost4,
                    Eigen::Vector2d(1, 2), num_generic_costs);
+}
+
+class EmptyConstraint final : public Constraint {
+ public:
+  EmptyConstraint()
+      : Constraint(0, 2, Eigen::VectorXd(0), Eigen::VectorXd(0),
+                   "empty_constraint") {}
+
+  ~EmptyConstraint() {}
+
+ private:
+  void DoEval(const Eigen::Ref<const Eigen::VectorXd>&, VectorXd*) const {}
+  void DoEval(const Eigen::Ref<const AutoDiffVecXd>&, AutoDiffVecXd*) const {}
+  void DoEval(const Eigen::Ref<const VectorX<symbolic::Variable>>&,
+              VectorX<symbolic::Expression>*) const {}
+};
+
+GTEST_TEST(TestMathematicalProgram, AddEmptyConstraint) {
+  // MathematicalProgram::AddFooConstraint with empty constraint.
+  solvers::MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables<2>();
+  auto binding1 = prog.AddConstraint(std::make_shared<EmptyConstraint>(), x);
+  EXPECT_TRUE(prog.GetAllConstraints().empty());
+  EXPECT_EQ(binding1.evaluator()->get_description(), "empty_constraint");
+
+  auto binding2 = prog.AddConstraint(
+      std::make_shared<LinearConstraint>(
+          Eigen::MatrixXd(0, 2), Eigen::VectorXd(0), Eigen::VectorXd(0)),
+      x);
+  EXPECT_TRUE(prog.GetAllConstraints().empty());
+  EXPECT_EQ(binding2.evaluator()->num_constraints(), 0);
+
+  auto binding3 =
+      prog.AddConstraint(std::make_shared<LinearEqualityConstraint>(
+                             Eigen::MatrixXd(0, 2), Eigen::VectorXd(0)),
+                         x);
+  EXPECT_TRUE(prog.GetAllConstraints().empty());
+  EXPECT_EQ(binding3.evaluator()->num_constraints(), 0);
+
+  auto binding4 =
+      prog.AddConstraint(std::make_shared<BoundingBoxConstraint>(
+                             Eigen::VectorXd(0), Eigen::VectorXd(0)),
+                         VectorX<symbolic::Variable>(0));
+  EXPECT_TRUE(prog.GetAllConstraints().empty());
+  EXPECT_EQ(binding4.evaluator()->num_constraints(), 0);
+
+  auto binding5 =
+      prog.AddConstraint(std::make_shared<LinearComplementarityConstraint>(
+                             Eigen::MatrixXd(0, 0), Eigen::VectorXd(0)),
+                         VectorX<symbolic::Variable>(0));
+  EXPECT_TRUE(prog.GetAllConstraints().empty());
+
+  auto binding6 = prog.AddConstraint(internal::CreateBinding(
+      std::make_shared<PositiveSemidefiniteConstraint>(0),
+      VectorXDecisionVariable(0)));
+  EXPECT_TRUE(prog.GetAllConstraints().empty());
+
+  auto binding7 =
+      prog.AddConstraint(std::make_shared<LinearMatrixInequalityConstraint>(
+                             std::vector<Eigen::Ref<const Eigen::MatrixXd>>(
+                                 {Eigen::MatrixXd(0, 0), Eigen::MatrixXd(0, 0),
+                                  Eigen::MatrixXd(0, 0)})),
+                         x);
+  EXPECT_TRUE(prog.GetAllConstraints().empty());
 }
 
 void CheckAddedSymbolicLinearCostUserFun(const MathematicalProgram& prog,
@@ -2243,6 +2398,35 @@ GTEST_TEST(TestMathematicalProgram, AddSymbolicRotatedLorentzConeConstraint5) {
       symbolic::Polynomial(z.tail(z.rows() - 2).squaredNorm()), tol));
 }
 
+GTEST_TEST(TestMathematicalProgram,
+           TestAddQuadraticAsRotatedLorentzConeConstraint) {
+  solvers::MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables<2>();
+
+  auto check = [&prog, &x](const Eigen::Matrix2d& Q, const Eigen::Vector2d& b,
+                           double c) {
+    auto dut = prog.AddQuadraticAsRotatedLorentzConeConstraint(Q, b, c, x);
+    auto z = dut.evaluator()->A() * x + dut.evaluator()->b();
+    double tol = 1E-10;
+    // Make sure that the rotated Lorentz cone constraint is the same as the
+    // quadratic constraint expression.
+    EXPECT_TRUE(symbolic::test::PolynomialEqual(
+        symbolic::Polynomial(z.tail(z.rows() - 2).squaredNorm() - z(0) * z(1)),
+        symbolic::Polynomial(0.5 * x.cast<symbolic::Expression>().dot(Q * x) +
+                             b.dot(x) + c),
+        tol));
+    EXPECT_EQ(prog.rotated_lorentz_cone_constraints().back().evaluator().get(),
+              dut.evaluator().get());
+  };
+  Eigen::Matrix2d Q;
+  Q << 2, 1, 3, 2;
+  Eigen::Vector2d b(2, 3);
+  double c = -0.5;
+  check(Q, b, c);
+  Q << 2, 2, 2, 6;
+  check(Q, b, c);
+}
+
 namespace {
 template <typename Derived>
 typename std::enable_if_t<is_same_v<typename Derived::Scalar, Expression>>
@@ -2732,8 +2916,12 @@ GTEST_TEST(TestMathematicalProgram, TestAddCostThrowError) {
 
   // Add a cost containing variable not included in the mathematical program.
   Variable y("y");
-  EXPECT_THROW(prog.AddCost(x(0) + y), runtime_error);
-  EXPECT_THROW(prog.AddCost(x(0) * x(0) + y), runtime_error);
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      prog.AddCost(x(0) + y),
+      ".*is not a decision variable.*");
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      prog.AddCost(x(0) * x(0) + y),
+      ".*is not a decision variable.*");
 }
 
 GTEST_TEST(TestMathematicalProgram, TestAddGenericCost) {
@@ -3102,14 +3290,13 @@ GTEST_TEST(TestMathematicalProgram, TestSolverOptions) {
   EXPECT_EQ(prog.GetSolverOptionsStr(solver_id).size(), 0);
 }
 
-void CheckNewNonnegativePolynomial(
-    MathematicalProgram::NonnegativePolynomial type) {
+void CheckNewSosPolynomial(MathematicalProgram::NonnegativePolynomial type) {
   // Check if the newly created nonnegative polynomial can be computed as m' * Q
   // * m.
   MathematicalProgram prog;
   auto t = prog.NewIndeterminates<4>();
   const auto m = symbolic::MonomialBasis<4, 2>(symbolic::Variables(t));
-  const auto pair = prog.NewNonnegativePolynomial(m, type);
+  const auto pair = prog.NewSosPolynomial(m, type);
   const symbolic::Polynomial& p = pair.first;
   const MatrixXDecisionVariable& Q = pair.second;
   MatrixX<symbolic::Polynomial> Q_poly(m.rows(), m.rows());
@@ -3123,17 +3310,14 @@ void CheckNewNonnegativePolynomial(
   const symbolic::Polynomial p_expected(m.dot(Q_poly * m));
   EXPECT_TRUE(p.EqualTo(p_expected));
 
-  const auto p2 = prog.NewNonnegativePolynomial(Q, m, type);
+  const auto p2 = prog.NewSosPolynomial(Q, m, type);
   EXPECT_TRUE(p2.EqualTo(p_expected));
 }
 
-GTEST_TEST(TestMathematicalProgram, NewNonnegativePolynomial) {
-  CheckNewNonnegativePolynomial(
-      MathematicalProgram::NonnegativePolynomial::kSos);
-  CheckNewNonnegativePolynomial(
-      MathematicalProgram::NonnegativePolynomial::kSdsos);
-  CheckNewNonnegativePolynomial(
-      MathematicalProgram::NonnegativePolynomial::kDsos);
+GTEST_TEST(TestMathematicalProgram, NewSosPolynomial) {
+  CheckNewSosPolynomial(MathematicalProgram::NonnegativePolynomial::kSos);
+  CheckNewSosPolynomial(MathematicalProgram::NonnegativePolynomial::kSdsos);
+  CheckNewSosPolynomial(MathematicalProgram::NonnegativePolynomial::kDsos);
 }
 
 void CheckNewEvenDegreeNonnegativePolynomial(
@@ -3216,9 +3400,10 @@ GTEST_TEST(TestMathematicalProgram, AddEqualityConstraintBetweenPolynomials) {
   // Test with a polynomial whose coefficients depend on variables that are not
   // decision variables of prog.
   symbolic::Variable b("b");
-  EXPECT_THROW(prog.AddEqualityConstraintBetweenPolynomials(
-                   p1, symbolic::Polynomial(b * x, {x})),
-               std::runtime_error);
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      prog.AddEqualityConstraintBetweenPolynomials(
+          p1, symbolic::Polynomial(b * x, {x})),
+      ".*is not a decision variable.*");
   // If we add `b` to prog as decision variable, then the code throws no
   // exceptions.
   prog.AddDecisionVariables(Vector1<symbolic::Variable>(b));
@@ -3250,7 +3435,7 @@ GTEST_TEST(TestMathematicalProgram, TestVariableScaling) {
   EXPECT_EQ(prog.GetVariableScaling().size(), 4);
 }
 
-GTEST_TEST(TestMathematicalProgram, AddConstraintMatrix) {
+GTEST_TEST(TestMathematicalProgram, AddConstraintMatrix1) {
   MathematicalProgram prog;
   auto x = prog.NewContinuousVariables<3>();
 
@@ -3290,6 +3475,62 @@ GTEST_TEST(TestMathematicalProgram, AddConstraintMatrix) {
   EXPECT_EQ(binding.evaluator()->A(), A_expected);
   EXPECT_EQ(binding.evaluator()->lower_bound(), lower_bound_expected);
   EXPECT_EQ(binding.evaluator()->upper_bound(), upper_bound_expected);
+}
+
+GTEST_TEST(TestMathematicalProgram, AddConstraintMatrix2) {
+  MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables<3>();
+
+  Eigen::Matrix<symbolic::Expression, 2, 2> exprs;
+  // clang-format off
+  exprs << x(0), x(0) + 2*x(1),
+           x(1), x(0) + x(1);
+  // clang-format on
+  // This test relies on the pair (lb(i), ub(i)) being unique.
+  Eigen::Matrix2d lb;
+  lb << 0, -kInf, 2., -1.;
+  Eigen::Matrix<double, 2, 2, Eigen::RowMajor> ub;
+  ub(0, 0) = kInf;
+  ub(0, 1) = 3;
+  ub(1, 0) = 2;
+  ub(1, 1) = kInf;
+  prog.AddConstraint(exprs, lb, ub);
+
+  ASSERT_EQ(prog.GetAllConstraints().size(), 1);
+  ASSERT_EQ(prog.GetAllLinearConstraints().size(), 1);
+
+  Eigen::Matrix<double, 4, 2> A_expected;
+  Eigen::Matrix<double, 4, 1> lower_bound_expected;
+  Eigen::Matrix<double, 4, 1> upper_bound_expected;
+  std::array<std::array<Eigen::RowVector2d, 2>, 2> coeff;
+  coeff[0][0] << 1, 0;
+  coeff[0][1] << 1, 2;
+  coeff[1][0] << 0, 1;
+  coeff[1][1] << 1, 1;
+
+  auto check_binding = [&lb, &ub,
+                        &coeff](const Binding<LinearConstraint>& binding) {
+    EXPECT_EQ(binding.evaluator()->num_constraints(), 4);
+    for (int i = 0; i < 2; ++i) {
+      for (int j = 0; j < 2; ++j) {
+        bool find_match = false;
+        for (int k = 0; k < 4; ++k) {
+          if (binding.evaluator()->lower_bound()(k) == lb(i, j) &&
+              binding.evaluator()->upper_bound()(k) == ub(i, j)) {
+            EXPECT_TRUE(
+                CompareMatrices(binding.evaluator()->A().row(k), coeff[i][j]));
+            find_match = true;
+          }
+        }
+        EXPECT_TRUE(find_match);
+      }
+    }
+  };
+  const auto binding1 = prog.GetAllLinearConstraints()[0];
+  check_binding(binding1);
+
+  const auto binding2 = prog.AddLinearConstraint(exprs, lb, ub);
+  check_binding(binding2);
 }
 
 GTEST_TEST(TestMathematicalProgram, ReparsePolynomial) {
@@ -3347,6 +3588,43 @@ GTEST_TEST(TestMathematicalProgram, ReparsePolynomial) {
     prog.Reparse(&p);
     EXPECT_PRED2(PolyEqual, p, expected);
   }
+}
+
+GTEST_TEST(TestMathematicalProgram, AddSosConstraint) {
+  MathematicalProgram prog{};
+  const auto x = prog.NewIndeterminates<1>()(0);
+  const auto a = prog.NewContinuousVariables<1>()(0);
+
+  // p1 has both a and x as indeterminates. So we need to reparse the polynomial
+  // to have only x as the indeterminates.
+  const symbolic::Polynomial p1(a + x * x);
+  const Vector2<symbolic::Monomial> monomial_basis(symbolic::Monomial{},
+                                                   symbolic::Monomial(x, 1));
+
+  const Matrix2<symbolic::Variable> Q_psd =
+      prog.AddSosConstraint(p1, monomial_basis);
+  EXPECT_EQ(prog.positive_semidefinite_constraints().size(), 1u);
+  EXPECT_EQ(prog.lorentz_cone_constraints().size(), 0u);
+  EXPECT_EQ(prog.rotated_lorentz_cone_constraints().size(), 0u);
+  const int num_lin_con = prog.linear_constraints().size() +
+                          prog.linear_equality_constraints().size();
+  // Now call AddSosConstraint with type=kDsos.
+  prog.AddSosConstraint(p1, monomial_basis,
+                        MathematicalProgram::NonnegativePolynomial::kDsos);
+  // With dsos, the mathematical program adds more linear constraints than it
+  // did with sos.
+  EXPECT_GT(prog.linear_constraints().size() +
+                prog.linear_equality_constraints().size(),
+            2 * num_lin_con);
+  EXPECT_EQ(prog.positive_semidefinite_constraints().size(), 1u);
+
+  // Now call AddSosConstraint with type=kSdsos.
+  prog.AddSosConstraint(p1, monomial_basis,
+                        MathematicalProgram::NonnegativePolynomial::kSdsos);
+  EXPECT_GT(prog.lorentz_cone_constraints().size() +
+                prog.rotated_lorentz_cone_constraints().size(),
+            0u);
+  EXPECT_EQ(prog.positive_semidefinite_constraints().size(), 1u);
 }
 
 template <typename C>

@@ -1,5 +1,6 @@
 #include "drake/multibody/parsing/detail_common.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 namespace drake {
@@ -7,6 +8,8 @@ namespace multibody {
 namespace internal {
 namespace {
 
+using drake::internal::DiagnosticDetail;
+using drake::internal::DiagnosticPolicy;
 using geometry::GeometryProperties;
 using geometry::ProximityProperties;
 using geometry::internal::HydroelasticType;
@@ -19,6 +22,35 @@ using geometry::internal::kHydroGroup;
 using geometry::internal::kMaterialGroup;
 using geometry::internal::kRezHint;
 using std::optional;
+
+class DataSourceTest : public ::testing::Test {
+ protected:
+  const std::string relative_path_{"relative.txt"};
+  const DataSource relative_{DataSource::kFilename, &relative_path_};
+  const std::string absolute_path_{"/a/b/c/absolute.txt"};
+  const DataSource absolute_{DataSource::kFilename, &absolute_path_};
+  const std::string stuff_{"stuff"};
+  const DataSource contents_{DataSource::kContents, &stuff_};
+};
+
+TEST_F(DataSourceTest, GetAbsolutePath) {
+  EXPECT_THAT(relative_.GetAbsolutePath(),
+              ::testing::MatchesRegex("/.*/relative.txt"));
+  EXPECT_EQ(absolute_.GetAbsolutePath(), absolute_path_);  // no change.
+  EXPECT_EQ(contents_.GetAbsolutePath(), "");
+}
+
+TEST_F(DataSourceTest, GetRootDir) {
+  EXPECT_THAT(relative_.GetRootDir(), ::testing::MatchesRegex("/.*[^/]"));
+  EXPECT_EQ(absolute_.GetRootDir(), "/a/b/c");
+  EXPECT_EQ(contents_.GetRootDir(), "");
+}
+
+TEST_F(DataSourceTest, GetStem) {
+  EXPECT_EQ(relative_.GetStem(), "relative");
+  EXPECT_EQ(absolute_.GetStem(), "absolute");
+  EXPECT_EQ(contents_.GetStem(), DataSource::kContentsPseudoStem);
+}
 
 using ReadDoubleFunc = std::function<optional<double>(const char*)>;
 const bool rigid{true};
@@ -37,8 +69,9 @@ ReadDoubleFunc param_read_double(
 }
 
 // Tests for a particular value in the given properties.
+template<typename T>
 ::testing::AssertionResult ExpectScalar(const char* group, const char* property,
-                                        double expected,
+                                        T expected,
                                         const ProximityProperties& p) {
   ::testing::AssertionResult failure = ::testing::AssertionFailure();
   const bool has_value = p.HasProperty(group, property);
@@ -46,7 +79,7 @@ ReadDoubleFunc param_read_double(
     return failure << "Expected (" << group << ", " << property
                    << "); not found";
   }
-  const double value = p.GetProperty<double>(group, property);
+  const T value = p.template GetProperty<T>(group, property);
   if (value != expected) {
     return failure << "Wrong value for (" << group << ", " << property << "):"
                    << "\n  Expected: " << expected << "\n  Found: " << value;
@@ -54,9 +87,30 @@ ReadDoubleFunc param_read_double(
   return ::testing::AssertionSuccess();
 }
 
+class ParseProximityPropertiesTest : public ::testing::Test {
+ public:
+  ParseProximityPropertiesTest() {
+    // Don't let warnings leak into spdlog; tests should always specifically
+    // handle any warnings that apppear.
+    diagnostic_.SetActionForWarnings(&DiagnosticPolicy::ErrorDefaultAction);
+  }
+
+  // This shadows the namespace-scoped free function under test in order to
+  // bind the `diagnostic` argument.
+  geometry::ProximityProperties ParseProximityProperties(
+    const std::function<std::optional<double>(const char*)>& read_double,
+    bool is_rigid, bool is_compliant) {
+    return internal::ParseProximityProperties(
+        diagnostic_, read_double, is_rigid, is_compliant);
+  }
+
+ protected:
+  DiagnosticPolicy diagnostic_;
+};
+
 // Confirms that an "empty" <drake:proximity_properties> tag produces an empty
 // instance of ProximityProperties.
-GTEST_TEST(ParseProximityPropertiesTest, NoProperties) {
+TEST_F(ParseProximityPropertiesTest, NoProperties) {
   ProximityProperties properties =
       ParseProximityProperties(empty_read_double, !rigid, !compliant);
   // It is empty if there is a single group: the default group with no
@@ -70,7 +124,7 @@ GTEST_TEST(ParseProximityPropertiesTest, NoProperties) {
 }
 
 // Confirms successful parsing of hydroelastic properties.
-GTEST_TEST(ParseProximityPropertiesTest, HydroelasticProperties) {
+TEST_F(ParseProximityPropertiesTest, HydroelasticProperties) {
   const char* kTag = "drake:mesh_resolution_hint";
   const double kRezHintValue{0.25};
 
@@ -150,7 +204,7 @@ GTEST_TEST(ParseProximityPropertiesTest, HydroelasticProperties) {
 }
 
 // Confirms successful parsing of hydroelastic modulus.
-GTEST_TEST(ParseProximityPropertiesTest, HydroelasticModulus) {
+TEST_F(ParseProximityPropertiesTest, HydroelasticModulus) {
   const double kValue = 1.75;
   ProximityProperties properties = ParseProximityProperties(
       param_read_double("drake:hydroelastic_modulus", kValue), !rigid,
@@ -161,23 +215,29 @@ GTEST_TEST(ParseProximityPropertiesTest, HydroelasticModulus) {
   EXPECT_EQ(properties.num_groups(), 2);  // Hydro and default groups.
 }
 
-// TODO(DamrongGuoy): Remove this test when we remove the support of the tag
-//  drake:elastic_modulus. See ParseProximityProperties().
-
-// Confirms the tag drake:elastic_modulus is still working.
-// The tag drake:elastic_modulus is deprecated, and will be removed on or
-// around 2022-02-01.
-GTEST_TEST(ParseProximityPropertiesTest, DeprecateElasticModulus) {
+// Confirms ignored parsing of hydroelastic modulus for explicit rigid geometry.
+TEST_F(ParseProximityPropertiesTest, RigidHydroelasticModulusIgnored) {
+  DiagnosticDetail warning;
+  diagnostic_.SetActionForWarnings([&](const DiagnosticDetail& detail) {
+    warning = detail;
+  });
   const double kValue = 1.75;
   ProximityProperties properties = ParseProximityProperties(
-      param_read_double("drake:elastic_modulus", kValue), !rigid, !compliant);
-  EXPECT_TRUE(ExpectScalar(kHydroGroup, kElastic, kValue, properties));
+      param_read_double("drake:hydroelastic_modulus", kValue), rigid,
+      !compliant);
+  EXPECT_THAT(warning.message, ::testing::MatchesRegex(
+      ".*hydroelastic_modulus.*value.*1.75.*ignored.*"));
+  EXPECT_FALSE(ExpectScalar(kHydroGroup, kElastic, kValue, properties));
+  EXPECT_TRUE(ExpectScalar(kHydroGroup, kComplianceType,
+                           geometry::internal::HydroelasticType::kRigid,
+                           properties));
+  // Compliance type is the only property.
   EXPECT_EQ(properties.GetPropertiesInGroup(kHydroGroup).size(), 1u);
   EXPECT_EQ(properties.num_groups(), 2);  // Hydro and default groups.
 }
 
 // Confirms successful parsing of dissipation.
-GTEST_TEST(ParseProximityPropertiesTest, Dissipation) {
+TEST_F(ParseProximityPropertiesTest, Dissipation) {
   const double kValue = 1.25;
   ProximityProperties properties = ParseProximityProperties(
       param_read_double("drake:hunt_crossley_dissipation", kValue), !rigid,
@@ -189,7 +249,7 @@ GTEST_TEST(ParseProximityPropertiesTest, Dissipation) {
 }
 
 // Confirms successful parsing of stiffness.
-GTEST_TEST(ParseProximityPropertiesTest, Stiffness) {
+TEST_F(ParseProximityPropertiesTest, Stiffness) {
   const double kValue = 300.0;
   ProximityProperties properties = ParseProximityProperties(
       param_read_double("drake:point_contact_stiffness", kValue), !rigid,
@@ -202,7 +262,7 @@ GTEST_TEST(ParseProximityPropertiesTest, Stiffness) {
 }
 
 // Confirms successful parsing of friction.
-GTEST_TEST(ParseProximityPropertiesTest, Friction) {
+TEST_F(ParseProximityPropertiesTest, Friction) {
   // We're not testing the case where *no* coefficients are provided; that's
   // covered in the NoProperties test.
   auto friction_read_double = [](optional<double> mu_d,

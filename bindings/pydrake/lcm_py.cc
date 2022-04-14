@@ -4,12 +4,10 @@
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 
-#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
 #include "drake/lcm/drake_lcm.h"
 #include "drake/lcm/drake_lcm_interface.h"
-#include "drake/lcm/drake_mock_lcm.h"
 
 namespace drake {
 namespace pydrake {
@@ -29,6 +27,8 @@ PYBIND11_MODULE(lcm, m) {
     using Class = DrakeLcmInterface;
     constexpr auto& cls_doc = doc.DrakeLcmInterface;
     py::class_<Class>(m, "DrakeLcmInterface", cls_doc.doc)
+        .def("get_lcm_url", &DrakeLcmInterface::get_lcm_url,
+            cls_doc.get_lcm_url.doc)
         // N.B. We do not bind `Subscribe` as multi-threading from C++ may
         // wreak havoc on the Python GIL with a callback.
         .def(
@@ -70,18 +70,6 @@ PYBIND11_MODULE(lcm, m) {
             py::arg("channel"), py::arg("handler"), cls_doc.Subscribe.doc);
     // TODO(eric.cousineau): Add remaining methods.
   }
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  {
-    using Class = DrakeMockLcm;
-    constexpr const char* deprecation =
-        "DrakeMockLcm is deprecated and will be removed from Drake on or after "
-        "2022-03-01. Use DrakeLcm(\"memq://\") instead.";
-    py::class_<Class, DrakeLcm>(m, "DrakeMockLcm", deprecation)
-        .def(py_init_deprecated<Class>(py::str(deprecation)), deprecation);
-  }
-#pragma GCC diagnostic pop
 
   ExecuteExtraPythonCode(m);
 }

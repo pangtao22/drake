@@ -10,10 +10,9 @@ integration. Any other configurations are provided on a best-effort basis.
 
 | Operating System ⁽⁴⁾             | Architecture | Python  | Bazel | CMake | C/C++ Compiler ⁽⁵⁾                 | Java                          |
 |----------------------------------|--------------|---------|-------|-------|------------------------------------|-------------------------------|
-| Ubuntu 18.04 LTS (Bionic Beaver) | x86_64 ⁽¹⁾   | 3.6 ⁽³⁾ | 4.2   | 3.10  | GCC 7.5 (default) or Clang 9   | OpenJDK 11                    |
-| Ubuntu 20.04 LTS (Focal Fossa)   | x86_64 ⁽¹⁾   | 3.8 ⁽³⁾ | 4.2   | 3.16  | GCC 9.3 (default) or Clang 9   | OpenJDK 11                    |
-| macOS Big Sur (11)               | x86_64 ⁽²⁾   | 3.9 ⁽³⁾ | 4.2   | 3.19  | Apple LLVM 12.0.0 (Xcode 12.4) | AdoptOpenJDK 15 (HotSpot JVM) |
-| macOS Monterey (12)              | x86_64 ⁽²⁾   | 3.9 ⁽³⁾ | 4.2   | 3.19  | Apple LLVM 12.0.0 (Xcode 12.4) | AdoptOpenJDK 15 (HotSpot JVM) |
+| Ubuntu 20.04 LTS (Focal Fossa)   | x86_64 ⁽¹⁾   | 3.8 ⁽³⁾ | 5.1   | 3.16  | GCC 9.3 (default) or Clang 9   | OpenJDK 11                    |
+| macOS Big Sur (11)               | x86_64 ⁽²⁾   | 3.9 ⁽³⁾ | 5.1   | 3.19  | Apple LLVM 12.0.0 (Xcode 12.4) | AdoptOpenJDK 15 (HotSpot JVM) |
+| macOS Monterey (12)              | x86_64 ⁽²⁾   | 3.9 ⁽³⁾ | 5.1   | 3.19  | Apple LLVM 12.0.0 (Xcode 12.4) | AdoptOpenJDK 15 (HotSpot JVM) |
 
 ⁽¹⁾ Drake Ubuntu builds assume support for Intel's AVX2 and FMA instructions,
 introduced with the Haswell architecture in 2013 with substantial performance
@@ -22,7 +21,10 @@ improvements in the Broadwell architecture in 2014. Drake is compiled with
 machines). Drake can be used on older machines if necessary by building from
 source with that flag removed.
 
-⁽²⁾ Running Drake under Rosetta 2 emulation on arm64 is not supported. Plans
+⁽²⁾ For users running on Apple's newer arm64 hardware, refer to
+[Running under Rosetta 2](/rosetta2.html)
+for instructions on running using x86_64 emulation.
+Building and running directly on arm64 is not yet supported; plans
 for any future arm64 support on macOS and/or Ubuntu are discussed in
 [issue #13514](https://github.com/RobotLocomotion/drake/issues/13514).
 
@@ -77,7 +79,7 @@ setup steps:
 
 See [above](#supported-configurations)
 for the configurations and platforms that Drake officially supports.
-All else being equal, we would recommend developers use Ubuntu Bionic.
+All else being equal, we would recommend developers use Ubuntu Focal.
 
 # Build with Bazel
 
@@ -102,25 +104,18 @@ make -j
 Please note the additional CMake options which affect the Python bindings:
 
 * ``-DWITH_GUROBI={ON, [OFF]}`` - Build with Gurobi enabled.
-* ``-DWITH_MOSEK={ON, [OFF]}`` - Build with MOSEK enabled.
+* ``-DWITH_MOSEK={ON, [OFF]}`` - Build with MOSEK™ enabled.
 * ``-DWITH_SNOPT={ON, [OFF]}`` - Build with SNOPT enabled.
 
 ``{...}`` means a list of options, and the option surrounded by ``[...]`` is
 the default option. An example of building ``pydrake`` with both Gurobi and
-MOSEK, without building tests:
+MOSEK™, without building tests:
 
 ```bash
 cmake -DWITH_GUROBI=ON -DWITH_MOSEK=ON ../drake
 ```
 
 You will also need to have your ``PYTHONPATH`` configured correctly.
-
-*Ubuntu 18.04 (Bionic):*
-
-```bash
-cd drake-build
-export PYTHONPATH=${PWD}/install/lib/python3.6/site-packages:${PYTHONPATH}
-```
 
 *Ubuntu 20.04 (Focal):*
 

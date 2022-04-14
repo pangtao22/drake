@@ -1,4 +1,4 @@
-ARG PLATFORM=ubuntu:18.04
+ARG PLATFORM=ubuntu:20.04
 
 # -----------------------------------------------------------------------------
 # Create a base provisioned image.
@@ -8,6 +8,7 @@ FROM ${PLATFORM} AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+ADD image/packages-* /image/
 ADD image/provision-base.sh /image/
 ADD image/known_hosts /root/.ssh/
 

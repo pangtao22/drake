@@ -16,6 +16,7 @@
 #include "drake/common/test_utilities/expect_no_throw.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/common/test_utilities/is_dynamic_castable.h"
+#include "drake/common/test_utilities/limit_malloc.h"
 #include "drake/systems/framework/basic_vector.h"
 #include "drake/systems/framework/context.h"
 #include "drake/systems/framework/leaf_context.h"
@@ -365,6 +366,13 @@ class LeafSystemTest : public ::testing::Test {
     context_.EnableCaching();
   }
 
+  double CalcNextUpdateTime() const {
+    // Unless there are an extrene number of concurrent events, calculating the
+    // next update time should not allocate.
+    test::LimitMalloc guard;
+    return system_.CalcNextUpdateTime(context_, event_info_.get());
+  }
+
   TestSystem<double> system_;
   std::unique_ptr<LeafContext<double>> context_ptr_ = system_.AllocateContext();
   LeafContext<double>& context_ = *context_ptr_;
@@ -538,7 +546,7 @@ TEST_F(LeafSystemTest, WitnessDeclarations) {
 // Tests that if no update events are configured, none are reported.
 TEST_F(LeafSystemTest, NoUpdateEvents) {
   context_.SetTime(25.0);
-  double time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  double time = CalcNextUpdateTime();
   EXPECT_EQ(std::numeric_limits<double>::infinity(), time);
   EXPECT_TRUE(!leaf_info_->HasEvents());
 }
@@ -574,7 +582,7 @@ TEST_F(LeafSystemTest, MultipleNonUniquePeriods) {
 TEST_F(LeafSystemTest, OffsetHasNotArrivedYet) {
   context_.SetTime(2.0);
   system_.AddPeriodicUpdate();
-  double time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  double time = CalcNextUpdateTime();
 
   EXPECT_EQ(5.0, time);
   const auto& events = leaf_info_->get_discrete_update_events().get_events();
@@ -590,7 +598,7 @@ TEST_F(LeafSystemTest, EventsAtTheSameTime) {
   // Both actions happen at t = 5.
   system_.AddPeriodicUpdate();
   system_.AddPeriodicUnrestrictedUpdate(3, 5);
-  double time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  double time = CalcNextUpdateTime();
 
   EXPECT_EQ(5.0, time);
   {
@@ -611,7 +619,7 @@ TEST_F(LeafSystemTest, EventsAtTheSameTime) {
 TEST_F(LeafSystemTest, ExactlyAtOffset) {
   context_.SetTime(5.0);
   system_.AddPeriodicUpdate();
-  double time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  double time = CalcNextUpdateTime();
 
   EXPECT_EQ(15.0, time);
   const auto& events = leaf_info_->get_discrete_update_events().get_events();
@@ -624,7 +632,7 @@ TEST_F(LeafSystemTest, ExactlyAtOffset) {
 TEST_F(LeafSystemTest, OffsetIsInThePast) {
   context_.SetTime(23.0);
   system_.AddPeriodicUpdate();
-  double time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  double time = CalcNextUpdateTime();
 
   EXPECT_EQ(25.0, time);
   const auto& events = leaf_info_->get_discrete_update_events().get_events();
@@ -637,7 +645,7 @@ TEST_F(LeafSystemTest, OffsetIsInThePast) {
 TEST_F(LeafSystemTest, ExactlyOnUpdateTime) {
   context_.SetTime(25.0);
   system_.AddPeriodicUpdate();
-  double time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  double time = CalcNextUpdateTime();
 
   EXPECT_EQ(35.0, time);
   const auto& events = leaf_info_->get_discrete_update_events().get_events();
@@ -650,15 +658,15 @@ TEST_F(LeafSystemTest, PeriodicUpdateZeroOffset) {
   system_.AddPeriodicUpdate(2.0);
 
   context_.SetTime(0.0);
-  double time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  double time = CalcNextUpdateTime();
   EXPECT_EQ(2.0, time);
 
   context_.SetTime(1.0);
-  time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  time = CalcNextUpdateTime();
   EXPECT_EQ(2.0, time);
 
   context_.SetTime(2.1);
-  time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  time = CalcNextUpdateTime();
   EXPECT_EQ(4.0, time);
 }
 
@@ -670,7 +678,7 @@ TEST_F(LeafSystemTest, UpdateAndPublish) {
 
   // The publish event fires at 12sec.
   context_.SetTime(9.0);
-  double time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  double time = CalcNextUpdateTime();
   EXPECT_EQ(12.0, time);
   {
     const auto& events = leaf_info_->get_publish_events().get_events();
@@ -680,7 +688,7 @@ TEST_F(LeafSystemTest, UpdateAndPublish) {
 
   // The update event fires at 15sec.
   context_.SetTime(14.0);
-  time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  time = CalcNextUpdateTime();
   EXPECT_EQ(15.0, time);
   {
     const auto& events = leaf_info_->get_discrete_update_events().get_events();
@@ -690,7 +698,7 @@ TEST_F(LeafSystemTest, UpdateAndPublish) {
 
   // Both events fire at 60sec.
   context_.SetTime(59.0);
-  time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  time = CalcNextUpdateTime();
   EXPECT_EQ(60.0, time);
   {
     const auto& events = leaf_info_->get_discrete_update_events().get_events();
@@ -710,7 +718,7 @@ TEST_F(LeafSystemTest, UpdateAndPublish) {
 TEST_F(LeafSystemTest, FloatingPointRoundingZeroPointZeroOneFive) {
   context_.SetTime(0.015 * 11);  // Slightly less than 0.165.
   system_.AddPeriodicUpdate(0.015);
-  double time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  double time = CalcNextUpdateTime();
   // 0.015 * 12 = 0.18.
   EXPECT_NEAR(0.18, time, 1e-8);
 }
@@ -721,7 +729,7 @@ TEST_F(LeafSystemTest, FloatingPointRoundingZeroPointZeroOneFive) {
 TEST_F(LeafSystemTest, FloatingPointRoundingZeroPointZeroZeroTwoFive) {
   context_.SetTime(0.0025 * 977);  // Slightly less than 2.4425
   system_.AddPeriodicUpdate(0.0025);
-  double time = system_.CalcNextUpdateTime(context_, event_info_.get());
+  double time = CalcNextUpdateTime();
   EXPECT_NEAR(2.445, time, 1e-8);
 }
 
@@ -902,7 +910,6 @@ TEST_F(LeafSystemTest, ContinuousStateBelongsWithSystem) {
   auto other_context = other_system.AllocateContext();
   DRAKE_EXPECT_THROWS_MESSAGE(
       other_system.CalcTimeDerivatives(*other_context, derivatives.get()),
-      std::logic_error,
       ".*::ContinuousState<double> was not created for.*::TestSystem.*");
 }
 
@@ -1035,7 +1042,7 @@ GTEST_TEST(ModelLeafSystemTest, ModelPortsTopology) {
   EXPECT_TRUE(in3_ticket.is_valid() && in4_ticket.is_valid());
   EXPECT_NE(in3_ticket, in4_ticket);  // We don't know the actual values.
   DRAKE_EXPECT_THROWS_MESSAGE(
-      dut.get_input_port_base(InputPortIndex(10)), std::out_of_range,
+      dut.get_input_port_base(InputPortIndex(10)),
       "System.*get_input_port_base().*no input port.*10.*only 5.*");
 
   // Check DependencyTracker setup for input ports.
@@ -1059,7 +1066,7 @@ GTEST_TEST(ModelLeafSystemTest, ModelPortsTopology) {
   EXPECT_TRUE(out2_ticket.is_valid() && out3_ticket.is_valid());
   EXPECT_NE(out2_ticket, out3_ticket);  // We don't know the actual values.
   DRAKE_EXPECT_THROWS_MESSAGE(
-      dut.get_output_port_base(OutputPortIndex(7)), std::out_of_range,
+      dut.get_output_port_base(OutputPortIndex(7)),
       "System.*get_output_port_base().*no output port.*7.*only 4.*");
 
   const InputPort<double>& in0 = dut.get_input_port(0);
@@ -3043,7 +3050,6 @@ GTEST_TEST(ImplicitTimeDerivatives, DefaultImplementation) {
   Vector4d residual4;
   DRAKE_EXPECT_THROWS_MESSAGE(
       dut.CalcImplicitTimeDerivativesResidual(*context, *xdot, &residual4),
-      std::logic_error,
       "System::DoCalcImplicitTimeDerivativesResidual.*"
       "default implementation requires.*residual size.*4.*"
       "matches.*state variables.*3.*must override.*");
@@ -3052,7 +3058,6 @@ GTEST_TEST(ImplicitTimeDerivatives, DefaultImplementation) {
   // we should get stopped by the NVI public method.
   DRAKE_EXPECT_THROWS_MESSAGE(
       dut.CalcImplicitTimeDerivativesResidual(*context, *xdot, &residual3),
-      std::logic_error,
       ".*CalcImplicitTimeDerivativesResidual.*"
       "expected residual.*size 4 but got.*size 3.*\n"
       "Use AllocateImplicitTimeDerivativesResidual.*");
@@ -3084,7 +3089,6 @@ GTEST_TEST(ImplicitTimeDerivatives, OverrideImplementation) {
   Vector3d bad_residual;
   DRAKE_EXPECT_THROWS_MESSAGE(
       dut.CalcImplicitTimeDerivativesResidual(*context, *xdot, &bad_residual),
-      std::logic_error,
       ".*CalcImplicitTimeDerivativesResidual.*"
       "expected residual.*size 1 but got.*size 3.*\n"
       "Use AllocateImplicitTimeDerivativesResidual.*");

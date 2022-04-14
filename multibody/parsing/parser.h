@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "drake/geometry/scene_graph.h"
+#include "drake/common/diagnostic_policy.h"
 #include "drake/multibody/parsing/package_map.h"
 #include "drake/multibody/plant/multibody_plant.h"
 #include "drake/multibody/tree/multibody_tree_indexes.h"
@@ -12,7 +12,8 @@ namespace drake {
 namespace multibody {
 
 /// Parses SDF and URDF input files into a MultibodyPlant and (optionally) a
-/// SceneGraph.
+/// SceneGraph. For documentation of Drake-specific extensions and limitations,
+/// see @ref multibody_parsing.
 class Parser final {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(Parser)
@@ -29,6 +30,10 @@ class Parser final {
   explicit Parser(
     MultibodyPlant<double>* plant,
     geometry::SceneGraph<double>* scene_graph = nullptr);
+
+  /// Gets a mutable reference to the plant that will be modified by this
+  /// parser.
+  MultibodyPlant<double>& plant() { return *plant_; }
 
   /// Gets a mutable reference to the PackageMap used by this parser.
   PackageMap& package_map() { return package_map_; }
@@ -88,8 +93,8 @@ class Parser final {
 
  private:
   PackageMap package_map_;
+  drake::internal::DiagnosticPolicy diagnostic_policy_;
   MultibodyPlant<double>* const plant_;
-  geometry::SceneGraph<double>* const scene_graph_;
 };
 
 }  // namespace multibody

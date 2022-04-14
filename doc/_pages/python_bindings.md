@@ -16,16 +16,17 @@ source files inside the ``bindings/pydrake`` folder. These bindings are
 installed as a single package called ``pydrake``.
 
 <div class="warning" markdown="1">
-Drake does not support the Python environment supplied by Anaconda.
-To use our supported workflow, please
-uninstall Anaconda or remove the Anaconda bin directory from the `PATH` before
-building or using the Drake Python bindings.
+Drake does not support the Python environment supplied by Anaconda. Before
+installing or using Drake, please `conda deactivate` (repeatedly, until even
+the conda base environment has been deactivated) such that none of the paths
+reported `which -a python python3 pip pip3` refer to conda.
 </div>
 
 # Installation
 
-Refer to [Installation](/installation.html) for how to install Drake's
-stable releases using pip.
+Refer to [Installation via Pip](/pip.html#stable-releases) for how to install
+Drake's releases using pip, or the general [Installation](/installation.html)
+instructions for alternative options.
 
 # Using the Python Bindings
 
@@ -39,7 +40,7 @@ python3 -c 'import pydrake.all; print(pydrake.__file__)'
 ```
 
 <div class="note" markdown="1">
-If you are using Gurobi, you must either have it installed in the suggested location under `/opt/...` mentioned in Gurobi 9.0.2, or you must ensure that you define the `${GUROBI_HOME}` environment variable, or specify `${GUROBI_INCLUDE_DIR}` via CMake.
+If you are using Gurobi, you must either have it installed in the suggested location under `/opt/...` mentioned in Gurobi 9.5.1, or you must ensure that you define the `${GUROBI_HOME}` environment variable, or specify `${GUROBI_INCLUDE_DIR}` via CMake.
 </div>
 
 
@@ -311,6 +312,52 @@ if __name__ == "__main__":
 <div class="note" markdown="1">
 If you are developing in Drake and are using the `drake_py_unittest` macro, you can specify the argument `--trace=user` to get the same behavior.
 </div>
+
+<!-- TODO(eric.cousineau): Move this into pydrake.common.debug. -->
+
+Additionally, you can also decorate your function to break on an exception so
+you can get a REPL (which works in a terminal or in a Jupyter notebook) to
+actively inspect the context (like `dbstop if error` in MATLAB).
+
+```python
+from contextlib import contextmanager
+import pdb
+import sys
+import traceback
+
+
+@contextmanager
+def launch_pdb_on_exception():
+    """
+    Provides a context that will launch interactive pdb console automatically
+    if an exception is raised.
+
+    Example usage with @iex decorator shorthand below:
+
+        @iex
+        def my_bad_function():
+            x = 1
+            assert False
+
+        my_bad_function()
+        # Should bring up debugger at `assert` statement.
+    """
+    # Adapted from:
+    # https://github.com/gotcha/ipdb/blob/fc83b4f5f/ipdb/__main__.py#L219-L232
+
+    try:
+        yield
+    except Exception:
+        traceback.print_exc()
+        _, _, tb = sys.exc_info()
+        pdb.post_mortem(tb)
+        # Resume original execution.
+        raise
+
+
+# Mirror `@ipdb.iex` decorator. See docs for `launch_pdb_on_exception()`.
+iex = launch_pdb_on_exception()
+```
 
 This generally should help you trace where the code is dying. However, if you
 still need to dig in, you can build the bindings in debug mode, without symbol

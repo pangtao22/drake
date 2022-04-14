@@ -58,6 +58,7 @@ drake_pybind_library(
         "//bindings/pydrake/common:cpp_param_pybind",
         "//bindings/pydrake/common:cpp_template_pybind",
         "//bindings/pydrake/common:deprecation_pybind",
+        "//bindings/pydrake/common:eigen_pybind",
     ],
     cc_so_name = "mathematicalprogram",
     cc_srcs = ["mathematicalprogram_py.cc"],
@@ -69,6 +70,23 @@ drake_pybind_library(
         "//bindings/pydrake/common:cpp_template_py",
     ],
     py_srcs = ["_mathematicalprogram_extra.py"],
+)
+
+drake_pybind_library(
+    name = "augmented_lagrangian_py",
+    cc_deps = [
+        "//bindings/pydrake:autodiff_types_pybind",
+        "//bindings/pydrake:documentation_pybind",
+        "//bindings/pydrake:symbolic_types_pybind",
+        "//bindings/pydrake/common:deprecation_pybind",
+    ],
+    cc_srcs = ["augmented_lagrangian_py.cc"],
+    package_info = PACKAGE_INFO,
+    py_deps = [
+        ":mathematicalprogram_py",
+        "//bindings/pydrake:autodiffutils_py",
+    ],
+    py_srcs = ["_augmented_lagrangian_extra.py"],
 )
 
 drake_pybind_library(
@@ -286,6 +304,7 @@ drake_pybind_library(
 )
 
 PY_LIBRARIES_WITH_INSTALL = [
+    ":augmented_lagrangian_py",
     ":branch_and_bound_py",
     ":clp_py",
     ":csdp_py",
@@ -329,6 +348,15 @@ install(
 )
 
 drake_py_unittest(
+    name = "augmented_lagrangian_test",
+    deps = [
+        ":augmented_lagrangian_py",
+        "//bindings/pydrake:autodiffutils_py",
+        "//bindings/pydrake/common/test_utilities",
+    ],
+)
+
+drake_py_unittest(
     name = "clp_solver_test",
     args = select({
         "//tools:no_clp": ["TestClptSolver.unavailable"],
@@ -349,6 +377,7 @@ drake_py_unittest(
     deps = [
         ":csdp_py",
         "//bindings/pydrake/common/test_utilities",
+        "//bindings/pydrake/common/test_utilities:scipy_stub_py",
     ],
 )
 
@@ -454,6 +483,7 @@ drake_py_unittest(
         ":snopt_py",
         "//bindings/pydrake:math_py",
         "//bindings/pydrake/common/test_utilities",
+        "//bindings/pydrake/common/test_utilities:scipy_stub_py",
     ],
 )
 

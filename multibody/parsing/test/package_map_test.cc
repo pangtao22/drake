@@ -89,11 +89,11 @@ GTEST_TEST(PackageMapTest, TestManualPopulation) {
   package_map.Add("package_foo", "package_foo");
   // Adding a duplicate package with a different path throws.
   DRAKE_EXPECT_THROWS_MESSAGE(
-      package_map.Add("package_foo", "package_baz"), std::runtime_error,
+      package_map.Add("package_foo", "package_baz"),
       ".*conflicts with.*");
   // Adding a package with a nonexistent path throws.
   DRAKE_EXPECT_THROWS_MESSAGE(
-      package_map.Add("garbage", "garbage"), std::runtime_error,
+      package_map.Add("garbage", "garbage"),
       ".*does not exist.*");
 
   VerifyMatch(package_map, expected_packages);
@@ -164,7 +164,7 @@ GTEST_TEST(PackageMapTest, TestAddMap) {
 
   // Combining package maps with a conflicting package + path throws.
   DRAKE_EXPECT_THROWS_MESSAGE(
-      package_map_1_copy.AddMap(package_map_conflicting), std::runtime_error,
+      package_map_1_copy.AddMap(package_map_conflicting),
       ".*conflicts with.*");
 }
 
@@ -194,7 +194,7 @@ GTEST_TEST(PackageMapTest, TestPopulateFromXml) {
       "drake/multibody/parsing/test/package_map_test_package_conflicting/"
       "package.xml");
   DRAKE_EXPECT_THROWS_MESSAGE(
-      package_map.AddPackageXml(conflicting_xml_filename), std::runtime_error,
+      package_map.AddPackageXml(conflicting_xml_filename),
       ".*conflicts with.*");
 }
 
@@ -215,8 +215,10 @@ GTEST_TEST(PackageMapTest, TestPopulateMapFromFolderExtraTrailingSlashes) {
   VerifyMatchWithTestDataRoot(package_map);
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 // Tests that PackageMap can be populated by crawling up a directory tree.
-GTEST_TEST(PackageMapTest, TestPopulateUpstreamToDrake) {
+GTEST_TEST(PackageMapTest, DeprecatedTestPopulateUpstreamToDrake) {
   const string root_path = GetTestDataRoot();
   const string sdf_file_name = FindResourceOrThrow(
       "drake/multibody/parsing/test/"
@@ -236,6 +238,7 @@ GTEST_TEST(PackageMapTest, TestPopulateUpstreamToDrake) {
   package_map.PopulateUpstreamToDrake(sdf_file_name);
   VerifyMatch(package_map, expected_packages);
 }
+#pragma GCC diagnostic pop
 
 // Tests that PackageMap can be populated from an env var.
 GTEST_TEST(PackageMapTest, TestPopulateFromEnvironment) {

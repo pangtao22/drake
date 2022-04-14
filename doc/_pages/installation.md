@@ -16,7 +16,6 @@ officially supports:
 
 | Operating System ⁽⁴⁾             | Architecture | Python  |
 |----------------------------------|--------------|---------|
-| Ubuntu 18.04 LTS (Bionic Beaver) | x86_64 ⁽¹⁾   | 3.6 ⁽³⁾ |
 | Ubuntu 20.04 LTS (Focal Fossa)   | x86_64 ⁽¹⁾   | 3.8 ⁽³⁾ |
 | macOS Big Sur (11)               | x86_64 ⁽²⁾   | 3.9 ⁽³⁾ |
 | macOS Monterey (12)              | x86_64 ⁽²⁾   | 3.9 ⁽³⁾ |
@@ -28,11 +27,18 @@ improvements in the Broadwell architecture in 2014. Drake is compiled with
 machines). Drake can be used on older machines if necessary by building from
 source with that flag removed.
 
-⁽²⁾ Running Drake under Rosetta 2 emulation on arm64 is not supported. Plans
+⁽²⁾ For users running on Apple's newer arm64 hardware, refer to
+[Running under Rosetta 2](/rosetta2.html)
+for instructions on running using x86_64 emulation.
+Building and running directly on arm64 is not yet supported; plans
 for any future arm64 support on macOS and/or Ubuntu are discussed in
 [issue #13514](https://github.com/RobotLocomotion/drake/issues/13514).
 
 ⁽³⁾ CPython is the only Python implementation supported.
+Drake does not support the Python environment supplied by Anaconda. Before
+installing or using Drake, please `conda deactivate` (repeatedly, until even
+the conda base environment has been deactivated) such that none of the paths
+reported `which -a python python3` refer to conda.
 
 ⁽⁴⁾ Drake features that perform image rendering (e.g., camera simulation)
 require a working display server.  Most personal computers will have this
@@ -44,7 +50,6 @@ compiler as our releases:
 
 | Operating System                 | C/C++ Compiler                 |
 |----------------------------------|--------------------------------|
-| Ubuntu 18.04 LTS (Bionic Beaver) | GCC 7.5                        |
 | Ubuntu 20.04 LTS (Focal Fossa)   | GCC 9.3                        |
 | macOS Big Sur (11)               | Apple LLVM 12.0.0 (Xcode 12.4) |
 | macOS Monterey (12)              | Apple LLVM 12.0.0 (Xcode 12.4) |
@@ -58,6 +63,8 @@ For new users, we recommend using the stable releases.  New releases
 will be announced on Drake's GitHub
 [releases](https://github.com/RobotLocomotion/drake/releases) page and
 documented in Drake's [Release Notes](/release_notes/release_notes.html).
+Refer to our [Drake Stability Guidelines](/stable.html) for our policy
+on API changes.
 
 Experienced users who want access to the latest features may use the
 nightly builds.
@@ -79,6 +86,9 @@ All other packages support both C++ and/or Python.
 
 Alternatively, you can skip the pre-compiled binaries and
 [build Drake from source](/from_source.html).
+
+Drake's binary releases do not support the MOSEK™ nor Gurobi solvers.
+To use MOSEK™ or Gurobi, you must build Drake from source.
 
 We're considering adding macOS support for Homebrew, i.e., ``brew install
 drake``.  Please upvote or comment on

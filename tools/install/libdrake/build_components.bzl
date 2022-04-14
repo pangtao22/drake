@@ -60,13 +60,17 @@ LIBDRAKE_COMPONENTS = [
     "//multibody/benchmarks/pendulum",
     "//multibody/constraint",
     "//multibody/contact_solvers",
+    "//multibody/contact_solvers/sap",
     "//multibody/hydroelastics",
     "//multibody/inverse_kinematics",
     "//multibody/math",
+    "//multibody/meshcat",
     "//multibody/optimization",
     "//multibody/parsing",
     "//multibody/plant",
     "//multibody/plant:contact_results_to_lcm",  # unpackaged
+    "//multibody/plant:contact_results_to_meshcat",  # unpackaged
+    "//multibody/plant:contact_results_to_meshcat_params",  # unpackaged
     "//multibody/topology:multibody_graph",  # unpackaged
     "//multibody/tree",
     "//multibody/triangle_quadrature",
@@ -87,6 +91,4 @@ LIBDRAKE_COMPONENTS = [
     # //common:filesystem (indirectly)
     # //common:nice_type_name_override_header (indirectly)
     # //geometry/render/gl_renderer:apple_only_no_render_engine_gl_factory (indirectly)  # noqa
-    # //third_party/com_github_finetjul_bender:vtkCapsuleSource (indirectly)
-    # //third_party/com_github_jbeder_yaml_cpp:emitfromevents (indirectly)
 ]

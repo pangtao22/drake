@@ -7,11 +7,18 @@ import argparse
 from fnmatch import fnmatch
 import os
 from os.path import join, relpath
+import shutil
 import sys
 
 from bazel_tools.tools.python.runfiles import runfiles
 
-from drake.doc.defs import check_call, main, symlink_input, verbose
+from drake.doc.defs import (
+    check_call,
+    main,
+    perl_cleanup_html_output,
+    symlink_input,
+    verbose,
+)
 
 
 def _symlink_headers(*, drake_workspace, temp_dir, modules):
@@ -99,6 +106,30 @@ def _generate_doxyfile(*, manifest, out_dir, temp_dir, dot):
         ])
     assert os.path.exists(output_filename)
     return output_filename
+
+
+def _generate_doxygen_header(*, doxygen, temp_dir):
+    """Creates Drake's header.html based on a patch to Doxygen's default
+    header template.
+    """
+    # This matches Doxyfile_CXX.
+    header_path = f"{temp_dir}/drake/doc/doxygen_cxx/header.html"
+
+    # Extract the default templates from the Doxygen binary. We only want the
+    # header, but it forces us to create all three in this exact order.
+    scratch_files = [
+        "header.html.orig",
+        "footer.html.orig",
+        "customdoxygen.css.orig",
+    ]
+    check_call([doxygen, "-w", "html"] + scratch_files, cwd=temp_dir)
+    shutil.copy(f"{temp_dir}/header.html.orig", header_path)
+    for orig in scratch_files:
+        os.remove(f"{temp_dir}/{orig}")
+
+    # Apply our patch.
+    patch_file = f"{header_path}.patch"
+    check_call(["/usr/bin/patch", header_path, patch_file])
 
 
 def _is_important_warning(line):
@@ -197,6 +228,10 @@ def _build(*, out_dir, temp_dir, modules, quick):
     # Prepare our input.
     symlink_input(
         "drake/doc/doxygen_cxx/doxygen_input.txt", temp_dir)
+    _generate_doxygen_header(
+        doxygen=doxygen,
+        temp_dir=temp_dir,
+    )
     _symlink_headers(
         drake_workspace=drake_workspace,
         temp_dir=temp_dir,
@@ -217,15 +252,8 @@ def _build(*, out_dir, temp_dir, modules, quick):
         ]
     _postprocess_doxygen_log(lines, check_for_errors)
 
-    # Collect the list of all HTML output files.
-    html_files = []
-    for dirpath, _, filenames in os.walk(out_dir):
-        for filename in filenames:
-            if filename.endswith(".html"):
-                html_files.append(relpath(join(dirpath, filename), out_dir))
-
     # Fix the formatting of deprecation text (see drake#15619 for an example).
-    perl_statements = [
+    extra_perl_statements = [
         # Remove quotes around the removal date.
         r's#(removed from Drake on or after) "(....-..-..)" *\.#\1 \2.#;',
         # Remove all quotes within the explanation text, i.e., the initial and
@@ -238,11 +266,9 @@ def _build(*, out_dir, temp_dir, modules, quick):
         # <dd><a class="anchor" id="_deprecated000013"></a>"Use RotationMatrix::MakeFromOneVector()." <br />  # noqa
         r'while (s#(?<=_deprecated\d{6}")([^"]*)"(.*?<br)#\1\2#) {};',
     ]
-    while html_files:
-        # Work in batches of 100, so we don't overflow the argv limit.
-        first, html_files = html_files[:100], html_files[100:]
-        check_call(["perl", "-pi", "-e", "".join(perl_statements)] + first,
-                   cwd=out_dir)
+    perl_cleanup_html_output(
+        out_dir=out_dir,
+        extra_perl_statements=extra_perl_statements)
 
     # The nominal pages to offer for preview.
     return ["", "classes.html", "modules.html"]

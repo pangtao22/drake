@@ -9,6 +9,7 @@
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/expect_no_throw.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
+#include "drake/common/test_utilities/limit_malloc.h"
 #include "drake/math/autodiff_gradient.h"
 #include "drake/math/rigid_transform.h"
 #include "drake/math/roll_pitch_yaw.h"
@@ -122,72 +123,85 @@ void VerifyModelBasics(const MultibodyTree<T>& model) {
 
   // Get links by name.
   for (const std::string& link_name : kLinkNames) {
+    drake::test::LimitMalloc guard;
     const Body<T>& link = model.GetBodyByName(link_name);
     EXPECT_EQ(link.name(), link_name);
   }
   DRAKE_EXPECT_THROWS_MESSAGE(
-      model.GetBodyByName(kInvalidName), std::logic_error,
+      model.GetBodyByName(kInvalidName),
       ".*There is no Body named.*");
   DRAKE_EXPECT_THROWS_MESSAGE(
       model.GetBodyByName(kLinkNames[0], world_model_instance()),
-      std::logic_error,
       ".*There is no Body.*but one does exist in other model instances.*");
+
+  // Test that calling GetBodyByName() with an invalid ModelInstanceIndex
+  // throws.
+  const ModelInstanceIndex kInvalidIndex(1<<30);
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      model.GetBodyByName(kLinkNames[0], kInvalidIndex),
+      ".*There is no model instance.*in the model.*");
 
   // Test we can also retrieve links as RigidBody objects.
   for (const std::string& link_name : kLinkNames) {
+    drake::test::LimitMalloc guard;
     const RigidBody<T>& link = model.GetRigidBodyByName(link_name);
     EXPECT_EQ(link.name(), link_name);
   }
   DRAKE_EXPECT_THROWS_MESSAGE(
-      model.GetRigidBodyByName(kInvalidName), std::logic_error,
+      model.GetRigidBodyByName(kInvalidName),
       ".*There is no Body named.*");
 
   // Get frames by name.
   for (const std::string& frame_name : kFrameNames) {
+    drake::test::LimitMalloc guard;
     const Frame<T>& frame = model.GetFrameByName(frame_name);
     EXPECT_EQ(frame.name(), frame_name);
     EXPECT_EQ(
         &frame, &model.GetFrameByName(frame_name, default_model_instance()));
   }
   DRAKE_EXPECT_THROWS_MESSAGE(
-      model.GetFrameByName(kInvalidName), std::logic_error,
+      model.GetFrameByName(kInvalidName),
       ".*There is no Frame named.*");
 
   // Get joints by name.
   for (const std::string& joint_name : kJointNames) {
+    drake::test::LimitMalloc guard;
     const Joint<T>& joint = model.GetJointByName(joint_name);
     EXPECT_EQ(joint.name(), joint_name);
   }
   DRAKE_EXPECT_THROWS_MESSAGE(
-      model.GetJointByName(kInvalidName), std::logic_error,
+      model.GetJointByName(kInvalidName),
       ".*There is no Joint named.*");
 
   // Templatized version to obtain a particular known type of joint.
   for (const std::string& joint_name : kJointNames) {
+    drake::test::LimitMalloc guard;
     const RevoluteJoint<T>& joint =
         model.template GetJointByName<RevoluteJoint>(joint_name);
     EXPECT_EQ(joint.name(), joint_name);
   }
   DRAKE_EXPECT_THROWS_MESSAGE(
       model.template GetJointByName<RevoluteJoint>(kInvalidName),
-      std::logic_error, ".*There is no Joint named.*");
+      ".*There is no Joint named.*");
   DRAKE_EXPECT_THROWS_MESSAGE(
       model.template GetJointByName<PrismaticJoint>(kJointNames[0]),
-      std::logic_error, ".*not of type.*PrismaticJoint.*but.*RevoluteJoint.*");
+      ".*not of type.*PrismaticJoint.*but.*RevoluteJoint.*");
 
   // Get actuators by name.
   for (const std::string& actuator_name : kActuatorNames) {
+    drake::test::LimitMalloc guard;
     const JointActuator<T>& actuator =
         model.GetJointActuatorByName(actuator_name);
     EXPECT_EQ(actuator.name(), actuator_name);
   }
   DRAKE_EXPECT_THROWS_MESSAGE(
-      model.GetJointActuatorByName(kInvalidName), std::logic_error,
+      model.GetJointActuatorByName(kInvalidName),
       ".*There is no JointActuator named.*");
 
   // Test we can retrieve joints from the actuators.
   int names_index = 0;
   for (const std::string& actuator_name : kActuatorNames) {
+    drake::test::LimitMalloc guard;
     const JointActuator<T>& actuator =
         model.GetJointActuatorByName(actuator_name);
     // We added actuators and joints in the same order. Assert this before
@@ -217,7 +231,6 @@ GTEST_TEST(MultibodyTree, VerifyModelBasics) {
   DRAKE_EXPECT_THROWS_MESSAGE(
       model->AddRigidBody("iiwa_link_5", default_model_instance(),
                           SpatialInertia<double>()),
-      std::logic_error,
       /* Verify this method is throwing for the right reasons. */
       ".* already contains a body named 'iiwa_link_5'. "
       "Body names must be unique within a given model.");
@@ -230,7 +243,6 @@ GTEST_TEST(MultibodyTree, VerifyModelBasics) {
           model->world_body(), std::nullopt,
           model->GetBodyByName("iiwa_link_5"), std::nullopt,
           Vector3<double>::UnitZ()),
-      std::logic_error,
       /* Verify this method is throwing for the right reasons. */
       ".* already contains a joint named 'iiwa_joint_4'. "
       "Joint names must be unique within a given model.");
@@ -241,7 +253,6 @@ GTEST_TEST(MultibodyTree, VerifyModelBasics) {
       model->AddJointActuator(
           "iiwa_actuator_4",
           model->GetJointByName("iiwa_joint_4")),
-      std::logic_error,
       /* Verify this method is throwing for the right reasons. */
       ".* already contains a joint actuator named 'iiwa_actuator_4'. "
           "Joint actuator names must be unique within a given model.");
@@ -277,13 +288,13 @@ GTEST_TEST(MultibodyTree, RetrievingAmbiguousNames) {
   // Checking if the name exists throws (unfortunately), unless we specify the
   // intended model instance.
   DRAKE_EXPECT_THROWS_MESSAGE(
-      model->HasBodyNamed(link_name), std::logic_error,
+      model->HasBodyNamed(link_name),
       ".*Body.*appears in multiple model instances.*disambiguate.*");
   EXPECT_TRUE(model->HasBodyNamed(link_name, default_model_instance()));
 
   // Accessing by name throws, unless we specify the intended model instance.
   DRAKE_EXPECT_THROWS_MESSAGE(
-      model->GetBodyByName(link_name), std::logic_error,
+      model->GetBodyByName(link_name),
       ".*Body.*appears in multiple model instances.*disambiguate.*");
   EXPECT_NO_THROW(model->GetBodyByName(link_name, default_model_instance()));
 }
@@ -312,7 +323,7 @@ GTEST_TEST(MultibodyTreeSystem, CatchBadBehavior) {
   DRAKE_EXPECT_NO_THROW(finalized.mutable_tree());
 
   // Make the MBSystem behave badly.
-  DRAKE_EXPECT_THROWS_MESSAGE(BadDerivedMBSystem(true), std::logic_error,
+  DRAKE_EXPECT_THROWS_MESSAGE(BadDerivedMBSystem(true),
                               ".*Finalize().*repeated.*not allowed.*");
 
   auto model = std::make_unique<MultibodyTree<double>>();
@@ -320,14 +331,14 @@ GTEST_TEST(MultibodyTreeSystem, CatchBadBehavior) {
   EXPECT_EQ(model, nullptr);  // Should have been moved from.
 
   DRAKE_EXPECT_THROWS_MESSAGE(
-      MultibodyTreeSystem<double>(std::move(model)), std::logic_error,
+      MultibodyTreeSystem<double>(std::move(model)),
       ".*MultibodyTreeSystem().*MultibodyTree was null.*");
 }
 
 GTEST_TEST(MultibodyTree, BackwardsCompatibility) {
   auto owned_tree = std::make_unique<MultibodyTree<double>>();
   auto* tree = owned_tree.get();
-  DRAKE_EXPECT_THROWS_MESSAGE(tree->CreateDefaultContext(), std::runtime_error,
+  DRAKE_EXPECT_THROWS_MESSAGE(tree->CreateDefaultContext(),
                               ".*that is owned by a MultibodyPlant.*");
   MultibodyTreeSystem<double> system(std::move(owned_tree));
   DRAKE_EXPECT_NO_THROW(tree->CreateDefaultContext());
@@ -646,6 +657,13 @@ TEST_F(KukaIiwaModelTests, StateAccess) {
   tree().get_mutable_state_segment(&context_->get_mutable_state(), 8, 3) << -1,
       -2, -3;
   check_segments();
+
+  EXPECT_TRUE(CompareMatrices(
+      tree().GetEffortLowerLimits(),
+      Eigen::VectorXd::Constant(7, -std::numeric_limits<double>::infinity())));
+  EXPECT_TRUE(CompareMatrices(
+      tree().GetEffortUpperLimits(),
+      Eigen::VectorXd::Constant(7, std::numeric_limits<double>::infinity())));
 }
 
 // This test helps verify MultibodyTree::CalcJacobianTranslationalVelocity()
