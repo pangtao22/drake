@@ -99,8 +99,8 @@ TestEllipsoidsSeparation::TestEllipsoidsSeparation() {
   VectorX<symbolic::Expression> lorentz_expr2(1 + R2_.cols());
   lorentz_expr1 << t_(0), R1_.transpose() * a_;
   lorentz_expr2 << t_(1), R2_.transpose() * a_;
-  prog_.AddLorentzConeConstraint(lorentz_expr1).evaluator();
-  prog_.AddLorentzConeConstraint(lorentz_expr2).evaluator();
+  prog_.AddLorentzConeConstraint(lorentz_expr1);
+  prog_.AddLorentzConeConstraint(lorentz_expr2);
   // a'*(x2 - x1) = 1
   prog_.AddLinearEqualityConstraint((x2_ - x1_).transpose(), 1.0, a_);
 
@@ -109,8 +109,10 @@ TestEllipsoidsSeparation::TestEllipsoidsSeparation() {
 }
 
 void TestEllipsoidsSeparation::SolveAndCheckSolution(
-    const SolverInterface& solver, double tol) {
-  MathematicalProgramResult result = RunSolver(prog_, solver);
+    const SolverInterface& solver,
+    const std::optional<SolverOptions>& solver_options, double tol) {
+  MathematicalProgramResult result =
+      RunSolver(prog_, solver, {}, solver_options);
 
   // Check the solution.
   // First check if each constraint is satisfied.
@@ -351,8 +353,10 @@ TestFindSpringEquilibrium::TestFindSpringEquilibrium() {
 }
 
 void TestFindSpringEquilibrium::SolveAndCheckSolution(
-    const SolverInterface& solver, double tol) {
-  const MathematicalProgramResult result = RunSolver(prog_, solver);
+    const SolverInterface& solver,
+    const std::optional<SolverOptions>& solver_options, double tol) {
+  const MathematicalProgramResult result =
+      RunSolver(prog_, solver, {}, solver_options);
 
   const std::optional<SolverId> solver_id = result.get_solver_id();
   ASSERT_TRUE(solver_id);
@@ -499,11 +503,12 @@ void SmallestEllipsoidCoveringProblem1::CheckSolutionExtra(
 }
 
 void SolveAndCheckSmallestEllipsoidCoveringProblems(
-    const SolverInterface& solver, double tol) {
+    const SolverInterface& solver,
+    const std::optional<SolverOptions>& solver_options, double tol) {
   SmallestEllipsoidCoveringProblem1 prob1;
   if (solver.available()) {
     MathematicalProgramResult result;
-    solver.Solve(prob1.prog(), {}, {}, &result);
+    solver.Solve(prob1.prog(), {}, solver_options, &result);
     prob1.CheckSolution(result, tol);
   }
 
@@ -518,7 +523,7 @@ void SolveAndCheckSmallestEllipsoidCoveringProblems(
   SmallestEllipsoidCoveringProblem prob_3d(points_3d);
   if (solver.available()) {
     MathematicalProgramResult result;
-    solver.Solve(prob_3d.prog(), {}, {}, &result);
+    solver.Solve(prob_3d.prog(), {}, solver_options, &result);
     prob_3d.CheckSolution(result, tol);
   }
 
@@ -533,7 +538,7 @@ void SolveAndCheckSmallestEllipsoidCoveringProblems(
   SmallestEllipsoidCoveringProblem prob_4d(points_4d);
   if (solver.available()) {
     MathematicalProgramResult result;
-    solver.Solve(prob_4d.prog(), {}, {}, &result);
+    solver.Solve(prob_4d.prog(), {}, solver_options, &result);
     prob_4d.CheckSolution(result, tol);
   }
 }
@@ -589,6 +594,30 @@ void TestSocpDualSolution2(const SolverInterface& solver,
     // This Lorentz cone is not activated, hence its dual should be zero.
     EXPECT_TRUE(CompareMatrices(result.GetDualSolution(constraint2),
                                 Eigen::Vector2d(0, 0), tol));
+  }
+}
+
+void TestSocpDuplicatedVariable1(
+    const SolverInterface& solver,
+    const std::optional<SolverOptions>& solver_options, double tol) {
+  MathematicalProgram prog;
+  const auto x = prog.NewContinuousVariables<2>();
+  // Add the constraint that
+  // (1, x0, sqrt(3)*x1, -sqrt(3)*x0) is in the Lorentz cone.
+  Eigen::Matrix<double, 4, 3> A;
+  A.setZero();
+  A(1, 0) = 1;
+  A(2, 1) = std::sqrt(3);
+  A(3, 2) = -std::sqrt(3);
+  prog.AddLorentzConeConstraint(A, Eigen::Vector4d(1, 0, 0, 0),
+                                Vector3<symbolic::Variable>(x(0), x(1), x(0)));
+  prog.AddLinearCost(x(0) + x(1));
+  if (solver.available()) {
+    MathematicalProgramResult result;
+    solver.Solve(prog, std::nullopt, solver_options, &result);
+    EXPECT_TRUE(result.is_success());
+    const Eigen::Vector2d x_sol = result.GetSolution(x);
+    EXPECT_NEAR(4 * x_sol(0) * x_sol(0) + 3 * x_sol(1) * x_sol(1), 1, tol);
   }
 }
 }  // namespace test

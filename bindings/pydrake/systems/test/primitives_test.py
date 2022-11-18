@@ -11,6 +11,7 @@ from pydrake.systems.framework import (
     BasicVector,
     DiagramBuilder,
     DiagramBuilder_,
+    InputPort,
     TriggerType,
     VectorBase,
 )
@@ -43,8 +44,10 @@ from pydrake.systems.primitives import (
     ObservabilityMatrix,
     PassThrough, PassThrough_,
     PerceptronActivationType,
+    PortSwitch, PortSwitch_,
     RandomSource,
     Saturation, Saturation_,
+    SharedPointerSystem, SharedPointerSystem_,
     Sine, Sine_,
     StateInterpolatorWithDiscreteDerivative,
     StateInterpolatorWithDiscreteDerivative_,
@@ -94,7 +97,9 @@ class TestGeneral(unittest.TestCase):
         self._check_instantiations(Multiplexer_)
         self._check_instantiations(MultilayerPerceptron_)
         self._check_instantiations(PassThrough_)
+        self._check_instantiations(PortSwitch_)
         self._check_instantiations(Saturation_)
+        self._check_instantiations(SharedPointerSystem_)
         self._check_instantiations(Sine_)
         self._check_instantiations(StateInterpolatorWithDiscreteDerivative_)
         self._check_instantiations(SymbolicVectorSystem_)
@@ -284,6 +289,14 @@ class TestGeneral(unittest.TestCase):
         system.CalcOutput(context, output)
         output_value = output.get_data(0)
         compare_value(self, output_value, model_value)
+
+    def test_port_switch(self):
+        system = PortSwitch(vector_size=2)
+        a = system.DeclareInputPort(name="a")
+        system.DeclareInputPort(name="b")
+        context = system.CreateDefaultContext()
+        self.assertIsInstance(a, InputPort)
+        system.get_port_selector_input_port().FixValue(context, a.get_index())
 
     def test_first_order_low_pass_filter(self):
         filter1 = FirstOrderLowPassFilter(time_constant=3.0, size=4)
@@ -623,6 +636,26 @@ class TestGeneral(unittest.TestCase):
         ZeroOrderHold(
             period_sec=0.1,
             abstract_model_value=AbstractValue.Make("Hello world"))
+
+    def test_shared_pointer_system_ctor(self):
+        dut = SharedPointerSystem(value_to_hold=[1, 2, 3])
+        readback = dut.get()
+        self.assertListEqual(readback, [1, 2, 3])
+        del dut
+        self.assertListEqual(readback, [1, 2, 3])
+
+    def test_shared_pointer_system_builder(self):
+        builder = DiagramBuilder()
+        self.assertListEqual(
+            SharedPointerSystem.AddToBuilder(
+                builder=builder, value_to_hold=[1, 2, 3]),
+            [1, 2, 3])
+        diagram = builder.Build()
+        del builder
+        readback = diagram.GetSystems()[0].get()
+        self.assertListEqual(readback, [1, 2, 3])
+        del diagram
+        self.assertListEqual(readback, [1, 2, 3])
 
     def test_sine(self):
         # Test scalar output.

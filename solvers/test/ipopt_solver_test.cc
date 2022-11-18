@@ -1,7 +1,10 @@
 #include "drake/solvers/ipopt_solver.h"
 
+#include <filesystem>
+
 #include <gtest/gtest.h>
 
+#include "drake/common/temp_directory.h"
 #include "drake/solvers/mathematical_program.h"
 #include "drake/solvers/test/linear_program_examples.h"
 #include "drake/solvers/test/mathematical_program_test_util.h"
@@ -211,6 +214,11 @@ GTEST_TEST(IpoptSolverTest, TestNonconvexQP) {
   }
 }
 
+GTEST_TEST(IpoptSolverTest, TestL2NormCost) {
+  IpoptSolver solver;
+  TestL2NormCost(solver, 1e-6);
+}
+
 /* Tests the solver's processing of the verbosity options. With multiple ways
  to request verbosity (common options and solver-specific options), we simply
  apply a smoke test that none of the means causes runtime errors. Note, we
@@ -257,10 +265,31 @@ GTEST_TEST(IpoptSolverTest, SolverOptionsVerbosity) {
   }
 }
 
+// This is to verify we can set the print out file through CommonSolverOption.
+GTEST_TEST(IpoptSolverTest, PrintToFile) {
+  MathematicalProgram prog;
+  auto x = prog.NewContinuousVariables(1);
+  prog.AddLinearConstraint(x(0) <= 3);
+  prog.AddLinearConstraint(x(0) >= -3);
+  prog.AddLinearCost(x(0));
+
+  const std::string filename = temp_directory() + "/ipopt.log";
+  EXPECT_FALSE(std::filesystem::exists({filename}));
+  SolverOptions solver_options;
+  solver_options.SetOption(CommonSolverOption::kPrintFileName, filename);
+
+  IpoptSolver solver;
+  if (solver.is_available()) {
+    const auto result = solver.Solve(prog, {}, solver_options);
+    EXPECT_TRUE(result.is_success());
+    EXPECT_TRUE(std::filesystem::exists({filename}));
+  }
+}
+
 TEST_P(TestEllipsoidsSeparation, TestSOCP) {
   IpoptSolver ipopt_solver;
   if (ipopt_solver.available()) {
-    SolveAndCheckSolution(ipopt_solver, 1.E-8);
+    SolveAndCheckSolution(ipopt_solver, {}, 1.E-8);
   }
 }
 
@@ -283,7 +312,7 @@ INSTANTIATE_TEST_SUITE_P(IpoptSolverTest, TestQPasSOCP,
 TEST_P(TestFindSpringEquilibrium, TestSOCP) {
   IpoptSolver ipopt_solver;
   if (ipopt_solver.available()) {
-    SolveAndCheckSolution(ipopt_solver, 2E-3);
+    SolveAndCheckSolution(ipopt_solver, {}, 2E-3);
   }
 }
 
@@ -311,7 +340,7 @@ GTEST_TEST(TestSOCP, MaximizeGeometricMeanTrivialProblem2) {
 
 GTEST_TEST(TestSOCP, SmallestEllipsoidCoveringProblem) {
   IpoptSolver solver;
-  SolveAndCheckSmallestEllipsoidCoveringProblems(solver, 1E-6);
+  SolveAndCheckSmallestEllipsoidCoveringProblems(solver, {}, 1E-6);
 }
 
 GTEST_TEST(TestLP, PoorScaling) {
@@ -319,6 +348,7 @@ GTEST_TEST(TestLP, PoorScaling) {
   TestLPPoorScaling1(solver, true, 1E-6);
   TestLPPoorScaling2(solver, true, 1E-4);
 }
+
 }  // namespace test
 }  // namespace solvers
 }  // namespace drake

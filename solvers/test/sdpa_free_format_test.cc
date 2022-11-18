@@ -1,14 +1,15 @@
 #include "drake/solvers/sdpa_free_format.h"
 
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <utility>
 
 #include <gtest/gtest.h>
 
-#include "drake/common/filesystem.h"
 #include "drake/common/temp_directory.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
+#include "drake/common/test_utilities/expect_throws_message.h"
 #include "drake/solvers/csdp_solver_internal.h"
 #include "drake/solvers/test/csdp_test_examples.h"
 
@@ -1034,6 +1035,44 @@ TEST_F(TrivialSOCP1, RemoveFreeVariableByLorentzConeSlackApproach) {
   TestRemoveFreeVariableByLorentzConeSlackApproach(*prog_);
 }
 
+GTEST_TEST(SdpaFreeFormatTest, EmptyConstraint) {
+  // Tests a program that contains an empty constraint 0 == 0.
+  // Construct SdpaFreeFormat with and without the empty constraint, they should
+  // be the same.
+  MathematicalProgram prog{};
+  const auto X = prog.NewSymmetricContinuousVariables<2>();
+  prog.AddPositiveSemidefiniteConstraint(X);
+  const auto x = prog.NewContinuousVariables<1>();
+  prog.AddBoundingBoxConstraint(-1, 1, x);
+  SdpaFreeFormat dut_no_empty_constraint(prog);
+  prog.AddLinearEqualityConstraint(Vector1d(0), 0, x);
+  SdpaFreeFormat dut_empty_constraint(prog);
+  EXPECT_EQ(dut_empty_constraint.num_X_rows(),
+            dut_no_empty_constraint.num_X_rows());
+  EXPECT_EQ(dut_empty_constraint.num_free_variables(),
+            dut_no_empty_constraint.num_free_variables());
+  EXPECT_EQ(dut_empty_constraint.constant_min_cost_term(),
+            dut_no_empty_constraint.constant_min_cost_term());
+  EXPECT_EQ(dut_empty_constraint.A().size(),
+            dut_no_empty_constraint.A().size());
+  for (int i = 0; i < static_cast<int>(dut_empty_constraint.A().size()); ++i) {
+    EXPECT_TRUE(CompareMatrices(dut_empty_constraint.A()[i].toDense(),
+                                dut_no_empty_constraint.A()[i].toDense()));
+  }
+  EXPECT_TRUE(CompareMatrices(dut_empty_constraint.C().toDense(),
+                              dut_no_empty_constraint.C().toDense()));
+  EXPECT_TRUE(CompareMatrices(dut_empty_constraint.B().toDense(),
+                              dut_no_empty_constraint.B().toDense()));
+  EXPECT_TRUE(CompareMatrices(dut_empty_constraint.d().toDense(),
+                              dut_no_empty_constraint.d().toDense()));
+
+  // Now add an infeasible empty constraint, expect an exception.
+  prog.AddLinearConstraint(Eigen::RowVector2d(0, 0), 1, kInf,
+                           Vector2<symbolic::Variable>(X(0, 0), X(1, 1)));
+  DRAKE_EXPECT_THROWS_MESSAGE(SdpaFreeFormat(prog),
+                              ".* the problem is infeasible as it contains.*");
+}
+
 }  // namespace internal
 GTEST_TEST(SdpaFreeFormatTest, GenerateSDPA1) {
   // This is the sample program from http://plato.asu.edu/ftp/sdpa_format.txt
@@ -1049,7 +1088,7 @@ GTEST_TEST(SdpaFreeFormatTest, GenerateSDPA1) {
 
   const std::string file_name = temp_directory() + "/sdpa";
   EXPECT_TRUE(GenerateSDPA(prog, file_name));
-  EXPECT_TRUE(filesystem::exists({file_name + ".dat-s"}));
+  EXPECT_TRUE(std::filesystem::exists({file_name + ".dat-s"}));
 
   std::ifstream infile(file_name + ".dat-s");
   ASSERT_TRUE(infile.is_open());
@@ -1108,7 +1147,7 @@ GTEST_TEST(SdpaFreeFormatTest, GenerateSDPA_remove_free_variables_two_slack) {
   const std::string file_name = temp_directory() + "/sdpa_free1";
   EXPECT_TRUE(GenerateSDPA(prog, file_name,
                            RemoveFreeVariableMethod::kTwoSlackVariables));
-  EXPECT_TRUE(filesystem::exists({file_name + ".dat-s"}));
+  EXPECT_TRUE(std::filesystem::exists({file_name + ".dat-s"}));
 
   std::ifstream infile(file_name + ".dat-s");
   ASSERT_TRUE(infile.is_open());
@@ -1155,7 +1194,7 @@ GTEST_TEST(SdpaFreeFormatTest, GenerateSDPA_remove_free_variables_null_space) {
   const std::string file_name = temp_directory() + "/sdpa_free2";
   EXPECT_TRUE(GenerateSDPA(prog, file_name,
                            RemoveFreeVariableMethod::kNullspace));
-  EXPECT_TRUE(filesystem::exists({file_name + ".dat-s"}));
+  EXPECT_TRUE(std::filesystem::exists({file_name + ".dat-s"}));
   std::ifstream infile(file_name + ".dat-s");
   ASSERT_TRUE(infile.is_open());
   std::string line;
@@ -1188,7 +1227,7 @@ GTEST_TEST(SdpaFreeFormatTest,
   const std::string file_name = temp_directory() + "/sdpa_free3";
   EXPECT_TRUE(GenerateSDPA(prog, file_name,
                            RemoveFreeVariableMethod::kLorentzConeSlack));
-  EXPECT_TRUE(filesystem::exists({file_name + ".dat-s"}));
+  EXPECT_TRUE(std::filesystem::exists({file_name + ".dat-s"}));
 
   std::ifstream infile(file_name + ".dat-s");
   ASSERT_TRUE(infile.is_open());

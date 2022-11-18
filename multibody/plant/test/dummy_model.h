@@ -22,7 +22,7 @@ using systems::OutputPortIndex;
  port that reports the same state.
  @tparam_nonsymbolic_scalar */
 template <typename T>
-class DummyModel : public PhysicalModel<T> {
+class DummyModel final : public PhysicalModel<T> {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(DummyModel);
 
@@ -58,6 +58,13 @@ class DummyModel : public PhysicalModel<T> {
    cloning to a different scalar type. */
   template <typename U>
   friend class DummyModel;
+
+  /* A dummy stub for PhysicalModelPointerVariant. */
+  PhysicalModelPointerVariant<T> DoToPhysicalModelPointerVariant() const final {
+    throw std::logic_error(
+        "DummyModel is used for unit testing only, and is not included in "
+        "PhysicalModelPointerVariant.");
+  }
 
   std::unique_ptr<PhysicalModel<double>> CloneToDouble() const final {
     return CloneToScalar<double>();

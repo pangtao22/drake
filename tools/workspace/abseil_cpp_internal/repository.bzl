@@ -7,11 +7,12 @@ def abseil_cpp_internal_repository(
     github_archive(
         name = name,
         repository = "abseil/abseil-cpp",
-        commit = "3204cc0625230e9876f0310a6dea0014210ab325",
-        sha256 = "1e60f834f9590197b26addf5060381163a02fe25898978727b4ad4eae1b875f9",  # noqa
+        commit = "2b403ec754ec342311720467277c346e413e3438",
+        sha256 = "8deb6cb2b38c407b57afc64cc1b7e6e97f4b6af31fd9094c20d3b5e627d4d30c",  # noqa
         patches = [
-            "@drake//tools/workspace/abseil_cpp_internal:patches/hidden_visibility.patch",  # noqa
-            "@drake//tools/workspace/abseil_cpp_internal:patches/inline_namespace.patch",  # noqa
+            ":patches/disable_int128_on_clang.patch",
+            ":patches/hidden_visibility.patch",
+            ":patches/inline_namespace.patch",
         ],
         patch_cmds = [
             # Force linkstatic = 1 everywhere. First, remove the few existing

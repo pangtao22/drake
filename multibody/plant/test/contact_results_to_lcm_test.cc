@@ -277,8 +277,9 @@ class ContactResultsToLcmTest : public ::testing::Test {
                      MultibodyPlant<T>* plant, vector<string>* body_names,
                      unordered_map<GeometryId, FullBodyName>* id_to_body,
                      FullBodyName ref_name) {
-    const auto& body =
-        plant->AddRigidBody(body_name, model_index, SpatialInertia<double>());
+    // To avoid unnecessary warnings/errors, use a non-zero spatial inertia.
+    const auto& body = plant->AddRigidBody(body_name, model_index,
+        SpatialInertia<double>::MakeUnitary());
     /* The expected format based on knowledge of the ContactResultToLcmSystem's
      implementation. */
     body_names->push_back(fmt::format("{}({})", body_name, model_index));
@@ -406,7 +407,7 @@ TYPED_TEST(ContactResultsToLcmTest, Constructor) {
      match the tables we build by hand. */
     unordered_map<GeometryId, FullBodyName> expected_geo_body_map;
     /* The world body will always be the first listed. */
-    vector<string> expected_body_names{{"WorldBody(0)"}};
+    vector<string> expected_body_names{{"world(0)"}};
 
     auto namer = [use_custom_names](GeometryId id) {
       if (use_custom_names) {
@@ -849,7 +850,9 @@ class ConnectVisualizerTest : public ::testing::Test {
     plant_ = &system_pair.plant;
     scene_graph_ = &system_pair.scene_graph;
 
-    const auto& body = plant_->AddRigidBody("link", SpatialInertia<double>());
+    // To avoid unnecessary warnings/errors, use a non-zero spatial inertia.
+    const auto& body = plant_->AddRigidBody("link",
+        SpatialInertia<double>::MakeUnitary());
     plant_->RegisterCollisionGeometry(body, {}, Sphere(1.0), kGeoName,
                                       CoulombFriction<double>{});
     plant_->Finalize();

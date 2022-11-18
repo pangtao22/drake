@@ -1,5 +1,6 @@
 #include "drake/multibody/parsing/detail_sdf_geometry.h"
 
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -7,12 +8,11 @@
 #include <vector>
 
 #include "fmt/ostream.h"
+#include <drake_vendor/sdf/Root.hh>
+#include <drake_vendor/sdf/parser.hh>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include <sdf/Root.hh>
-#include <sdf/parser.hh>
 
-#include "drake/common/filesystem.h"
 #include "drake/common/find_resource.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
@@ -67,8 +67,9 @@ sdf::ParserConfig MakeStrictConfig() {
 
 sdf::SDFPtr ReadString(const std::string& input) {
   sdf::SDFPtr result(new sdf::SDF());
-  sdf::init(result);
-
+  // TODO(azeey): Use newer DOM API (eg sdf::Root::LoadString) instead of
+  // sdf::init and sdf::readString.
+  sdf::init(result, sdf::ParserConfig{});
   sdf::ParserConfig config = MakeStrictConfig();
   sdf::Errors errors;
   const bool success = sdf::readString(input, config, result, errors);
@@ -111,7 +112,8 @@ unique_ptr<sdf::Geometry> MakeSdfGeometryFromString(
       sdf_parsed->Root()->GetElement("model")->
           GetElement("link")->GetElement("visual")->GetElement("geometry");
   auto sdf_geometry = make_unique<sdf::Geometry>();
-  sdf_geometry->Load(geometry_element);
+  sdf::ParserConfig config = MakeStrictConfig();
+  sdf_geometry->Load(geometry_element, config);
   return sdf_geometry;
 }
 
@@ -142,7 +144,8 @@ unique_ptr<sdf::Visual> MakeSdfVisualFromString(
       sdf_parsed->Root()->GetElement("model")->
           GetElement("link")->GetElement("visual");
   auto sdf_visual = make_unique<sdf::Visual>();
-  sdf_visual->Load(visual_element);
+  sdf::ParserConfig config = MakeStrictConfig();
+  sdf_visual->Load(visual_element, config);
   return sdf_visual;
 }
 
@@ -177,7 +180,8 @@ unique_ptr<sdf::Collision> MakeSdfCollisionFromString(
       sdf_parsed->Root()->GetElement("model")->
           GetElement("link")->GetElement("collision");
   auto sdf_collision = make_unique<sdf::Collision>();
-  sdf_collision->Load(collision_element);
+  sdf::ParserConfig config = MakeStrictConfig();
+  sdf_collision->Load(collision_element, config);
   return sdf_collision;
 }
 
@@ -433,6 +437,22 @@ TEST_F(SceneGraphParserDetail, MakeHeightmapFromSdfGeometry) {
   EXPECT_EQ(shape, nullptr);
 }
 
+// Verify that MakeShapeFromSdfGeometry does nothing with a polyline.
+TEST_F(SceneGraphParserDetail, MakePolylineFromSdfGeometry) {
+  unique_ptr<sdf::Geometry> sdf_geometry = MakeSdfGeometryFromString(
+      "<polyline>"
+      "  <polyline>"
+      "    <point>0 0</point>"
+      "    <point>0 1</point>"
+      "    <point>1 1</point>"
+      "    <point>1 0</point>"
+      "    <height>1</height>"
+      "  </polyline>"
+      "</polyline>");
+  unique_ptr<Shape> shape = MakeShapeFromSdfGeometry(*sdf_geometry);
+  EXPECT_EQ(shape, nullptr);
+}
+
 // Verify MakeGeometryInstanceFromSdfVisual can make a GeometryInstance from an
 // sdf::Visual.
 // Since we test MakeShapeFromSdfGeometry separately, there is no need to unit
@@ -482,7 +502,7 @@ TEST_F(SceneGraphParserDetail, VisualGeometryNameRequirements) {
 
   // A fmt::format-compatible string for testing various permutations of visual
   // names.
-  const std::string visual_tag =
+  constexpr const char* visual_tag =
       "<visual name='{}'>"
       "  <pose>1.0 2.0 3.0 3.14 6.28 1.57</pose>"
       "  <geometry>"
@@ -797,7 +817,7 @@ TEST_F(SceneGraphParserDetail, ParseVisualMaterial) {
   const std::string file_path = FindResourceOrThrow(
       "drake/multibody/parsing/test/urdf_parser_test/empty.png");
   const std::string root_dir =
-      filesystem::path(file_path).parent_path().string();
+      std::filesystem::path(file_path).parent_path().string();
 
   // Case: No material defined -- empty illustration properties.
   {
@@ -1073,7 +1093,7 @@ TEST_F(SceneGraphParserDetail, MakeProximityPropertiesForCollision) {
   // It contains a `{}` place holder such that child tags of <collision> can be
   // injected to test various expressions of collision properties --
   // substitution via fmt::format.
-  const std::string collision_xml = R"""(
+  constexpr const char* collision_xml = R"""(
 <collision name="some_geo">
   <pose>0.0 0.0 0.0 0.0 0.0 0.0</pose>
   <geometry>
@@ -1119,6 +1139,7 @@ TEST_F(SceneGraphParserDetail, MakeProximityPropertiesForCollision) {
     <drake:mesh_resolution_hint>2.5</drake:mesh_resolution_hint>
     <drake:hydroelastic_modulus>3.5</drake:hydroelastic_modulus>
     <drake:hunt_crossley_dissipation>4.5</drake:hunt_crossley_dissipation>
+    <drake:relaxation_time>3.1</drake:relaxation_time>
     <drake:mu_dynamic>4.5</drake:mu_dynamic>
     <drake:mu_static>4.75</drake:mu_static>
   </drake:proximity_properties>)""");
@@ -1130,6 +1151,8 @@ TEST_F(SceneGraphParserDetail, MakeProximityPropertiesForCollision) {
                            geometry::internal::kElastic, 3.5);
     assert_single_property(properties, geometry::internal::kMaterialGroup,
                            geometry::internal::kHcDissipation, 4.5);
+    assert_single_property(properties, geometry::internal::kMaterialGroup,
+                           geometry::internal::kRelaxationTime, 3.1);
     assert_friction(properties, {4.75, 4.5});
   }
 

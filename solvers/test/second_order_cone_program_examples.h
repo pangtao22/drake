@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <vector>
 
@@ -48,8 +49,10 @@ class TestEllipsoidsSeparation
  public:
   TestEllipsoidsSeparation();
 
-  void SolveAndCheckSolution(const SolverInterface& solver,
-                             double tol = 1E-8);
+  void SolveAndCheckSolution(
+      const SolverInterface& solver,
+      const std::optional<SolverOptions>& solver_options = std::nullopt,
+      double tol = 1E-8);
 
  private:
   Eigen::VectorXd x1_;
@@ -138,8 +141,10 @@ class TestFindSpringEquilibrium
  public:
   TestFindSpringEquilibrium();
 
-  void SolveAndCheckSolution(const SolverInterface& solver,
-                             double tol = 2E-3);
+  void SolveAndCheckSolution(
+      const SolverInterface& solver,
+      const std::optional<SolverOptions>& solver_options = std::nullopt,
+      double tol = 2E-3);
 
  private:
   Eigen::VectorXd weight_;
@@ -258,7 +263,8 @@ class SmallestEllipsoidCoveringProblem1
 };
 
 void SolveAndCheckSmallestEllipsoidCoveringProblems(
-    const SolverInterface& solver, double tol);
+    const SolverInterface& solver,
+    const std::optional<SolverOptions>& solver_options, double tol);
 
 /**
  * Computes the minimal distance to a point from a sphere.
@@ -340,6 +346,14 @@ void TestSocpDualSolution1(const SolverInterface& solver,
 void TestSocpDualSolution2(const SolverInterface& solver,
                            const SolverOptions& solver_options, double tol,
                            bool rotated_lorentz_cone_with_coefficient_two);
+
+// We intentionally use duplicated variables in the second order cone constraint
+// to test if Drake's solver wrappers can handle duplicated variables.
+// min x0 + x1
+// s.t 4x0²+3x1² ≤ 1
+void TestSocpDuplicatedVariable1(
+    const SolverInterface& solver,
+    const std::optional<SolverOptions>& solver_options, double tol);
 }  // namespace test
 }  // namespace solvers
 }  // namespace drake

@@ -84,8 +84,7 @@ class RevoluteJoint final : public Joint<T> {
   ///   are exactly the same, that is, `axis_F = axis_M`. In other words,
   ///   `axis_F` (or `axis_M`) is the eigenvector of `R_FM` with eigenvalue
   ///   equal to one.
-  ///   This vector can have any length, only the direction is used. This method
-  ///   aborts if `axis` is the zero vector.
+  ///   This vector can have any length, only the direction is used.
   /// @param[in] pos_lower_limit
   ///   Lower position limit, in radians, for the rotation coordinate
   ///   (see get_angle()).
@@ -97,45 +96,36 @@ class RevoluteJoint final : public Joint<T> {
   ///   joint. The damping torque (in N⋅m) is modeled as `τ = -damping⋅ω`, i.e.
   ///   opposing motion, with ω the angular rate for `this` joint (see
   ///   get_angular_rate()).
+  /// @throws std::exception if the L2 norm of `axis` is less than the square
+  /// root of machine epsilon.
   /// @throws std::exception if damping is negative.
   /// @throws std::exception if pos_lower_limit > pos_upper_limit.
   RevoluteJoint(const std::string& name, const Frame<T>& frame_on_parent,
                 const Frame<T>& frame_on_child, const Vector3<double>& axis,
                 double pos_lower_limit, double pos_upper_limit,
-                double damping = 0)
-      : Joint<T>(name, frame_on_parent, frame_on_child,
-                 VectorX<double>::Constant(1, pos_lower_limit),
-                 VectorX<double>::Constant(1, pos_upper_limit),
-                 VectorX<double>::Constant(
-                     1, -std::numeric_limits<double>::infinity()),
-                 VectorX<double>::Constant(
-                     1, std::numeric_limits<double>::infinity()),
-                 VectorX<double>::Constant(
-                     1, -std::numeric_limits<double>::infinity()),
-                 VectorX<double>::Constant(
-                     1, std::numeric_limits<double>::infinity())) {
-    const double kEpsilon = std::numeric_limits<double>::epsilon();
-    DRAKE_DEMAND(!axis.isZero(kEpsilon));
-    DRAKE_THROW_UNLESS(damping >= 0);
-    axis_ = axis.normalized();
-    damping_ = damping;
-  }
+                double damping = 0);
 
-  const std::string& type_name() const override {
-    static const never_destroyed<std::string> name{kTypeName};
-    return name.access();
-  }
+  const std::string& type_name() const override;
 
   /// Returns the axis of revolution of `this` joint as a unit vector.
   /// Since the measures of this axis in either frame F or M are the same (see
-  /// this class's documentation for frames's definitions) then,
+  /// this class's documentation for frame definitions) then,
   /// `axis = axis_F = axis_M`.
   const Vector3<double>& revolute_axis() const {
     return axis_;
   }
 
   /// Returns `this` joint's damping constant in N⋅m⋅s.
-  double damping() const { return damping_; }
+  double damping() const { return this->damping_vector()[0]; }
+
+  /// Sets the default value of viscous damping for this joint, in N⋅m⋅s.
+  /// @throws std::exception if damping is negative.
+  /// @pre the MultibodyPlant must not be finalized.
+  void set_default_damping(double damping) {
+    DRAKE_THROW_UNLESS(damping >= 0);
+    DRAKE_DEMAND(!this->get_parent_tree().topology_is_valid());
+    this->set_default_damping_vector(Vector1d(damping));
+  }
 
   /// Returns the position lower limit for `this` joint in radians.
   double position_lower_limit() const {
@@ -378,9 +368,6 @@ class RevoluteJoint final : public Joint<T> {
 
   // This is the joint's axis expressed in either M or F since axis_M = axis_F.
   Vector3<double> axis_;
-
-  // This joint's damping constant in N⋅m⋅s.
-  double damping_{0};
 };
 
 template <typename T> const char RevoluteJoint<T>::kTypeName[] = "revolute";

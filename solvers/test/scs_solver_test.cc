@@ -179,10 +179,17 @@ TEST_F(UnboundedLinearProgramTest0, TestUnbounded) {
   }
 }
 
+TEST_F(DuplicatedVariableLinearProgramTest1, Test) {
+  ScsSolver solver;
+  if (solver.is_available()) {
+    CheckSolution(solver, std::nullopt, 1E-5);
+  }
+}
+
 TEST_P(TestEllipsoidsSeparation, TestSOCP) {
   ScsSolver scs_solver;
   if (scs_solver.available()) {
-    SolveAndCheckSolution(scs_solver, kTol);
+    SolveAndCheckSolution(scs_solver, {}, kTol);
   }
 }
 
@@ -202,7 +209,7 @@ INSTANTIATE_TEST_SUITE_P(SCSTest, TestQPasSOCP,
 TEST_P(TestFindSpringEquilibrium, TestSOCP) {
   ScsSolver scs_solver;
   if (scs_solver.available()) {
-    SolveAndCheckSolution(scs_solver, kTol);
+    SolveAndCheckSolution(scs_solver, {}, kTol);
   }
 }
 
@@ -232,8 +239,14 @@ GTEST_TEST(TestSOCP, MaximizeGeometricMeanTrivialProblem2) {
 
 GTEST_TEST(TestSOCP, SmallestEllipsoidCoveringProblem) {
   ScsSolver solver;
-  SolveAndCheckSmallestEllipsoidCoveringProblems(solver, kTol);
+  SolveAndCheckSmallestEllipsoidCoveringProblems(solver, {}, kTol);
 }
+
+GTEST_TEST(TestSOCP, TestSocpDuplicatedVariable1) {
+  ScsSolver solver;
+  TestSocpDuplicatedVariable1(solver, std::nullopt, 1E-6);
+}
+
 
 TEST_P(QuadraticProgramTest, TestQP) {
   ScsSolver solver;
@@ -255,6 +268,13 @@ GTEST_TEST(QPtest, TestUnitBallExample) {
   }
 }
 
+GTEST_TEST(TestDuplicatedVariableQuadraticProgram, Test) {
+  ScsSolver solver;
+  if (solver.available()) {
+    TestDuplicatedVariableQuadraticProgram(solver, 1E-5);
+  }
+}
+
 GTEST_TEST(TestSemidefiniteProgram, TrivialSDP) {
   ScsSolver scs_solver;
   if (scs_solver.available()) {
@@ -265,21 +285,21 @@ GTEST_TEST(TestSemidefiniteProgram, TrivialSDP) {
 GTEST_TEST(TestSemidefiniteProgram, CommonLyapunov) {
   ScsSolver scs_solver;
   if (scs_solver.available()) {
-    FindCommonLyapunov(scs_solver, kTol);
+    FindCommonLyapunov(scs_solver, {}, kTol);
   }
 }
 
 GTEST_TEST(TestSemidefiniteProgram, OuterEllipsoid) {
   ScsSolver scs_solver;
   if (scs_solver.available()) {
-    FindOuterEllipsoid(scs_solver, kTol);
+    FindOuterEllipsoid(scs_solver, {}, kTol);
   }
 }
 
 GTEST_TEST(TestSemidefiniteProgram, EigenvalueProblem) {
   ScsSolver scs_solver;
   if (scs_solver.available()) {
-    SolveEigenvalueProblem(scs_solver, kTol);
+    SolveEigenvalueProblem(scs_solver, {}, kTol);
   }
 }
 

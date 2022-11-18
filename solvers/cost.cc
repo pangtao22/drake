@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "drake/math/autodiff_gradient.h"
+#include "drake/math/differentiable_norm.h"
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -115,20 +116,13 @@ shared_ptr<QuadraticCost> MakeQuadraticErrorCost(
   return make_shared<QuadraticCost>(2 * Q, -2 * Q * x_desired, c);
 }
 
-shared_ptr<QuadraticCost> MakeL2NormCost(
-    const Eigen::Ref<const Eigen::MatrixXd>& A,
-    const Eigen::Ref<const Eigen::VectorXd>& b) {
-  const double c = b.dot(b);
-  return make_shared<QuadraticCost>(2 * A.transpose() * A,
-                                    -2 * A.transpose() * b, c);
-}
-
 shared_ptr<QuadraticCost> Make2NormSquaredCost(
     const Eigen::Ref<const Eigen::MatrixXd>& A,
     const Eigen::Ref<const Eigen::VectorXd>& b) {
   const double c = b.dot(b);
   return make_shared<QuadraticCost>(2 * A.transpose() * A,
-                                    -2 * A.transpose() * b, c);
+                                    -2 * A.transpose() * b, c,
+                                    true /* Hessian is psd */);
 }
 
 L1NormCost::L1NormCost(const Eigen::Ref<const Eigen::MatrixXd>& A,
@@ -203,7 +197,7 @@ void L2NormCost::DoEval(const Eigen::Ref<const Eigen::VectorXd>& x,
 void L2NormCost::DoEval(const Eigen::Ref<const AutoDiffVecXd>& x,
                         AutoDiffVecXd* y) const {
   y->resize(1);
-  (*y)(0) = (A_ * x + b_).norm();
+  (*y)(0) = math::DifferentiableNorm(A_ * x + b_);
 }
 
 void L2NormCost::DoEval(const Eigen::Ref<const VectorX<symbolic::Variable>>& x,

@@ -21,7 +21,8 @@ class ContactVisualizerTest : public ::testing::Test {
   ContactVisualizerTest() : meshcat_(std::make_shared<Meshcat>()) {}
 
   // Sets up a simple plant, scene graph, and visualizer.
-  // The plant has two spheres on prismatic joints.
+  // The plant has two spheres with point contact geometry on prismatic joints
+  // and two spheres with hydroelastic geometry on prismatic joints.
   //
   // @param add_to_builder_overload must be 0, 1, or 2 to select which
   // "AddToBuilder" overload will be used.
@@ -34,7 +35,7 @@ class ContactVisualizerTest : public ::testing::Test {
     auto [plant, scene_graph] =
         multibody::AddMultibodyPlantSceneGraph(&builder, 0.001);
 
-    // Add the spheres and joints.
+    // Add the point contact spheres and joints.
     multibody::Parser parser(&plant);
     const std::string sdf = FindResourceOrThrow(
         "drake/examples/manipulation_station/models/sphere.sdf");
@@ -54,6 +55,27 @@ class ContactVisualizerTest : public ::testing::Test {
       plant.RegisterCollisionGeometry(sphere2, X, *shape, "bonus",
           multibody::CoulombFriction<double>());
     }
+
+    // Add the hydroelastic spheres and joints between them.
+    const std::string hydro_sdf = FindResourceOrThrow(
+        "drake/multibody/meshcat/test/hydroelastic.sdf");
+    parser.AddModelFromFile(hydro_sdf);
+    const auto& body1 = plant.GetBodyByName("body1");
+    plant.AddJoint<multibody::PrismaticJoint>(
+        "body1", plant.world_body(), std::nullopt, body1, std::nullopt,
+        Eigen::Vector3d::UnitZ());
+    const auto& body2 = plant.GetBodyByName("body2");
+    plant.AddJoint<multibody::PrismaticJoint>(
+        "body2", plant.world_body(), std::nullopt, body2, std::nullopt,
+        Eigen::Vector3d::UnitX());
+
+    auto geometry_ids = plant.GetCollisionGeometriesForBody(body1);
+
+    DRAKE_ASSERT(geometry_ids.size() == 2);
+
+    body1_id1 = geometry_ids[0];
+    body1_id2 = geometry_ids[1];
+
     plant.Finalize();
 
     // Add the visualizer.
@@ -77,16 +99,17 @@ class ContactVisualizerTest : public ::testing::Test {
       DRAKE_UNREACHABLE();
     }
 
-    // Start the two spheres in contact, but not completely overlapping.
+    // Start the two point contact spheres in contact, but not completely
+    // overlapping. Start the two hydroelastic contact spheres overlapping.
     diagram_ = builder.Build();
     context_ = diagram_->CreateDefaultContext();
     plant.SetPositions(&plant.GetMyMutableContextFromRoot(context_.get()),
-                       Eigen::Vector2d{-0.03, 0.03});
+                       Eigen::Vector4d{-0.03, 0.03, 0.1, 0.3});
   }
 
   void PublishAndCheck(
       bool expect_geometry_names = false) {
-    diagram_->Publish(*context_);
+    diagram_->ForcedPublish(*context_);
     if (expect_geometry_names) {
       EXPECT_TRUE(meshcat_->HasPath(
           "contact_forces/point/sphere1.base_link+sphere2.base_link.bonus"));
@@ -94,12 +117,29 @@ class ContactVisualizerTest : public ::testing::Test {
       EXPECT_TRUE(meshcat_->HasPath(
           "contact_forces/point/sphere1.base_link+sphere2.base_link"));
     }
+
+    // If the query object port is not connected, the geometry names will
+    // be in their "basic" form (i.e. just Ids).
+    if (visualizer_->query_object_input_port().HasValue(
+            visualizer_->GetMyContextFromRoot(*context_))) {
+      EXPECT_TRUE(meshcat_->HasPath(
+          "contact_forces/hydroelastic/body1.body1_collision+body2"));
+      EXPECT_TRUE(meshcat_->HasPath(
+          "contact_forces/hydroelastic/body1.body1_collision2+body2"));
+    } else {
+      EXPECT_TRUE(meshcat_->HasPath(fmt::format(
+          "contact_forces/hydroelastic/body1.Id({})+body2", body1_id1)));
+      EXPECT_TRUE(meshcat_->HasPath(fmt::format(
+          "contact_forces/hydroelastic/body1.Id({})+body2", body1_id2)));
+    }
   }
 
   std::shared_ptr<Meshcat> meshcat_;
   const ContactVisualizer<double>* visualizer_{};
   std::unique_ptr<systems::Diagram<double>> diagram_{};
   std::unique_ptr<systems::Context<double>> context_{};
+  geometry::GeometryId body1_id1{};
+  geometry::GeometryId body1_id2{};
 };
 
 // Tests the preferred spelling of AddToBuilder.
@@ -152,12 +192,12 @@ TEST_F(ContactVisualizerTest, Parameters) {
   // visualization; they are partially covered by meshcat_manual_test.
   SetUpDiagram(0, false, params);
 
-  diagram_->Publish(*context_);
+  diagram_->ForcedPublish(*context_);
   EXPECT_FALSE(meshcat_->HasPath("contact_forces"));
   EXPECT_TRUE(meshcat_->HasPath("test_prefix"));
 
-  auto periodic_events = visualizer_->GetPeriodicEvents();
-  for (const auto& data_and_vector : periodic_events) {
+  auto periodic_events_map = visualizer_->MapPeriodicEventsByTiming();
+  for (const auto& data_and_vector : periodic_events_map) {
     EXPECT_EQ(data_and_vector.second.size(), 1);  // only one periodic event
     EXPECT_EQ(data_and_vector.first.period_sec(), params.publish_period);
     EXPECT_EQ(data_and_vector.first.offset_sec(), 0.0);
@@ -167,13 +207,13 @@ TEST_F(ContactVisualizerTest, Parameters) {
 TEST_F(ContactVisualizerTest, Delete) {
   SetUpDiagram();
 
-  diagram_->Publish(*context_);
+  diagram_->ForcedPublish(*context_);
   EXPECT_TRUE(meshcat_->HasPath("contact_forces"));
 
   visualizer_->Delete();
   EXPECT_FALSE(meshcat_->HasPath("contact_forces"));
 
-  diagram_->Publish(*context_);
+  diagram_->ForcedPublish(*context_);
   EXPECT_TRUE(meshcat_->HasPath("contact_forces"));
 }
 
@@ -200,7 +240,7 @@ TEST_F(ContactVisualizerTest, ScalarConversion) {
 
   // Call publish to provide code coverage for the AutoDiffXd version of
   // UpdateMeshcat.  We simply confirm that the code doesn't blow up.
-  ad_diagram->Publish(*ad_context);
+  ad_diagram->ForcedPublish(*ad_context);
 }
 
 }  // namespace

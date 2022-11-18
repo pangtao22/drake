@@ -24,8 +24,10 @@
 #include "drake/systems/primitives/multilayer_perceptron.h"
 #include "drake/systems/primitives/multiplexer.h"
 #include "drake/systems/primitives/pass_through.h"
+#include "drake/systems/primitives/port_switch.h"
 #include "drake/systems/primitives/random_source.h"
 #include "drake/systems/primitives/saturation.h"
+#include "drake/systems/primitives/shared_pointer_system.h"
 #include "drake/systems/primitives/sine.h"
 #include "drake/systems/primitives/symbolic_vector_system.h"
 #include "drake/systems/primitives/trajectory_affine_system.h"
@@ -353,6 +355,19 @@ PYBIND11_MODULE(primitives, m) {
         .def(py::init<const AbstractValue&>(), py::arg("abstract_model_value"),
             doc.PassThrough.ctor.doc_1args_abstract_model_value);
 
+    DefineTemplateClassWithDefault<PortSwitch<T>, LeafSystem<T>>(
+        m, "PortSwitch", GetPyParam<T>(), doc.PortSwitch.doc)
+        .def(py::init<int>(), py::arg("vector_size"), doc.PortSwitch.ctor.doc)
+        // TODO(russt): implement AbstractValue version of the constructor and
+        // bind it here.
+        .def("get_port_selector_input_port",
+            &PortSwitch<T>::get_port_selector_input_port,
+            py_rvp::reference_internal,
+            doc.PortSwitch.get_port_selector_input_port.doc)
+        .def("DeclareInputPort", &PortSwitch<T>::DeclareInputPort,
+            py::arg("name"), py_rvp::reference_internal,
+            doc.PortSwitch.DeclareInputPort.doc);
+
     DefineTemplateClassWithDefault<Saturation<T>, LeafSystem<T>>(
         m, "Saturation", GetPyParam<T>(), doc.Saturation.doc)
         .def(py::init<const VectorX<T>&, const VectorX<T>&>(),
@@ -389,6 +404,35 @@ PYBIND11_MODULE(primitives, m) {
             py::arg("state"), py::arg("position"),
             doc.StateInterpolatorWithDiscreteDerivative.set_initial_position
                 .doc_2args_state_position);
+
+    DefineTemplateClassWithDefault<SharedPointerSystem<T>, LeafSystem<T>>(
+        m, "SharedPointerSystem", GetPyParam<T>(), doc.SharedPointerSystem.doc)
+        .def(py::init([](py::object value_to_hold) {
+          auto wrapped = std::make_unique<py::object>(std::move(value_to_hold));
+          return std::make_unique<SharedPointerSystem<T>>(std::move(wrapped));
+        }),
+            py::arg("value_to_hold"), doc.SharedPointerSystem.ctor.doc)
+        .def_static(
+            "AddToBuilder",
+            [](DiagramBuilder<T>* builder, py::object value_to_hold) {
+              auto wrapped =
+                  std::make_unique<py::object>(std::move(value_to_hold));
+              return SharedPointerSystem<T>::AddToBuilder(
+                  builder, std::move(wrapped));
+            },
+            py::arg("builder"), py::arg("value_to_hold"),
+            doc.SharedPointerSystem.AddToBuilder.doc)
+        .def(
+            "get",
+            [](const SharedPointerSystem<T>& self) {
+              py::object result = py::none();
+              py::object* held = self.template get<py::object>();
+              if (held != nullptr) {
+                result = std::move(*held);
+              }
+              return result;
+            },
+            doc.SharedPointerSystem.get.doc);
 
     DefineTemplateClassWithDefault<SymbolicVectorSystem<T>, LeafSystem<T>>(m,
         "SymbolicVectorSystem", GetPyParam<T>(), doc.SymbolicVectorSystem.doc)

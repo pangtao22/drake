@@ -46,12 +46,29 @@ struct CsdpSolverDetails {
   Eigen::SparseMatrix<double> Z_val;
 };
 
+/**
+ * Wrap CSDP solver such that it can solve a
+ * drake::solvers::MathematicalProgram.
+ * @note CSDP doesn't accept free variables, while
+ * drake::solvers::MathematicalProgram does. In order to convert
+ * MathematicalProgram into CSDP format, we provide several approaches to remove
+ * free variables. You can set the approach through
+ * @code{cc}
+ * SolverOptions solver_options;
+ * solver_options.SetOption(CsdpSolver::id(),
+ *    "drake::RemoveFreeVariableMethod",
+ *    static_cast<int>(RemoveFreeVariableMethod::kNullspace));
+ * CsdpSolver solver;
+ * auto result = solver.Solve(prog, std::nullopt, solver_options);
+ * @endcode
+ * For more details, check out RemoveFreeVariableMethod.
+ */
 class CsdpSolver final : public SolverBase {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(CsdpSolver)
 
-  explicit CsdpSolver(
-      RemoveFreeVariableMethod method = RemoveFreeVariableMethod::kNullspace);
+  /** Default constructor */
+  CsdpSolver();
 
   ~CsdpSolver() final;
 
@@ -71,8 +88,6 @@ class CsdpSolver final : public SolverBase {
  private:
   void DoSolve(const MathematicalProgram&, const Eigen::VectorXd&,
                const SolverOptions&, MathematicalProgramResult*) const final;
-
-  RemoveFreeVariableMethod method_;
 };
 }  // namespace solvers
 }  // namespace drake

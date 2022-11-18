@@ -10,6 +10,8 @@ namespace multibody {
 namespace contact_solvers {
 namespace internal {
 
+// TODO(xuchenhan-tri): Move this class to math namespace.
+
 // Given a set S with n elements, this class represents the permutation of S
 // into a new set S' containing m (m ≤ n) non-repeated elements of S.
 // That is, given S = {s₁, s₂, ⋯ ,sᵢ, ⋯, sₙ}, this class represents the
@@ -80,11 +82,18 @@ class PartialPermutation {
   // i_permuted = P(i).
   // @throws a std::runtime_error if i does not particate in the permutation,
   // see participates().
+  // @throws exception if i is not in [0, domain_size()).
   int permuted_index(int i) const;
 
   // Returns `true` if the index i in the domain of the permutation participates
   // in the permutation.
+  // @throws exception if i is not in [0, domain_size()).
   bool participates(int i) const;
+
+  // Returns index i such that i_permuted = P(i), i.e. the inverse mapping from
+  // i_permuted to i.
+  // @throws if i_permuted is not in [0, permuted_domain_size()).
+  int domain_index(int i_permuted) const;
 
   // This method applies this permutation to the elements of x and writes them
   // into x_permuted. That is, x_permuted[permuted_index(i)] = x[i] for all

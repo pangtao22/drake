@@ -1,18 +1,30 @@
 #pragma once
+
 #include <memory>
 #include <set>
 #include <string>
+#include <variant>
 
 #include "drake/common/default_scalars.h"
+#include "drake/geometry/scene_graph.h"
 #include "drake/multibody/plant/scalar_convertible_component.h"
 #include "drake/systems/framework/leaf_system.h"
 
 namespace drake {
 namespace multibody {
+
 template <typename T>
 class MultibodyPlant;
 
+/* Forward declarations of all concrete PhysicalModel (right now one). */
+template <typename T>
+class DeformableModel;
+
 namespace internal {
+
+/* Variant over const pointers to all PhysicalModel. */
+template <typename T>
+using PhysicalModelPointerVariant = std::variant<const DeformableModel<T>*>;
 
 /* PhysicalModel provides the functionalities to extend the type of
  physical model of MultibodyPlant. Developers can derive from this
@@ -79,7 +91,19 @@ class PhysicalModel : public ScalarConvertibleComponent<T> {
     system_resources_declared_ = true;
   }
 
+  /* Returns (a const pointer to) the specific model variant of `this`
+   PhysicalModel. Note that the variant contains a pointer to the concrete model
+   and therefore should not persist longer than the lifespan of this model.  */
+  PhysicalModelPointerVariant<T> ToPhysicalModelPointerVariant() const {
+    return DoToPhysicalModelPointerVariant();
+  }
+
  protected:
+  /* Derived classes must override this function to return their specific model
+   variant. */
+  virtual PhysicalModelPointerVariant<T> DoToPhysicalModelPointerVariant()
+      const = 0;
+
   /* Derived classes that support making a clone that uses double as a scalar
    type must implement this so that it creates a copy of the object with double
    as the scalar type. It should copy all members except for those overwritten
@@ -124,6 +148,12 @@ class PhysicalModel : public ScalarConvertibleComponent<T> {
           "()' before system resources have been declared are not allowed.");
     }
   }
+
+  /* Returns the SceneGraph with which the given `plant` has been registered.
+   @pre plant != nullptr.
+   @pre Finalize() has not been called on `plant`.
+   @pre `plant` has been registered with some SceneGraph. */
+  geometry::SceneGraph<T>& mutable_scene_graph(MultibodyPlant<T>* plant);
 
   /* Protected LeafSystem methods exposed through MultibodyPlant. */
   static systems::DiscreteStateIndex DeclareDiscreteState(

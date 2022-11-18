@@ -1,12 +1,12 @@
 #include "drake/multibody/parsing/detail_path_utils.h"
 
+#include <filesystem>
 #include <fstream>
 #include <string>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "drake/common/filesystem.h"
 #include "drake/common/find_resource.h"
 #include "drake/common/unused.h"
 
@@ -69,7 +69,8 @@ GTEST_TEST(ResoluveUriUncheckedTest, NormalizedPath) {
       "drake/multibody/parsing/test/"
       "package_map_test_packages/package_map_test_package_a/"
       "sdf/test_model.sdf");
-  const string root_dir = filesystem::path(target_file).parent_path().string();
+  const string root_dir =
+      std::filesystem::path(target_file).parent_path().string();
 
   // Case: Simple concatenation would produce /fake/root/./file.txt.
   EXPECT_EQ(ResolveGoodUri("./test_model.sdf", package_map, root_dir),
@@ -194,6 +195,39 @@ GTEST_TEST(ResolveUriTest, TestUnsupported) {
   const string uri = "http://localhost/filename.sdf";
   EXPECT_THAT(ResolveBadUri(uri, package_map, root_dir),
               ::testing::MatchesRegex(".*unsupported scheme.*"));
+}
+
+// Verifies that deprecation warnings are produced when accessing deprecated
+// package names. We need to cover the case where the package.xml specifies
+// a detail message, and the case where there is no detail.
+GTEST_TEST(ResolveUriTest, DeprecatedPackage) {
+  PackageMap package_map;
+  package_map.Add("foo", ".");
+  package_map.Add("bar", ".");
+  package_map.SetDeprecated("foo", "Stop using foo");
+  package_map.SetDeprecated("bar", "");
+
+  // Capture warning messages.
+  DiagnosticPolicy diagnostic;
+  DiagnosticDetail warning;
+  diagnostic.SetActionForWarnings([&warning](const DiagnosticDetail& detail) {
+    warning = detail;
+  });
+
+  // Check that we get a detailed warning.
+  std::string result = ResolveUri(
+      diagnostic, "package://foo/multibody", package_map, "");
+  EXPECT_EQ(result, "multibody");
+  EXPECT_THAT(warning.message, ::testing::MatchesRegex(
+      ".*package://foo/multibody.*is deprecated.*Stop using foo.*"));
+
+  // Check that we get a basic warning.
+  warning = {};
+  result = ResolveUri(
+      diagnostic, "package://bar/multibody", package_map, "");
+  EXPECT_EQ(result, "multibody");
+  EXPECT_THAT(warning.message, ::testing::MatchesRegex(
+      ".*package://bar/multibody.*is deprecated.*"));
 }
 
 }  // namespace

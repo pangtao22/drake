@@ -1,11 +1,5 @@
 #include "drake/multibody/contact_solvers/sap/sap_solver.h"
 
-// TODO(amcastro-tri): While many of tests in this file verify the correctness
-// of the solution, it might not be enough to ensure the entire implementation
-// is correct. E.g. miscalculation of the Hessian could lead to slower
-// convergence. Consider more fine grained unit tests, especially for the
-// Hessian and other gradients.
-
 #include <memory>
 
 #include <gtest/gtest.h>
@@ -15,9 +9,13 @@
 #include "drake/multibody/contact_solvers/block_sparse_linear_operator.h"
 #include "drake/multibody/contact_solvers/block_sparse_matrix.h"
 #include "drake/multibody/contact_solvers/contact_solver_utils.h"
+#include "drake/multibody/contact_solvers/sap/sap_friction_cone_constraint.h"
 #include "drake/multibody/contact_solvers/sap/sap_solver_results.h"
+#include "drake/multibody/contact_solvers/supernodal_solver.h"
 #include "drake/multibody/contact_solvers/system_dynamics_data.h"
+#include "drake/systems/framework/context.h"
 
+using drake::systems::Context;
 using Eigen::Matrix3d;
 using Eigen::MatrixXd;
 using Eigen::Vector2d;
@@ -30,197 +28,34 @@ namespace multibody {
 namespace contact_solvers {
 namespace internal {
 
+// Friend struct to grant access to SapSolver's private functions for testing.
 class SapSolverTester {
  public:
-  using PreProcessedData = SapSolver<double>::PreProcessedData;
+  static std::unique_ptr<SuperNodalSolver> MakeSuperNodalSolver(
+      const SapSolver<double>& sap) {
+    return sap.MakeSuperNodalSolver();
+  }
 
-  static PreProcessedData PreProcessData(
-      const SapSolver<double>& solver, double time_step,
-      const SystemDynamicsData<double>& dynamics_data,
-      const PointContactData<double>& contact_data) {
-    PreProcessedData data;
-    solver.PreProcessData(time_step, dynamics_data, contact_data, &data);
-    return data;
+  static void UpdateSuperNodalSolver(const SapSolver<double>& sap,
+                                     const Context<double>& context,
+                                     SuperNodalSolver* supernodal_solver) {
+    sap.UpdateSuperNodalSolver(context, supernodal_solver);
+  }
+
+  static const SapModel<double>& model(const SapSolver<double>& sap) {
+    return *sap.model_;
+  }
+
+  static MatrixX<double> CalcDenseHessian(
+      const SapSolver<double>& sap, const systems::Context<double>& context) {
+    return sap.CalcDenseHessian(context);
   }
 };
 
-// We place data consumed by the contact solver in a single struct.
-struct ProblemData {
-  ProblemData(int nv, int nc) {
-    M.resize(nv, nv);
-    J.resize(3 * nc, nv);
-    v_star.resize(nv);
-    phi0.resize(nc);
-    stiffness.resize(nc);
-    dissipation.resize(nc);
-    mu.resize(nc);
-  }
-
-  double time_step;
-
-  // For this problem we have that A = M, i.e. the momentum matrix equals the
-  // mass matrix. Mass matrix in different formats:
-  MatrixXd M;
-  BlockSparseMatrix<double> Ablock;
-  std::unique_ptr<BlockSparseLinearOperator<double>> Mop;
-
-  // Jacobian in different formats:
-  MatrixXd J;
-  BlockSparseMatrix<double> Jblock;
-  std::unique_ptr<BlockSparseLinearOperator<double>> Jop;
-
-  // Free motion velocities.
-  VectorXd v_star;
-
-  // Contact data.
-  VectorXd phi0;
-  VectorXd stiffness;
-  VectorXd dissipation;
-  VectorXd mu;
-
-  // Contact solver data.
-  std::unique_ptr<SystemDynamicsData<double>> dynamics_data;
-  std::unique_ptr<PointContactData<double>> contact_data;
-};
-
-// Simple problem configuration where 3 particles (with three translational DOFs
-// each) are stacked on top of each other; particle 2 is on the ground, particle
-// 1 is placed on top of particle 2 and particle 0 is placed on top of particle
-// 1. The problem is setup with arbitrary (though non-zero) values in order to
-// verify the computation of intermediate quantities such as the pre-processed
-// data in SAP.
-class ParticlesStackProblem {
- public:
-  static constexpr int kNumParticles = 3;   // Number of particles.
-  static constexpr int kNumVelocities = 9;  // Three particles in 3D.
-  static constexpr int kNumContacts = 3;    // Vertical stack.
-
-  // Arbitrary non-zero free-motion velocities.
-  VectorXd MakeFreeMotionVelocities() const {
-    return VectorXd::LinSpaced(kNumVelocities, 0, kNumVelocities);
-  }
-
-  // Arbitrary particle masses.
-  VectorXd GetParticleMasses() const {
-    return 1.5 * VectorXd::LinSpaced(kNumParticles, 1, kNumParticles);
-  }
-
-  // Mass matrix for the system of three particles.
-  void CalcMassMatrix(BlockSparseMatrix<double>* M) const {
-    const VectorXd masses = GetParticleMasses();
-    BlockSparseMatrixBuilder<double> builder(3, 3, 3);
-    // Each particle is a block.
-    for (int p = 0; p < kNumParticles; ++p) {
-      builder.PushBlock(p, p, masses[p] * Matrix3d::Identity());
-    }
-    *M = builder.Build();
-  }
-
-  // Contact Jacobian representing the configuration in which the particles form
-  // a stack. Particle 2 on the ground, particle 1 on 2 and particle 0 on 1.
-  void MakeContactJacobian(BlockSparseMatrix<double>* J) const {
-    const MatrixXd Jblock = MatrixXd::Identity(3, 3);
-    BlockSparseMatrixBuilder<double> builder(kNumContacts, kNumParticles, 5);
-    // Contact between particles 0 and 1.
-    builder.PushBlock(0, 0, Jblock);
-    builder.PushBlock(0, 1, Jblock);
-    // Contact between particles 1 and 2.
-    builder.PushBlock(1, 1, Jblock);
-    builder.PushBlock(1, 2, Jblock);
-    // Contact between particle 2 and the ground.
-    builder.PushBlock(2, 2, Jblock);
-    *J = builder.Build();
-  }
-
-  std::unique_ptr<ProblemData> MakeProblemData() const {
-    // Set system dynamics data:
-    auto data = std::make_unique<ProblemData>(kNumVelocities, kNumContacts);
-    data->time_step = 5.0e-3;
-    CalcMassMatrix(&data->Ablock);
-    data->M = data->Ablock.MakeDenseMatrix();
-    data->Mop =
-        std::make_unique<BlockSparseLinearOperator<double>>("M", &data->Ablock);
-
-    data->v_star = MakeFreeMotionVelocities();
-
-    data->dynamics_data = std::make_unique<SystemDynamicsData<double>>(
-        data->Mop.get(), nullptr, &data->v_star);
-
-    MakeContactJacobian(&data->Jblock);
-    data->J = data->Jblock.MakeDenseMatrix();
-    data->Jop =
-        std::make_unique<BlockSparseLinearOperator<double>>("J", &data->Jblock);
-
-    data->phi0.setLinSpaced(kNumContacts, 1., kNumContacts);
-    data->stiffness.setLinSpaced(kNumContacts, 1., kNumContacts);
-    data->dissipation.setLinSpaced(kNumContacts, 1., kNumContacts);
-    data->mu.setLinSpaced(kNumContacts, 1., kNumContacts);
-
-    data->contact_data = std::make_unique<PointContactData<double>>(
-        &data->phi0, data->Jop.get(), &data->stiffness, &data->dissipation,
-        &data->mu);
-
-    return data;
-  }
-};
-
-GTEST_TEST(SapSolver, PreProcessedData) {
-  ParticlesStackProblem problem;
-  auto problem_data = problem.MakeProblemData();
-  SapSolver<double> sap;
-  SapSolverParameters parameters;
-  sap.set_parameters(parameters);
-  SapSolverTester::PreProcessedData data = SapSolverTester::PreProcessData(
-      sap, problem_data->time_step, *problem_data->dynamics_data,
-      *problem_data->contact_data);
-
-  EXPECT_EQ(data.time_step, problem_data->time_step);
-  EXPECT_EQ(data.nv, problem.kNumVelocities);
-  EXPECT_EQ(data.nc, problem.kNumContacts);
-  EXPECT_EQ(data.mu, problem_data->mu);
-  EXPECT_EQ(data.J.MakeDenseMatrix(), problem_data->J);
-  EXPECT_EQ(data.A.MakeDenseMatrix(), problem_data->M);
-  EXPECT_EQ(data.At[0], (problem_data->M.block<3, 3>(0, 0)));
-  EXPECT_EQ(data.At[1], (problem_data->M.block<3, 3>(3, 3)));
-  EXPECT_EQ(data.At[2], (problem_data->M.block<3, 3>(6, 6)));
-  const VectorXd expected_inv_sqrt_A =
-      problem_data->M.diagonal().cwiseInverse().cwiseSqrt();
-  EXPECT_TRUE(CompareMatrices(data.inv_sqrt_A, expected_inv_sqrt_A,
-                              std::numeric_limits<double>::epsilon(),
-                              MatrixCompareType::relative));
-  EXPECT_EQ(data.v_star, problem_data->v_star);  // This should just be a copy.
-  EXPECT_TRUE(CompareMatrices(
-      data.p_star, problem_data->M * problem_data->v_star,
-      std::numeric_limits<double>::epsilon(), MatrixCompareType::relative));
-
-  // For this simple configuration, we can verify analytically that the
-  // effective (inverse of the) mass of each contact point is: sqrt(3)/3*(1/m1 +
-  // 1/m2), for the contact between particles masses m1 and m2. For the ground,
-  // we take the mass to be infinity.
-  const VectorXd masses = problem.GetParticleMasses();
-  const double Wdiag0 = std::sqrt(3) / 3 * (1.0 / masses(0) + 1.0 / masses(1));
-  const double Wdiag1 = std::sqrt(3) / 3 * (1.0 / masses(1) + 1.0 / masses(2));
-  const double Wdiag2 = std::sqrt(3) / 3 * (1.0 / masses(2));
-  const Vector3d Wdiag_expected(Wdiag0, Wdiag1, Wdiag2);
-  EXPECT_TRUE(CompareMatrices(data.delassus_diagonal, Wdiag_expected,
-                              std::numeric_limits<double>::epsilon(),
-                              MatrixCompareType::relative));
-  const VectorXd& k = problem_data->stiffness;
-  const VectorXd& c = problem_data->dissipation;
-  const double dt = problem_data->time_step;
-  const VectorXd taud = c.array() / k.array();
-  const VectorXd Rn_expected =
-      ((dt + taud.array()) * k.array() * dt).cwiseInverse();
-  const VectorXd Rt_expected = parameters.sigma * Wdiag_expected;
-  VectorXd R_expected(3 * problem.kNumContacts);
-  for (int i = 0; i < problem.kNumContacts; ++i) {
-    R_expected.segment<3>(3 * i) =
-        Vector3d(Rt_expected(i), Rt_expected(i), Rn_expected(i));
-  }
-  EXPECT_TRUE(CompareMatrices(data.R, R_expected,
-                              std::numeric_limits<double>::epsilon(),
-                              MatrixCompareType::relative));
-}
+constexpr double kEps = std::numeric_limits<double>::epsilon();
+// Suggested value for the dimensionless parameter used in the regularization of
+// friction, see [Castro et al. 2022].
+constexpr double kDefaultSigma = 1.0e-3;
 
 /* Model of a "pizza saver":
 
@@ -338,50 +173,47 @@ class PizzaSaverProblem {
     // clang-format on
   }
 
-  // Makes the problem data to advance the dynamics of the pizza saver from
+  // Makes contact problem to advance the dynamics of the pizza saver from
   // state x0 = [q0, v0], with applied forces tau = (fx, fy, fz, Mz).
-  std::unique_ptr<ProblemData> MakeProblemData(const VectorXd& q0,
-                                               const VectorXd& v0,
-                                               const VectorXd& tau) const {
-    // Set system dynamics data:
-    auto data = std::make_unique<ProblemData>(kNumVelocities, kNumContacts);
-    CalcMassMatrix(&data->M);
-    {
-      // A single block size.
-      BlockSparseMatrixBuilder<double> builder(1, 1, 1);
-      builder.PushBlock(0, 0, data->M);
-      data->Ablock = builder.Build();
-    }
-    data->Mop =
-        std::make_unique<BlockSparseLinearOperator<double>>("M", &data->Ablock);
+  // beta is the dimensionless near-rigid regime parameter and sigma the
+  // dimensionless parameter for the regularization of friction, see [Castro et
+  // al. 2021] for details.
+  std::unique_ptr<SapContactProblem<double>> MakeContactProblem(
+      const VectorXd& q0, const VectorXd& v0, const VectorXd& tau, double beta,
+      double sigma) const {
+    std::unique_ptr<SapContactProblem<double>> problem =
+        MakeContactProblemWithoutConstraints(q0, v0, tau);
 
-    data->v_star.resize(kNumVelocities);
-    data->v_star = v0 + time_step_ * data->M.ldlt().solve(tau);
+    // Add contact constraints.
+    const double phi0 = q0(2);
+    const SapFrictionConeConstraint<double>::Parameters parameters{
+        mu_, stiffness_, taud_, beta, 1.0e-3};
+    MatrixXd J;  // Full system Jacobian for the three contacts.
+    CalcContactJacobian(q0(3), &J);
+    problem->AddConstraint(std::make_unique<SapFrictionConeConstraint<double>>(
+        0, J.middleRows(0, 3), phi0, parameters));
+    problem->AddConstraint(std::make_unique<SapFrictionConeConstraint<double>>(
+        0, J.middleRows(3, 3), phi0, parameters));
+    problem->AddConstraint(std::make_unique<SapFrictionConeConstraint<double>>(
+        0, J.middleRows(6, 3), phi0, parameters));
 
-    data->dynamics_data = std::make_unique<SystemDynamicsData<double>>(
-        data->Mop.get(), nullptr, &data->v_star);
+    return problem;
+  }
 
-    // Set contact data:
-    CalcContactJacobian(q0(3), &data->J);
-    {
-      // A single block size.
-      BlockSparseMatrixBuilder<double> builder(1, 1, 1);
-      builder.PushBlock(0, 0, data->J);
-      data->Jblock = builder.Build();
-    }
-    data->Jop =
-        std::make_unique<BlockSparseLinearOperator<double>>("J", &data->Jblock);
+  std::unique_ptr<SapContactProblem<double>>
+  MakeContactProblemWithoutConstraints(const VectorXd& q0, const VectorXd& v0,
+                                       const VectorXd& tau) const {
+    // For this problem there is a single clique for the pizza saver.
+    std::vector<MatrixXd> A(1);
+    CalcMassMatrix(&A[0]);
 
-    data->phi0.setConstant(kNumContacts, q0(2));
-    data->stiffness.setConstant(kNumContacts, stiffness_);
-    data->dissipation.setConstant(kNumContacts, taud_ * stiffness_);
-    data->mu.setConstant(kNumContacts, mu_);
+    // Compute free motion velocities.
+    VectorXd v_star = v0 + time_step_ * A[0].ldlt().solve(tau);
 
-    data->contact_data = std::make_unique<PointContactData<double>>(
-        &data->phi0, data->Jop.get(), &data->stiffness, &data->dissipation,
-        &data->mu);
+    auto problem = std::make_unique<SapContactProblem<double>>(
+        time_step_, std::move(A), std::move(v_star));
 
-    return data;
+    return problem;
   }
 
  private:
@@ -407,79 +239,134 @@ class PizzaSaverProblem {
   const double g_{10.0};  // Acceleration of gravity.
 };
 
-SapSolverResults<double> AdvanceNumSteps(const PizzaSaverProblem& problem,
-                                         const VectorXd& tau, int num_steps,
-                                         const SapSolverParameters& params,
-                                         bool cost_criterion_reached = false) {
-  SapSolver<double> sap;
-  sap.set_parameters(params);
-  SapSolverResults<double> result;
-  // Arbitrary non-zero guess to stress the solver.
-  // N.B. We need non-zero values when cost_criterion_reached = true since
-  // v_guess = 0 would be close to the steady state solution and SAP would
-  // satisfy the optimality even when very tight tolerances are specified.
-  VectorXd v_guess(problem.kNumVelocities);
-  v_guess << 1.0, 2.0, 3.0, 4.0;
+class PizzaSaverTest
+    : public testing::TestWithParam<SapSolverParameters::LineSearchType> {
+ public:
+  static SapSolverResults<double> AdvanceNumSteps(
+      const PizzaSaverProblem& problem, const VectorXd& tau, int num_steps,
+      const SapSolverParameters& params, double beta = 1.0,
+      bool cost_criterion_reached = false) {
+    SapSolver<double> sap;
+    sap.set_parameters(params);
+    SapSolverResults<double> result;
+    // Arbitrary non-zero guess to stress the solver.
+    // N.B. We need non-zero values when cost_criterion_reached = true since
+    // v_guess = 0 would be close to the steady state solution and SAP would
+    // satisfy the optimality even when very tight tolerances are specified.
+    VectorXd v_guess(problem.kNumVelocities);
+    v_guess << 1.0, 2.0, 3.0, 4.0;
 
-  const double theta = M_PI / 5;  // Arbitrary orientation.
-  VectorXd q = Vector4d(0.0, 0.0, 0.0, theta);
-  VectorXd v = VectorXd::Zero(problem.kNumVelocities);
+    const double theta = M_PI / 5;  // Arbitrary orientation.
+    VectorXd q = Vector4d(0.0, 0.0, 0.0, theta);
+    VectorXd v = VectorXd::Zero(problem.kNumVelocities);
 
-  for (int i = 0; i < num_steps; ++i) {
-    const auto data = problem.MakeProblemData(q, v, tau);
-    const SapSolverStatus status =
-        sap.SolveWithGuess(problem.time_step(), *data->dynamics_data,
-                           *data->contact_data, v_guess, &result);
-    EXPECT_EQ(status, SapSolverStatus::kSuccess);
-    v = result.v;
-    q += problem.time_step() * v;
+    for (int i = 0; i < num_steps; ++i) {
+      const auto contact_problem =
+          problem.MakeContactProblem(q, v, tau, beta, kDefaultSigma);
+      const SapSolverStatus status =
+          sap.SolveWithGuess(*contact_problem, v_guess, &result);
+      EXPECT_EQ(status, SapSolverStatus::kSuccess);
+      v = result.v;
+      q += problem.time_step() * v;
 
-    // Verify the number of times cache entries were updated.
-    const SapSolver<double>::SolverStats& stats = sap.get_statistics();
+      // Verify the number of times cache entries were updated.
+      const SapSolver<double>::SolverStats& stats = sap.get_statistics();
 
-    if (cost_criterion_reached) {
-      EXPECT_TRUE(stats.cost_criterion_reached);
-    } else {
-      EXPECT_TRUE(stats.optimality_criterion_reached);
+      if (cost_criterion_reached) {
+        EXPECT_TRUE(stats.cost_criterion_reached);
+      } else {
+        EXPECT_TRUE(stats.optimality_criterion_reached);
+      }
     }
 
-    // N.B. We only count iterations that perform factorizations. Since impulses
-    // need to be computed in order to evaluate the termination criteria (before
-    // a factorization might be carried out), the expected number of gradients
-    // update equals the number of iterations plus one.
-    EXPECT_EQ(stats.num_gradients_cache_updates, stats.num_iters + 1);
-
-    // Impulses are evaluated:
-    //  - At the very beginning of an iteration, to evaluate stopping criteria
-    //    (num_iters+1 since the last iteration does not perform factorization.)
-    //  - At the very beginning of line search iterations, i.e. num_iters.
-    //  - Once per line search iteration.
-    //    Therefore we expect impulses to be evaluated
-    //    num_line_search_iters+2*num_iters+1 times.
-    EXPECT_EQ(stats.num_impulses_cache_updates,
-              stats.num_line_search_iters + 2 * stats.num_iters + 1);
+    return result;
   }
 
-  return result;
-}
+  // Makes a problem for which we know the solution will be in stiction. If Mz <
+  // mu * m * g * R, the saver should be in stiction (that is, the sliding
+  // velocity should be smaller than the regularization parameter). Otherwise
+  // the saver will start sliding. For this setup, the transition occurs at
+  // M_transition = mu * m * g * R = 30.
+  static PizzaSaverProblem MakeStictionProblem() {
+    const double dt = 0.01;
+    const double mu = 2. / 3.;
+    const double k = 1.0e4;
+    const double taud = 2.0 * dt;
+    return PizzaSaverProblem(dt, mu, k, taud);
+  }
+
+  // Make a stiction problem with MakeStictionProblem() and verify the solution
+  // is accurate to within `relative_tolerance`. `params` specifies SAP's
+  // parameters. `cost_criterion_reached` specifies if we expect the cost
+  // criterion to be reached for all time steps.
+  static void VerifyStictionSolution(const SapSolverParameters& params,
+                                     double relative_tolerance,
+                                     bool cost_criterion_reached) {
+    PizzaSaverProblem problem = MakeStictionProblem();
+
+    const double Mz = 20.0;
+    const Vector4d tau(0.0, 0.0, -problem.mass() * problem.g(), Mz);
+    const double beta = 1.0;  // Enable near-rigid regime.
+    const SapSolverResults<double> result =
+        AdvanceNumSteps(problem, tau, 40, params, beta, cost_criterion_reached);
+
+    // Expected generalized impulse.
+    const Vector4d j_expected =
+        problem.time_step() *
+        Vector4d(0.0, 0.0, problem.mass() * problem.g(), -Mz);
+
+    // Maximum expected slip. See Castro et al. 2022 for details (Eq. 31).
+    const double max_slip_expected =
+        kDefaultSigma * problem.mu() * problem.time_step() * problem.g();
+
+    EXPECT_TRUE(CompareMatrices(result.v.head<3>(), Vector3d::Zero(), 1.0e-10));
+    EXPECT_TRUE((result.j - j_expected).norm() / j_expected.norm() <
+                relative_tolerance);
+    VectorXd gamma_normal(problem.kNumContacts);
+    ExtractNormal(result.gamma, &gamma_normal);
+    EXPECT_TRUE(CompareMatrices(
+        gamma_normal,
+        VectorXd::Constant(problem.kNumContacts, j_expected(2) / 3.0),
+        relative_tolerance, MatrixCompareType::relative));
+    VectorXd vc_normal(problem.kNumContacts);
+    ExtractNormal(result.vc, &vc_normal);
+    EXPECT_TRUE(CompareMatrices(vc_normal, VectorXd::Zero(problem.kNumContacts),
+                                1.0e-10));
+    const double friction_impulse_expected =
+        problem.time_step() * Mz / problem.radius() / 3.0;
+
+    VectorXd gamma_friction(2 * problem.kNumContacts);
+    ExtractTangent(result.gamma, &gamma_friction);
+    VectorXd vc_tangent(2 * problem.kNumContacts);
+    ExtractTangent(result.vc, &vc_tangent);
+    for (int i = 0; i < 3; ++i) {
+      const double slip = vc_tangent.segment<2>(2 * i).norm();
+      const double friction_impulse = gamma_friction.segment<2>(2 * i).norm();
+      const double normal_impulse = gamma_normal(i);
+      EXPECT_LE(friction_impulse, problem.mu() * normal_impulse);
+      EXPECT_NEAR(friction_impulse, friction_impulse_expected,
+                  relative_tolerance * friction_impulse_expected);
+      EXPECT_LE(slip, max_slip_expected);
+    }
+  }
+};
 
 // Solve a problem with no applied torque. In this case contact forces should
 // balance weight.
-GTEST_TEST(PizzaSaver, NoAppliedTorque) {
+TEST_P(PizzaSaverTest, NoAppliedTorque) {
   const double dt = 0.01;
   const double mu = 1.0;
   const double k = 1.0e4;
   const double taud = dt;
   const PizzaSaverProblem problem(dt, mu, k, taud);
 
-  SapSolverParameters params;
-  params.rel_tolerance = 1.0e-6;
-  params.beta = 0;  // No near-rigid regime.
-  params.ls_max_iterations = 40;
+  SapSolverParameters params;  // Default set of parameters.
+  params.line_search_type = GetParam();
+  const double beta = kEps;  // No near-rigid regime.
 
   const Vector4d tau(0.0, 0.0, -problem.mass() * problem.g(), 0.0);
   const SapSolverResults<double> result =
-      AdvanceNumSteps(problem, tau, 30, params);
+      AdvanceNumSteps(problem, tau, 30, params, beta);
 
   // N.B. The accuracy of the solutions is significantly higher when using exact
   // line search.
@@ -506,18 +393,17 @@ GTEST_TEST(PizzaSaver, NoAppliedTorque) {
 // We verify SAP returns immediately when the exact guess is provided. To stress
 // test this case, the maximum number of iterations is set to zero. We expect
 // SAP to return the guess as the solution.
-GTEST_TEST(PizzaSaver, ConvergenceWithExactGuess) {
+TEST_P(PizzaSaverTest, ConvergenceWithExactGuess) {
   const double dt = 0.01;
   const double mu = 1.0;
   const double k = 1.0e4;
   const double taud = dt;
   const PizzaSaverProblem problem(dt, mu, k, taud);
 
-  SapSolverParameters params;
-  params.rel_tolerance = 1.0e-6;
-  params.beta = 0;  // No near-rigid regime.
-  params.ls_max_iterations = 40;
+  SapSolverParameters params;  // Default set of parameters.
+  params.line_search_type = GetParam();
   params.max_iterations = 0;
+  const double beta = kEps;  // No near-rigid regime.
 
   const double weight = problem.mass() * problem.g();
   const Vector4d tau(0.0, 0.0, -weight, 0.0);
@@ -529,13 +415,13 @@ GTEST_TEST(PizzaSaver, ConvergenceWithExactGuess) {
   VectorXd q = Vector4d(0.0, 0.0, z, theta);
   VectorXd v = VectorXd::Zero(problem.kNumVelocities);
 
-  const auto data = problem.MakeProblemData(q, v, tau);
+  const auto contact_problem =
+      problem.MakeContactProblem(q, v, tau, beta, kDefaultSigma);
   SapSolver<double> sap;
   sap.set_parameters(params);
   SapSolverResults<double> result;
   const SapSolverStatus status =
-      sap.SolveWithGuess(problem.time_step(), *data->dynamics_data,
-                         *data->contact_data, v, &result);
+      sap.SolveWithGuess(*contact_problem, v, &result);
   EXPECT_EQ(status, SapSolverStatus::kSuccess);
 
   // Verify no iterations were performed.
@@ -546,81 +432,12 @@ GTEST_TEST(PizzaSaver, ConvergenceWithExactGuess) {
   EXPECT_EQ(result.v, v);
 }
 
-// Makes a problem for which we know the solution will be in stiction. If Mz <
-// mu * m * g * R, the saver should be in stiction (that is, the sliding
-// velocity should be smaller than the regularization parameter). Otherwise the
-// saver will start sliding. For this setup the transition occurs at
-// M_transition = mu * m * g * R = 30.
-PizzaSaverProblem MakeStictionProblem() {
-  const double dt = 0.01;
-  const double mu = 2. / 3.;
-  const double k = 1.0e4;
-  const double taud = dt;
-  return PizzaSaverProblem(dt, mu, k, taud);
-}
-
-// Make a stiction problem with MakeStictionProblem() and verify the solution is
-// accurate to within `relative_tolerance`. `params` specifies SAP's parameters.
-// `cost_criterion_reached` specifies if we expect the cost criterion to be
-// reached for all time steps.
-void VerifyStictionSolution(const SapSolverParameters& params,
-                            double relative_tolerance,
-                            bool cost_criterion_reached) {
-  PizzaSaverProblem problem = MakeStictionProblem();
-
-  const double Mz = 20.0;
-  const Vector4d tau(0.0, 0.0, -problem.mass() * problem.g(), Mz);
-  const SapSolverResults<double> result =
-      AdvanceNumSteps(problem, tau, 40, params, cost_criterion_reached);
-
-  // Expected generalized impulse.
-  const Vector4d j_expected =
-      problem.time_step() *
-      Vector4d(0.0, 0.0, problem.mass() * problem.g(), -Mz);
-
-  // Maximum expected slip. See Castro et al. 2021 for details (Eq. 22).
-  const double max_slip_expected =
-      params.sigma * problem.time_step() * problem.g();
-
-  EXPECT_TRUE(CompareMatrices(result.v.head<3>(), Vector3d::Zero(), 1.0e-10));
-  EXPECT_TRUE((result.j - j_expected).norm() / j_expected.norm() <
-              relative_tolerance);
-  VectorXd gamma_normal(problem.kNumContacts);
-  ExtractNormal(result.gamma, &gamma_normal);
-  EXPECT_TRUE(CompareMatrices(
-      gamma_normal,
-      VectorXd::Constant(problem.kNumContacts, j_expected(2) / 3.0),
-      relative_tolerance, MatrixCompareType::relative));
-  VectorXd vc_normal(problem.kNumContacts);
-  ExtractNormal(result.vc, &vc_normal);
-  EXPECT_TRUE(CompareMatrices(vc_normal, VectorXd::Zero(problem.kNumContacts),
-                              1.0e-10));
-  const double friction_impulse_expected =
-      problem.time_step() * Mz / problem.radius() / 3.0;
-
-  VectorXd gamma_friction(2 * problem.kNumContacts);
-  ExtractTangent(result.gamma, &gamma_friction);
-  VectorXd vc_tangent(2 * problem.kNumContacts);
-  ExtractTangent(result.vc, &vc_tangent);
-  for (int i = 0; i < 3; ++i) {
-    const double slip = vc_tangent.segment<2>(2 * i).norm();
-    const double friction_impulse = gamma_friction.segment<2>(2 * i).norm();
-    const double normal_impulse = gamma_normal(i);
-    EXPECT_LE(friction_impulse, problem.mu() * normal_impulse);
-    EXPECT_NEAR(friction_impulse, friction_impulse_expected,
-                relative_tolerance * friction_impulse_expected);
-    EXPECT_LE(slip, max_slip_expected);
-  }
-}
-
 // Solve a stiction problem and verify the solution for a nominal set of solver
 // parameters.
-GTEST_TEST(PizzaSaver, Stiction) {
-  SapSolverParameters params;
-  params.abs_tolerance = 1.0e-14;
-  params.rel_tolerance = 1.0e-6;
-  params.beta = 0;  // No near-rigid regime.
-  params.ls_max_iterations = 40;
+TEST_P(PizzaSaverTest, Stiction) {
+  SapSolverParameters params;  // Default set of parameters.
+  params.line_search_type = GetParam();
+
   // For the tolerances specified, we expect the solver to reach the optimality
   // condition for all time steps.
   const bool cost_criterion_reached = false;
@@ -640,14 +457,16 @@ GTEST_TEST(PizzaSaver, Stiction) {
 // returns a success code with the last computed solution.
 // In this test we verify the computed solution is accurate within a reasonable
 // tolerance that takes into account the temporal transient.
-GTEST_TEST(PizzaSaver, StictionAtTightOptimalityTolerance) {
-  SapSolverParameters params;
+TEST_P(PizzaSaverTest, StictionAtTightOptimalityTolerance) {
+  SapSolverParameters params;  // Default set of parameters.
   // Extremely tight tolerances to trigger the cost stopping criterion.
-  params.abs_tolerance = 1.0e-20;
-  params.rel_tolerance = 1.0e-20;
-  params.beta = 0;  // No near-rigid regime.
-  params.ls_max_iterations = 40;
-  // Inform the unit test we want to verify this condition.
+  params.abs_tolerance = 0;
+  params.rel_tolerance = 0;
+  params.line_search_type = GetParam();
+
+  // Inform the unit test we want to verify the solver reaches the cost
+  // convergence criterion first. This is true regardless of the line search
+  // method since we specified zero tolerances above.
   const bool cost_criterion_reached = true;
   // Use a reasonable tolerance to verify the accuracy of the solution.
   const double relative_tolerance = 1.0e-6;
@@ -655,7 +474,7 @@ GTEST_TEST(PizzaSaver, StictionAtTightOptimalityTolerance) {
 }
 
 // Test case with zero friction coefficient.
-GTEST_TEST(PizzaSaver, NoFriction) {
+TEST_P(PizzaSaverTest, NoFriction) {
   const double dt = 0.01;
   const double mu = 0.0;
   const double k = 1.0e4;
@@ -663,15 +482,14 @@ GTEST_TEST(PizzaSaver, NoFriction) {
   const int num_steps = 30;
   PizzaSaverProblem problem(dt, mu, k, taud);
 
-  SapSolverParameters params;
-  params.rel_tolerance = 1.0e-6;
-  params.beta = 0;  // No near-rigid regime.
-  params.ls_max_iterations = 40;
+  SapSolverParameters params;  // Default set of parameters.
+  params.line_search_type = GetParam();
+  const double beta = kEps;  // No near-rigid regime.
 
   const double fx = 1.0;
   const Vector4d tau(fx, 0.0, -problem.mass() * problem.g(), 0.0);
   const SapSolverResults<double> result =
-      AdvanceNumSteps(problem, tau, num_steps, params);
+      AdvanceNumSteps(problem, tau, num_steps, params, beta);
 
   // Expected generalized impulse.
   const Vector4d j_expected(0.0, 0.0, dt * problem.mass() * problem.g(), 0.0);
@@ -701,24 +519,23 @@ GTEST_TEST(PizzaSaver, NoFriction) {
 // This tests the solver when we apply a moment Mz about COM to the pizza
 // saver. If Mz > mu * m * g * R, the saver will slide.
 // occurs at M_transition = mu * m * g * R = 30.0
-GTEST_TEST(PizzaSaver, Sliding) {
+TEST_P(PizzaSaverTest, Sliding) {
   const double dt = 0.01;
   const double mu = 2. / 3.;
   const double k = 1.0e4;
   const double taud = dt;
   PizzaSaverProblem problem(dt, mu, k, taud);
 
-  SapSolverParameters params;
-  params.rel_tolerance = 1.0e-6;
-  params.beta = 0;  // No near-rigid regime.
-  params.ls_max_iterations = 40;
+  SapSolverParameters params;  // Default set of parameters.
+  params.line_search_type = GetParam();
+  const double beta = kEps;  // No near-rigid regime.
 
   const double Mz = 40.0;
   const double weight = problem.mass() * problem.g();
   const Vector4d tau(0.0, 0.0, -weight, Mz);
 
   const SapSolverResults<double> result =
-      AdvanceNumSteps(problem, tau, 10, params);
+      AdvanceNumSteps(problem, tau, 10, params, beta);
 
   EXPECT_GT(result.v(3), 0.0);  // It's accelerating.
   for (int i = 0; i < 3; ++i) {
@@ -728,21 +545,25 @@ GTEST_TEST(PizzaSaver, Sliding) {
                 std::numeric_limits<double>::epsilon() * normal_impulse);
   }
 
-  // To verify the line search throws when it doesn't converge, we set a low
-  // maximum number of iterations and verify the solver fails for the right
-  // reasons.
-  params.ls_max_iterations = 1;
-  DRAKE_EXPECT_THROWS_MESSAGE(
-      AdvanceNumSteps(problem, tau, 1, params),
-      "Line search reached the maximum number of iterations.*");
+  // ls_max_iterations only pertains to backtracking line search.
+  if (params.line_search_type !=
+      SapSolverParameters::LineSearchType::kExact) {
+    // To verify the line search throws when it doesn't converge, we set a low
+    // maximum number of iterations and verify the solver fails for the right
+    // reasons.
+    params.backtracking_line_search.max_iterations = 1;
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        AdvanceNumSteps(problem, tau, 1, params),
+        "Line search reached the maximum number of iterations.*");
+  }
 }
 
 // Verify we can also get a solution in the near-rigid regime. To trigger this
 // regime we set a very large contact stiffness. In particular, for this test we
 // apply a moment Mz such that Mz < mu * m * g * R, and the saver is in
-// stiction. For this setup the transition occurs at
+// stiction. For this set up the transition occurs at
 // M_transition = mu * m * g * R = 30.
-GTEST_TEST(PizzaSaver, NearRigidStiction) {
+TEST_P(PizzaSaverTest, NearRigidStiction) {
   const double dt = 0.01;
   const double mu = 2. / 3.;
   // We use a very large value of stiffness that we know makes the solver fail
@@ -751,30 +572,32 @@ GTEST_TEST(PizzaSaver, NearRigidStiction) {
   const double taud = dt;
   PizzaSaverProblem problem(dt, mu, k, taud);
 
-  SapSolverParameters params;
+  SapSolverParameters params;  // Default set of parameters.
+  params.line_search_type = GetParam();
   params.rel_tolerance = 1.0e-6;
   const double Mz = 20.0;
   const Vector4d tau(0.0, 0.0, -problem.mass() * problem.g(), Mz);
 
   // We first verify that if we don't use the near-rigid regime strategy the
   // solver fails to converge.
-  params.beta = 0.0;  // near-rigid regime disabled.
-  EXPECT_THROW(AdvanceNumSteps(problem, tau, 30, params), std::exception);
+  double beta = kEps;  // No near-rigid regime.
+  EXPECT_THROW(AdvanceNumSteps(problem, tau, 30, params, beta), std::exception);
 
   // We try again the same problem but with with near-rigid transition enabled.
   // N.B. AdvanceNumSteps() creates a new SAP solver every time. Therefore it is
   // impossible that results from the previous computation affect this new
   // computation.
-  params.beta = 1.0;  // Enable near-rigid regime with default value of beta.
+  beta = 1.0;  // Enable near-rigid regime with default value of beta.
   const SapSolverResults<double> result =
-      AdvanceNumSteps(problem, tau, 30, params);
+      AdvanceNumSteps(problem, tau, 30, params, beta);
 
   // Expected generalized force.
   const Vector4d j_expected(0.0, 0.0, dt * problem.mass() * problem.g(),
-                             -dt * Mz);
+                            -dt * Mz);
 
-  // Maximum expected slip. See Castro et al. 2021 for details (Eq. 22).
-  const double max_slip_expected = params.sigma * dt * problem.g();
+  // Maximum expected slip. See Castro et al. 2022 for details (Eq. 31).
+  const double max_slip_expected =
+      kDefaultSigma * problem.mu() * dt * problem.g();
 
   EXPECT_TRUE(CompareMatrices(result.v.head<3>(), Vector3d::Zero(), 1.0e-9));
   EXPECT_TRUE((result.j - j_expected).norm() / j_expected.norm() <
@@ -802,6 +625,414 @@ GTEST_TEST(PizzaSaver, NearRigidStiction) {
     EXPECT_LE(slip, max_slip_expected);
   }
 }
+
+TEST_P(PizzaSaverTest, NoConstraints) {
+  const double dt = 0.01;
+  const double mu = NAN;    // not used in this problem.
+  const double k = NAN;     // not used in this problem.
+  const double taud = NAN;  // not used in this problem.
+  const PizzaSaverProblem problem(dt, mu, k, taud);
+
+  const double weight = problem.mass() * problem.g();
+  const Vector4d tau(0.0, 0.0, -weight, 0.0);
+
+  const double theta = M_PI / 5;  // Arbitrary orientation.
+  VectorXd q = Vector4d(0.0, 0.0, 0.0, theta);
+  VectorXd v = VectorXd::Zero(problem.kNumVelocities);
+
+  const auto contact_problem =
+      problem.MakeContactProblemWithoutConstraints(q, v, tau);
+  SapSolver<double> sap;
+  SapSolverParameters params;  // Default set of parameters.
+  params.line_search_type = GetParam();
+  sap.set_parameters(params);
+  SapSolverResults<double> result;
+  const SapSolverStatus status =
+      sap.SolveWithGuess(*contact_problem, v, &result);
+  EXPECT_EQ(status, SapSolverStatus::kSuccess);
+
+  // Verify no iterations were performed.
+  const SapSolver<double>::SolverStats& stats = sap.get_statistics();
+  EXPECT_EQ(stats.num_iters, 0);
+
+  // The solution is trivial since constraint impulses are zero and v = v*.
+  EXPECT_EQ(result.v, contact_problem->v_star());
+  EXPECT_EQ(result.j, VectorXd::Zero(contact_problem->num_velocities()));
+  EXPECT_EQ(result.gamma.size(), 0);
+  EXPECT_EQ(result.vc.size(), 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TestLineSearchMethods, PizzaSaverTest,
+    testing::Values(SapSolverParameters::LineSearchType::kBackTracking,
+                    SapSolverParameters::LineSearchType::kExact));
+
+// Constraint to keep velocities within given bounds vl (lower) and vu (upper).
+// Recall that SAP constraints are compliant and therefore non-zero impulses
+// result when velocities are slightly outside of these bounds. This constraint
+// applies bounds to the velocities that belong to a given clique. Both vl and
+// vu have the same size, equal to the number of generalized velocities nc for
+// the specified clique.
+// This constraint models impulses as: γ = max(0, −R⁻¹⋅(vc−v̂)), where
+// regularization R is given and bias v̂ = [vl, -vu], of size 2⋅nc.
+template <typename T>
+class LimitConstraint final : public SapConstraint<T> {
+ public:
+  DRAKE_DEFAULT_COPY_AND_MOVE_AND_ASSIGN(LimitConstraint);
+
+  // Constructs a limit constraint on `clique` with lower limit vl, upper
+  // limit vu and regularization R.
+  LimitConstraint(int clique, const VectorX<T>& vl, const VectorX<T>& vu,
+                  VectorX<T> R)
+      : SapConstraint<T>(
+            clique,
+            ConcatenateVectors(vl, vu) /* Dummy vector of the right size. */,
+            CalcConstraintJacobian(vl.size())),
+        R_(std::move(R)),
+        vhat_(ConcatenateVectors(vl, -vu)) {
+    DRAKE_DEMAND(vl.size() == vu.size());
+    DRAKE_DEMAND(R_.size() == 2 * vl.size());
+    DRAKE_DEMAND((vl.array() <= vu.array()).all());
+  }
+
+  VectorX<T> CalcBiasTerm(const T&, const T&) const final { return vhat_; }
+  VectorX<T> CalcDiagonalRegularization(const T&, const T&) const final {
+    return R_;
+  }
+
+  // For this constraint the projection is γ = P(y) = max(0, y), componentwise.
+  void Project(const Eigen::Ref<const VectorX<double>>& y,
+               const Eigen::Ref<const VectorX<double>>& R,
+               EigenPtr<VectorX<double>> gamma,
+               MatrixX<double>* dPdy) const final {
+    // For this constraint the number of equations equals the number of
+    // velocities in the constrained clique.
+    const int nv = this->num_constraint_equations();
+    if (dPdy != nullptr) {
+      dPdy->resize(nv, nv);
+      dPdy->setZero(nv, nv);
+    }
+    for (int i = 0; i < nv; ++i) {
+      if (y(i) > 0) {
+        (*gamma)(i) = y(i);
+        if (dPdy != nullptr) {
+          (*dPdy)(i, i) = 1.0;
+        }
+      } else {
+        (*gamma)(i) = 0.0;
+      }
+    }
+  };
+
+  std::unique_ptr<SapConstraint<T>> Clone() const final {
+    return std::make_unique<LimitConstraint<T>>(*this);
+  }
+
+ private:
+  static VectorX<T> ConcatenateVectors(const VectorX<T>& v1,
+                                       const VectorX<T>& v2) {
+    VectorX<T> v(v1.size() + v2.size());
+    v << v1, v2;
+    return v;
+  }
+
+  static VectorX<T> CalcConstraintFunction(const VectorX<T>& vl,
+                                           const VectorX<T>& vu,
+                                           const VectorX<T>& v) {
+    DRAKE_DEMAND(vl.size() == v.size());
+    DRAKE_DEMAND(vu.size() == v.size());
+    const int nv = v.size();
+    const VectorX<T> g = (VectorX<T>(2 * nv) << v - vl, vu - v).finished();
+    return g;
+  }
+
+  static MatrixX<T> CalcConstraintJacobian(int nv) {
+    MatrixX<T> J = MatrixX<T>::Identity(2 * nv, nv);
+    J.topRows(nv) = MatrixX<T>::Identity(nv, nv);
+    J.bottomRows(nv) = -MatrixX<T>::Identity(nv, nv);
+    return J;
+  }
+
+  VectorX<T> R_;     // Regularization.
+  VectorX<T> vhat_;  // Bias.
+};
+
+// This fixture is used to test the number of iterations performed by SAP's
+// Newton solver. We set up a contact problem for which the solution is v = v*,
+// the "free-motion" velocities. The problem has three cliques and a single
+// LimitConstraint on the first clique. We can test how the Newton iterations
+// perform by changing the initial guess. For instance, when the initial guess
+// is within the contraint's bounds, the cost is quadratic and we expect SAP to
+// converge in a single Newton iteration.
+class SapNewtonIterationTest
+    : public testing::TestWithParam<SapSolverParameters::LineSearchType> {
+ public:
+  void SetUp() override {
+    const double time_step = 0.01;
+    sap_problem_ = std::make_unique<SapContactProblem<double>>(time_step);
+
+    // Arbitrary non-identity SPD matrices to build the dynamics matrix A.
+    // clang-format off
+    constexpr int num_velocities{9};  // Total number of velocities.
+    constexpr int clique1_nv{3};  // Number of velocities for clique 1.
+    const Eigen::Matrix2d S22 =
+      (Eigen::Matrix2d() << 2, 1,
+                            1, 2).finished();
+    const Eigen::Matrix3d S33 =
+      (Eigen::Matrix3d() << 4, 1, 2,
+                            1, 5, 3,
+                            2, 3, 6).finished();
+    const Eigen::Matrix4d S44 =
+      (Eigen::Matrix4d() << 7, 1, 2, 3,
+                            1, 8, 4, 5,
+                            2, 4, 9, 6,
+                            3, 5, 6, 10).finished();
+    // clang-format on
+
+    // Velocity limits on clique 1.
+    vl_ = Vector3d(-3., -2, -1.);
+    vu_ = Vector3d(1., 2, 3.);
+
+    // We make a v* that is inside the "box" specified by vl and vu.
+    VectorXd v_star =
+        VectorXd::LinSpaced(num_velocities, 1., 1. * num_velocities);
+    // The limit constraint applies to the second clique (clique=1) only. This
+    // clique has clique1_nv = 3 degrees of freedom starting at entry 2 in the
+    // full vector of generalized velocities. Thus the .segment<clique1_nv>(2)
+    // below:
+    auto v_star_clique1 =
+        v_star.segment<clique1_nv>(2);  // Velocities for clique 1.
+    v_star_clique1 = 0.5 * (vl_ + vu_);
+    v_star_.resize(num_velocities);
+    v_star_ = v_star;
+
+    std::vector<MatrixXd> A = {S22, S33, S44};
+    sap_problem_->Reset(std::move(A), std::move(v_star));
+
+    constexpr int num_limit_constraint_equations = 2 * clique1_nv;
+    VectorXd R = VectorXd::Constant(num_limit_constraint_equations, 1.0e-3);
+    sap_problem_->AddConstraint(
+        std::make_unique<LimitConstraint<double>>(1, vl_, vu_, std::move(R)));
+  }
+
+  // We verify our supernodal algebra by comparing the Hessian reconstructed
+  // with the supernodal solver against our already tested dense algebra.
+  void VerifySupernodalHessian(const SapSolver<double>& sap,
+                               const VectorXd& v_guess) const {
+    // Verify Hessian obtained with sparse supernodal algebra.
+    std::unique_ptr<SuperNodalSolver> supernodal_solver =
+        SapSolverTester::MakeSuperNodalSolver(sap);
+    const SapModel<double>& model = SapSolverTester::model(sap);
+    const auto context = model.MakeContext();
+    auto v = model.GetMutableVelocities(context.get());
+    model.velocities_permutation().Apply(v_guess, &v);
+    SapSolverTester::UpdateSuperNodalSolver(sap, *context,
+                                            supernodal_solver.get());
+    const MatrixXd H = supernodal_solver->MakeFullMatrix();
+    const MatrixXd H_expected =
+        SapSolverTester::CalcDenseHessian(sap, *context);
+    EXPECT_TRUE(CompareMatrices(H, H_expected, 3.0 * kEps,
+                                MatrixCompareType::relative));
+  }
+
+  // Compute next step velocity using the provide set of `params` and the given
+  // guess `v_guess`.
+  VectorXd SolveWithGuess(const SapSolverParameters& params,
+                          const VectorXd& v_guess) const {
+    SapSolver<double> sap;
+    sap.set_parameters(params);
+    SapSolverResults<double> result;
+    const SapSolverStatus status =
+        sap.SolveWithGuess(*sap_problem_, v_guess, &result);
+    EXPECT_EQ(status, SapSolverStatus::kSuccess);
+    return result.v;
+  }
+
+  // Compare solutions obtained with dense and supernodal algebra.
+  void CompareDenseAgainstSupernodal(const VectorXd& v_guess) const {
+    const double relative_tolerance = kEps;
+
+    // Perform computation with supernodal algebra.
+    SapSolverParameters params_supernodal;  // Default set of parameters.
+    params_supernodal.use_dense_algebra = false;
+    params_supernodal.abs_tolerance = 0;
+    params_supernodal.rel_tolerance = relative_tolerance;
+    params_supernodal.line_search_type = GetParam();
+    const VectorXd v_supernodal = SolveWithGuess(params_supernodal, v_guess);
+
+    // Perform computation with dense algebra.
+    SapSolverParameters params_dense;  // Default set of parameters.
+    params_dense.use_dense_algebra = true;
+    params_dense.abs_tolerance = 0;
+    params_dense.rel_tolerance = relative_tolerance;
+    params_dense.line_search_type = GetParam();
+    const VectorXd v_dense = SolveWithGuess(params_dense, v_guess);
+
+    // We expected results computed with dense and supernodal algebra to match
+    // close to machine epsilon for this small problem.
+    EXPECT_TRUE(CompareMatrices(v_supernodal, v_dense, 5.0 * relative_tolerance,
+                                MatrixCompareType::relative));
+  }
+
+ protected:
+  VectorXd vl_;
+  VectorXd vu_;
+  VectorXd v_star_;
+  std::unique_ptr<SapContactProblem<double>> sap_problem_;
+};
+
+// Unit test that SAP performs no computation when provided with an initial
+// guess that satisfies optimality condition.
+TEST_P(SapNewtonIterationTest, GuessIsTheSolution) {
+  SapSolver<double> sap;
+  SapSolverParameters parameters;
+  parameters.line_search_type = GetParam();
+  sap.set_parameters(parameters);
+  const VectorXd v_guess = v_star_;
+  SapSolverResults<double> result;
+  const SapSolverStatus status =
+      sap.SolveWithGuess(*sap_problem_, v_guess, &result);
+  EXPECT_EQ(status, SapSolverStatus::kSuccess);
+
+  // Verify optimality is satisfied but no iterations were performed.
+  const SapSolver<double>::SolverStats& stats = sap.get_statistics();
+  EXPECT_EQ(stats.num_iters, 0);
+  EXPECT_TRUE(stats.optimality_criterion_reached);
+
+  // Since the initial guess is the solution to this problem, we expect the
+  // result ot be an exact copy of it. Constraints are not active and therefore
+  // impulses are zero.
+  EXPECT_EQ(result.v, v_guess);
+  EXPECT_EQ(result.j, VectorXd::Zero(sap_problem_->num_velocities()));
+  EXPECT_EQ(result.gamma,
+            VectorXd::Zero(sap_problem_->num_constraint_equations()));
+}
+
+// For this particular problem, the cost is quadratic for velocities within the
+// bounds of the limits imposed by the constraint. Therefore we expect the
+// Newton solver to achieve convergence in just a single iteration, to machine
+// precision when a full step (alpha=1) is taken by the line search.
+TEST_P(SapNewtonIterationTest, GuessWithinLimits) {
+  SapSolver<double> sap;
+  SapSolverParameters params;
+  params.line_search_type = GetParam();
+  if (params.line_search_type ==
+      SapSolverParameters::LineSearchType::kBackTracking) {
+    // For the backtracking line search, we set the maximum step size so that
+    // the method tries alpha = 1.0. Since alpha_m = alpha_max * rho^m
+    // (m=0..max_iterations), we set alpha_max = 1.0/ls_rho so that alpha_1 =
+    // 1.0 on the second line search iteration. Since in this case the guess is
+    // within the constraint limits, where the cost is exactly quadratic, one
+    // Newton iteration with alpha = 1 will achieve convergence within machine
+    // precision.
+    params.backtracking_line_search.alpha_max =
+        1.0 / params.backtracking_line_search.rho;
+  }
+  sap.set_parameters(params);
+
+  // Arbitrary initial guess within the velocity limits but different from the
+  // solution v_star_.
+  VectorXd v_guess = v_star_;
+  v_guess.segment<3>(2) = 0.9 * vl_ + 0.1 * vu_;
+  SapSolverResults<double> result;
+  const SapSolverStatus status =
+      sap.SolveWithGuess(*sap_problem_, v_guess, &result);
+  EXPECT_EQ(status, SapSolverStatus::kSuccess);
+
+  // Since we provide the guess to be within the limits, and we know the
+  // solution is v = v*, we expect the solver achieve convergence in a single
+  // Newton iteration.
+  const SapSolver<double>::SolverStats& stats = sap.get_statistics();
+  EXPECT_EQ(stats.num_iters, 1);
+  // We expect two backtracking line search iterations given alpha_max != 1.
+  // Since the problem is quadratic, we expect the exact line search to
+  // take only one iteration.
+  const int expected_line_search_iterations =
+      params.line_search_type == SapSolverParameters::kBackTracking ? 2 : 1;
+  EXPECT_EQ(stats.num_line_search_iters, expected_line_search_iterations);
+  // This problem is very well conditioned, we expect convergence on the
+  // optimality condition.
+  EXPECT_TRUE(stats.optimality_criterion_reached);
+
+  // The solution exactly equals the initial guess v* within machine epsilon
+  // given in this case the problem is linear.
+  EXPECT_TRUE(CompareMatrices(result.v, v_star_, 10.0 * kEps,
+                              MatrixCompareType::relative));
+  EXPECT_TRUE(CompareMatrices(result.j,
+                              VectorXd::Zero(sap_problem_->num_velocities()),
+                              3.0 * kEps, MatrixCompareType::absolute));
+  EXPECT_TRUE(CompareMatrices(
+      result.gamma, VectorXd::Zero(sap_problem_->num_constraint_equations()),
+      3.0 * kEps, MatrixCompareType::absolute));
+
+  VerifySupernodalHessian(sap, v_guess);
+
+  // Verify solution computed with dense and supernodal algebra match.
+  CompareDenseAgainstSupernodal(v_guess);
+}
+
+// For this problem when the initial guess is outside the constraint's limits
+// the cost is non-linear and we need several Newton iterations to achieve
+// convergence.
+TEST_P(SapNewtonIterationTest, GuessOutsideLimits) {
+  SapSolver<double> sap;
+  SapSolverParameters params;
+  params.line_search_type = GetParam();
+  if (params.line_search_type ==
+      SapSolverParameters::LineSearchType::kBackTracking) {
+    // For the backtracking line search, we use the same parameters as in
+    // the unit test SapNewtonIterationTest__GuessWithinLimits so that the only
+    // difference between the two tests is the initial guess given to the
+    // solver.
+    params.backtracking_line_search.alpha_max =
+        1.0 / params.backtracking_line_search.rho;
+  }
+  sap.set_parameters(params);
+
+  // Arbitrary initial guess outside the constraint bounds to force several
+  // Newton iterations.
+  VectorXd v_guess = v_star_;
+  v_guess.segment<3>(2) = Vector3d(1.2 * vl_(0) /* below lower limit */,
+                                   v_star_(1) /* within limits */,
+                                   1.1 * vu_(2) /* above upper limit */);
+  SapSolverResults<double> result;
+  const SapSolverStatus status =
+      sap.SolveWithGuess(*sap_problem_, v_guess, &result);
+  EXPECT_EQ(status, SapSolverStatus::kSuccess);
+
+  // Since the initial guess is outside the constraint's bounds, and we know the
+  // solution is v = v* inside the bounds, we expect several Newton iterations
+  // to achieve convergence.
+  const SapSolver<double>::SolverStats& stats = sap.get_statistics();
+  EXPECT_GT(stats.num_iters, 1);
+  EXPECT_GT(stats.num_line_search_iters, 1);
+  // This problem is very well conditioned, we expect convergence on the
+  // optimality condition.
+  EXPECT_TRUE(stats.optimality_criterion_reached);
+
+  // Even though the initial guess is outside the constraint limits, once a SAP
+  // iteration reaches a solution within the constraint's bounds, it will
+  // converge within machine epsilon in the next iteration.
+  EXPECT_TRUE(CompareMatrices(result.v, v_star_, 3.0 * kEps,
+                              MatrixCompareType::relative));
+  EXPECT_TRUE(CompareMatrices(result.j,
+                              VectorXd::Zero(sap_problem_->num_velocities()),
+                              3.0 * kEps, MatrixCompareType::absolute));
+  EXPECT_TRUE(CompareMatrices(
+      result.gamma, VectorXd::Zero(sap_problem_->num_constraint_equations()),
+      3.0 * kEps, MatrixCompareType::absolute));
+
+  // Verify Hessian obtained with sparse supernodal algebra.
+  VerifySupernodalHessian(sap, v_guess);
+
+  // Verify solution computed with dense and supernodal algebra match.
+  CompareDenseAgainstSupernodal(v_guess);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TestLineSearchMethods, SapNewtonIterationTest,
+    testing::Values(SapSolverParameters::LineSearchType::kBackTracking,
+                    SapSolverParameters::LineSearchType::kExact));
 
 }  // namespace internal
 }  // namespace contact_solvers

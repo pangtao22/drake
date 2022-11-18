@@ -3,8 +3,8 @@ title: Tools for Code Style Compliance
 ---
 
 This section provides a list of tools that some have found useful for ensuring
-their code abides by [Drake's coding style](/code_style_guide.html). The list
-is by no means comprehensive.
+their code abides by [Drake's Code Style Guide](/code_style_guide.html).
+The list is by no means comprehensive.
 If your favorite tools or methodologies are not listed, we would be delighted
 to learn about them. Please document your trick and submit a pull request!
 
@@ -33,25 +33,22 @@ User manuals for the style-checking tools are as follows:
   [http://pycodestyle.readthedocs.io/en/latest/intro.html](http://pycodestyle.readthedocs.io/en/latest/intro.html).
   * The syntax ``# noqa`` can be used to quiet the warning about an overly-long
     line.
-* Bazel: Uses both pycodestyle like Python, and also [buildifier](/bazel.html#updating-build-files).
+* Bazel: Uses both pycodestyle like Python, and also the buildifier tool as
+  described in [Updating BUILD files](/bazel.html#updating-build-files).
 
 
 # Manual style fixups
 
 ## C/C++: Clang-Format
 
-The [Mandatory platform specific instructions](/from_source.html#mandatory-platform-specific-instructions)
+The [Mandatory platform-specific instructions](/from_source.html#mandatory-platform-specific-instructions)
 install Drake's required version of ``clang-format``, depending on the platform
 (macOS or Ubuntu).
 
 To run ``clang-format``:
 
 ```
-# For development on macOS:
-/usr/local/opt/llvm@9/bin/clang-format -i -style=file [file name]
-
-# For development on Ubuntu:
-clang-format-9 -i -style=file [file name]
+clang-format-12 -i -style=file [file name]
 ```
 
 Using ``clang-format`` will modify the entire file that is specified. As an
@@ -60,8 +57,8 @@ portions of a file that you have modified. To run ``git clang-format``:
 
 ```
 # For development on Ubuntu: format a file that has been staged in git
-git clang-format-9 --binary=/usr/bin/clang-format-9 -- [file name]
+git clang-format-12 --binary=/usr/bin/clang-format-12 -- [file name]
 
 # For development on Ubuntu: format a file that has been modified but not staged
-git clang-format-9 --binary=/usr/bin/clang-format-9 -f -- [file name]
+git clang-format-12 --binary=/usr/bin/clang-format-12 -f -- [file name]
 ```

@@ -77,10 +77,15 @@ def _vtk_cc_library(
                 "-l{}-{}".format(name, VTK_MAJOR_MINOR_VERSION),
                 "-Wl,-rpath,{}".format(lib_dir),
             ]
+    elif os_result.is_ubuntu and os_result.ubuntu_release == "22.04":
+        if not header_only:
+            linkopts = linkopts + [
+                "-l{}-{}".format(name, VTK_MAJOR_MINOR_VERSION),
+            ]
     elif os_result.is_ubuntu:
         if not header_only:
             srcs = ["lib/lib{}-{}.so.1".format(name, VTK_MAJOR_MINOR_VERSION)]
-    elif os_result.is_manylinux:
+    elif os_result.is_manylinux or os_result.is_macos_wheel:
         if not header_only:
             # TODO(jwnimmer-tri) Ideally, we wouldn't be hard-coding paths when
             # using manylinux.
@@ -116,13 +121,16 @@ def _impl(repository_ctx):
             os_result.homebrew_prefix,
             VTK_MAJOR_MINOR_PATCH_VERSION,
         ), "include")
+    elif os_result.is_ubuntu and os_result.ubuntu_release == "22.04":
+        include_dir = "vtk-{}".format(VTK_MAJOR_MINOR_VERSION)
+        repository_ctx.symlink(
+            "/usr/include/" + include_dir,
+            "include/" + include_dir,
+        )
     elif os_result.is_ubuntu:
-        if os_result.ubuntu_release == "18.04":
-            archive = "vtk-9.1.0-1-bionic-x86_64.tar.gz"
-            sha256 = "1b51691d09c9fa77a74ad237fe320fed606e071f732f10645efeffa859352bb6"  # noqa
-        elif os_result.ubuntu_release == "20.04":
-            archive = "vtk-9.1.0-1-focal-x86_64.tar.gz"
-            sha256 = "b21e8b98ad71da205305bc074d8e3d4208e9dff307ae716384cefb4d1e606d2f"  # noqa
+        if os_result.ubuntu_release == "20.04":
+            archive = "vtk-9.1.0-3-focal-x86_64.tar.gz"
+            sha256 = "0a899323e7927a7b3e09d1be35bf70df9630f4eba56b9af93c59401cefa227c5"  # noqa
         else:
             fail("Operating system is NOT supported {}".format(os_result))
 
@@ -138,7 +146,7 @@ def _impl(repository_ctx):
             sha256 = sha256,
             type = "tar.gz",
         )
-    elif os_result.is_manylinux:
+    elif os_result.is_manylinux or os_result.is_macos_wheel:
         repository_ctx.symlink("/opt/vtk/include", "include")
     else:
         fail("Operating system is NOT supported {}".format(os_result))
@@ -159,7 +167,7 @@ licenses([
     file_content += _vtk_cc_library(os_result, "vtkfmt")
 
     # NOTE: see /tools/wheel/image/vtk-args, this is to avoid packaging glew.
-    if os_result.is_manylinux:
+    if os_result.is_manylinux or os_result.is_macos_wheel:
         file_content += _vtk_cc_library(os_result, "vtkglew")
 
     file_content += _vtk_cc_library(os_result, "vtkkissfft")
@@ -378,6 +386,8 @@ licenses([
             "vtkExecutive.h",
             "vtkImageAlgorithm.h",
             "vtkPolyDataAlgorithm.h",
+            "vtkReaderAlgorithm.h",
+            "vtkSimpleReader.h",
             "vtkStreamingDemandDrivenPipeline.h",
         ],
         deps = [
@@ -712,10 +722,17 @@ licenses([
         ],
     )
 
-    # Indirect dependency: omit headers.
     file_content += _vtk_cc_library(
         os_result,
         "vtkIOLegacy",
+        hdrs = [
+            "vtkCellIterator.h",
+            "vtkDataReader.h",
+            "vtkIOLegacyModule.h",
+            "vtkUnstructuredGrid.h",
+            "vtkUnstructuredGridBase.h",
+            "vtkUnstructuredGridReader.h",
+        ],
         deps = [
             ":vtkCommonCore",
             ":vtkCommonDataModel",
@@ -726,6 +743,11 @@ licenses([
         ],
     )
 
+    if os_result.is_manylinux:
+        vtk_expat_libraries = []
+    else:
+        vtk_expat_libraries = ["@expat"]
+
     # Indirect dependency: omit headers.
     file_content += _vtk_cc_library(
         os_result,
@@ -735,8 +757,7 @@ licenses([
             ":vtkCommonDataModel",
             ":vtkIOCore",
             ":vtksys",
-            "@expat",
-        ],
+        ] + vtk_expat_libraries,
     )
 
     # Indirect dependency: omit headers.
@@ -837,8 +858,16 @@ licenses([
         "vtkGenericRenderWindowInteractor.h",
         "vtkRenderingUIModule.h",
     ]
-    if not os_result.is_macos:
+    if not os_result.is_macos and not os_result.is_macos_wheel:
         vtk_rendering_ui_hdrs.append("vtkXRenderWindowInteractor.h")
+
+    if os_result.is_macos_wheel:
+        # Normally this would be a private dependency, but no such thing when
+        # VTK is built static.
+        vtk_ui_linkopts = ["-framework Cocoa"]
+    else:
+        vtk_ui_linkopts = []
+
     file_content += _vtk_cc_library(
         os_result,
         "vtkRenderingUI",
@@ -846,6 +875,7 @@ licenses([
         deps = [
             ":vtkRenderingCore",
         ],
+        linkopts = vtk_ui_linkopts,
     )
 
     # Indirect dependency: omit headers.
@@ -871,12 +901,18 @@ licenses([
         "vtkShader.h",
         "vtkShaderProgram.h",
     ]
-    if not os_result.is_macos:
+    if not os_result.is_macos and not os_result.is_macos_wheel:
         vtk_rendering_opengl2_hdrs.append("vtkXOpenGLRenderWindow.h")
 
     if os_result.is_manylinux:
         vtk_glew_library = ":vtkglew"
+
+        # Normally these would be private dependencies, but no such thing when
+        # VTK is built static.
         vtk_opengl_linkopts = ["-lX11", "-lXt", "-lGLX"]
+    elif os_result.is_macos_wheel:
+        vtk_glew_library = ":vtkglew"
+        vtk_opengl_linkopts = []
     else:
         vtk_glew_library = "@glew"
         vtk_opengl_linkopts = []
@@ -926,6 +962,9 @@ filegroup(
 
     if os_result.is_macos:
         # Use Homebrew VTK.
+        files_to_install = []
+    elif os_result.is_ubuntu and os_result.ubuntu_release == "22.04":
+        # Use Ubuntu VTK.
         files_to_install = []
     else:
         # Install all files.

@@ -19,6 +19,8 @@ namespace yaml {
 namespace test {
 namespace {
 
+using internal::YamlReadArchive;
+
 // TODO(jwnimmer-tri) Add a test case for reading NonPodVectorStruct.
 // TODO(jwnimmer-tri) Add a test case for reading OuterWithBlankInner.
 // TODO(jwnimmer-tri) Add a test case for reading StringStruct.
@@ -754,8 +756,8 @@ doc:
         AcceptIntoDummy<OuterStruct>(node),
         "YAML node of type Mapping"
         " \\(with size 1 and keys \\{inner_value_TYPO\\}\\)"
-        " key inner_value_TYPO did not match any visited value entry for <root>"
-        " while accepting YAML node of type Mapping"
+        " key 'inner_value_TYPO' did not match any visited value entry for"
+        " <root> while accepting YAML node of type Mapping"
         " \\(with size 2 and keys \\{inner_struct, outer_value\\}\\)"
         " while visiting [^ ]*InnerStruct inner_struct\\.");
   } else {

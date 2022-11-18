@@ -8,19 +8,21 @@ def petsc_repository(
     github_archive(
         name = name,
         repository = "petsc/petsc",
-        commit = "v3.16.5",
-        sha256 = "1adf81bfb42104af469443fbcdb4211a7cae674dcb46b6c312ff29a7ffb8ff45",  # noqa
-        build_file = "@drake//tools/workspace/petsc:package.BUILD.bazel",
+        commit = "v3.18.1",
+        sha256 = "89b60c644e6893df1bc5b072560cf1295c8c9bccf585bd6eab234ae77d91a83e",  # noqa
+        build_file = ":package.BUILD.bazel",
         mirrors = mirrors,
         patches = [
             # Patch to fix dangerous global state in PETSc.
-            "@drake//tools/workspace/petsc:patches/destroy.patch",
-            "@drake//tools/workspace/petsc:patches/inherit.patch",
-            "@drake//tools/workspace/petsc:patches/matrix.patch",
-            "@drake//tools/workspace/petsc:patches/mpi.patch",
-            "@drake//tools/workspace/petsc:patches/petscimpl.patch",
-            "@drake//tools/workspace/petsc:patches/pname.patch",
-            "@drake//tools/workspace/petsc:patches/remove_packages.patch",
-            "@drake//tools/workspace/petsc:patches/tagm.patch",
+            ":patches/destroy.patch",
+            ":patches/dlregispetsc.patch",
+            ":patches/inherit.patch",
+            ":patches/matrix.patch",
+            ":patches/mpi.patch",
+            ":patches/petscimpl.patch",
+            ":patches/petsc_creationidx_keyval.patch",
+            ":patches/pname.patch",
+            ":patches/remove_packages.patch",
+            ":patches/tagm.patch",
         ],
     )

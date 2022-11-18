@@ -2,318 +2,75 @@
 
 #include <algorithm>
 #include <limits>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
-#include "drake/multibody/contact_solvers/contact_solver_utils.h"
+#include "drake/common/default_scalars.h"
+#include "drake/common/extract_double.h"
+#include "drake/math/linear_solve.h"
+#include "drake/multibody/contact_solvers/newton_with_bisection.h"
+#include "drake/multibody/contact_solvers/supernodal_solver.h"
 
 namespace drake {
 namespace multibody {
 namespace contact_solvers {
 namespace internal {
 
+using drake::systems::Context;
+
 template <typename T>
-void SapSolver<T>::Cache::Resize(int nv, int nc) {
-  velocities_cache_.Resize(nc);
-  momentum_cache_.Resize(nv);
-  impulses_cache_.Resize(nc);
-  gradients_cache_.Resize(nv, nc);
-  search_direction_cache_.Resize(nv, nc);
+void SapSolver<T>::set_parameters(const SapSolverParameters& parameters) {
+  parameters_ = parameters;
 }
 
 template <typename T>
-SapSolverStatus SapSolver<T>::SolveWithGuess(
-    const T& time_step, const SystemDynamicsData<T>& dynamics_data,
-    const PointContactData<T>& contact_data, const VectorX<T>& v_guess,
-    SapSolverResults<T>* results) {
-  // The primal method needs the inverse dynamics data.
-  DRAKE_DEMAND(dynamics_data.has_inverse_dynamics());
-  // User code should only call the solver for problems with constraints.
-  // Otherwise the solution is trivially v = v*.
-  DRAKE_DEMAND(contact_data.num_contacts() != 0);
-  PreProcessData(time_step, dynamics_data, contact_data, &data_);
-  return DoSolveWithGuess(v_guess, results);
+const typename SapSolver<T>::SolverStats& SapSolver<T>::get_statistics() const {
+  return stats_;
 }
 
 template <typename T>
-Vector3<T> SapSolver<T>::ProjectSingleImpulse(
-    const T& mu, const Eigen::Ref<const Vector3<T>>& R,
-    const Eigen::Ref<const Vector3<T>>& y, Matrix3<T>* dPdy) const {
-  // Computes the "soft norm" ‖x‖ₛ defined by ‖x‖ₛ² = ‖x‖² + ε², where ε =
-  // soft_tolerance. Using the soft norm we define the tangent vector as t̂ =
-  // γₜ/‖γₜ‖ₛ, which is well defined even for γₜ = 0. Also gradients are well
-  // defined and follow the same equations presented in [Castro et al., 2021]
-  // where regular norms are simply replaced by soft norms.
-  // N.B. soft_norm() is not a norm in the mathematical sense. In particular
-  // soft_norm(VectorX<T>::Zero()) = ε, different from zero.
-  auto soft_norm = [eps = parameters_.soft_tolerance](
-                       const Eigen::Ref<const VectorX<T>>& x) -> T {
-    using std::sqrt;
-    return sqrt(x.squaredNorm() + eps * eps);
-  };
-
-  // We assume a regularization of the form R = (Rt, Rt, Rn).
-  const T& Rt = R(0);
-  const T& Rn = R(2);
-  const T mu_hat = mu * Rt / Rn;
-
-  const auto yt = y.template head<2>();
-  const T yr = soft_norm(yt);
-  const T yn = y(2);
-  const Vector2<T> t_hat = yt / yr;
-
-  // N.B. The expressions implemented below are also valid for mu = 0. The
-  // projection below reduces to gamma = [0, 0, max(0, yn)] when mu = 0, as it
-  // should. The gradient also reduces to the correct expression:
-  //     | 0 0 0 |
-  // G = | 0 0 0 |
-  //     | 0 0 1 |
-
-  Vector3<T> gamma;
-  // Analytical projection of y onto the friction cone ℱ using the R norm.
-  if (yr < mu * yn) {
-    // Region I, stiction.
-    gamma = y;
-    if (dPdy) dPdy->setIdentity();
-  } else if (-mu_hat * yr < yn && mu * yn <= yr) {
-    // Region II, sliding.
-
-    // Common terms in both the projection and its gradient.
-    const T mu_tilde_squared = mu * mu_hat;  // mu_tilde = mu * sqrt(Rt/Rn).
-    const T factor = 1.0 / (1.0 + mu_tilde_squared);
-
-    // Projection P(y).
-    const T gn = (yn + mu_hat * yr) * factor;
-    const Vector2<T> gt = mu * gn * t_hat;
-    gamma.template head<2>() = gt;
-    gamma(2) = gn;
-
-    // Gradient.
-    if (dPdy) {
-      const Matrix2<T> P = t_hat * t_hat.transpose();
-      const Matrix2<T> Pperp = Matrix2<T>::Identity() - P;
-
-      // We split dPdy into separate blocks:
-      //
-      // dPdy = |dgt_dyt dgt_dyn|
-      //        |dgn_dyt dgn_dyn|
-      // where dgt_dyt ∈ ℝ²ˣ², dgt_dyn ∈ ℝ², dgn_dyt ∈ ℝ²ˣ¹ and dgn_dyn ∈ ℝ.
-      const Matrix2<T> dgt_dyt = mu * (gn / yr * Pperp + mu_hat * factor * P);
-      const Vector2<T> dgt_dyn = mu * factor * t_hat;
-      const RowVector2<T> dgn_dyt = mu_hat * factor * t_hat.transpose();
-      const T dgn_dyn = factor;
-
-      dPdy->template topLeftCorner<2, 2>() = dgt_dyt;
-      dPdy->template topRightCorner<2, 1>() = dgt_dyn;
-      dPdy->template bottomLeftCorner<1, 2>() = dgn_dyt;
-      (*dPdy)(2, 2) = dgn_dyn;
-    }
-  } else {  // yn <= -mu_hat * yr
-    // Region III, no contact.
-    gamma.setZero();
-    if (dPdy) dPdy->setZero();
-  }
-
-  return gamma;
-}
-
-template <typename T>
-void SapSolver<T>::ProjectAllImpulses(const VectorX<T>& y,
-                                      VectorX<T>* gamma) const {
-  const int nc = data_.nc;
-  const int nc3 = 3 * nc;
-  DRAKE_DEMAND(y.size() == nc3);
-  DRAKE_DEMAND(gamma->size() == nc3);
-
-  // Data.
-  const auto& R = data_.R;
-  const auto& mu = data_.mu;
-
-  for (int ic = 0; ic < nc; ++ic) {
-    const int ic3 = 3 * ic;
-    const auto& R_ic = R.template segment<3>(ic3);
-    const T& mu_ic = mu(ic);
-    const auto& y_ic = y.template segment<3>(ic3);
-    // Analytical projection of y onto the friction cone ℱ using the R norm.
-    gamma->template segment<3>(ic3) =
-        ProjectSingleImpulse(mu_ic, R_ic, y_ic);
-  }
-}
-
-template <typename T>
-void SapSolver<T>::CalcAllProjectionsGradients(
-    const VectorX<T>& y, std::vector<Matrix3<T>>* dPdy) const {
-  const int nc = data_.nc;
-  const int nc3 = 3 * nc;
-  DRAKE_DEMAND(y.size() == nc3);
-  DRAKE_DEMAND(static_cast<int>(dPdy->size()) == nc);
-
-  // Data.
-  const auto& R = data_.R;
-  const auto& mu = data_.mu;
-
-  for (int ic = 0; ic < nc; ++ic) {
-    const int ic3 = 3 * ic;
-    const auto& R_ic = R.template segment<3>(ic3);
-    const T& mu_ic = mu(ic);
-    const auto& y_ic = y.template segment<3>(ic3);
-
-    // Analytical projection of y onto the friction cone ℱ using the R norm.
-    auto& dPdy_ic = (*dPdy)[ic];
-    ProjectSingleImpulse(mu_ic, R_ic, y_ic, &dPdy_ic);
-  }
-}
-
-template <typename T>
-void SapSolver<T>::CalcDelassusDiagonalApproximation(
-    int nc, const std::vector<MatrixX<T>>& At, const BlockSparseMatrix<T>& J,
-    VectorX<T>* delassus_diagonal) const {
-  DRAKE_DEMAND(delassus_diagonal != nullptr);
-  DRAKE_DEMAND(delassus_diagonal->size() == nc);
-  const int nt = At.size();  // Number of trees.
-
-  // We compute a factorization of A once so we can re-use it multiple times
-  // below.
-  std::vector<Eigen::LDLT<MatrixX<T>>> A_ldlt;
-  A_ldlt.resize(nt);
-  for (int t = 0; t < nt; ++t) {
-    const auto& At_local = At[t];
-    A_ldlt[t] = At_local.ldlt();
-  }
-
-  // We compute a diagonal approximation to the Delassus operator W. We
-  // initialize it to zero and progressively add contributions in an O(n) pass.
-  std::vector<Matrix3<T>> W(nc, Matrix3<T>::Zero());
-  for (auto [p, t, Jpt] : J.get_blocks()) {
-    // Verify assumption that this indeed is a contact Jacobian.
-    DRAKE_DEMAND(J.row_start(p) % 3 == 0);
-    DRAKE_DEMAND(Jpt.rows() % 3 == 0);
-    // ic_start is the first contact point of patch p.
-    const int ic_start = J.row_start(p) / 3;
-    // k-th contact within patch p.
-    for (int k = 0; k < Jpt.rows() / 3; ++k) {
-      const int ic = ic_start + k;
-      const auto& Jkt = Jpt.template middleRows<3>(3 * k);
-      // This effectively computes Jₖₜ⋅A⁻¹⋅Jₖₜᵀ.
-      W[ic] += Jkt * A_ldlt[t].solve(Jkt.transpose());
-    }
-  }
-
-  // Compute delassus_diagonal as the rms norm of k-th diagonal block.
-  for (int k = 0; k < nc; ++k) {
-    (*delassus_diagonal)[k] = W[k].norm() / 3;
-  }
-}
-
-template <typename T>
-void SapSolver<T>::PreProcessData(const T& time_step,
-                                  const SystemDynamicsData<T>& dynamics_data,
-                                  const PointContactData<T>& contact_data,
-                                  PreProcessedData* data) const {
-  DRAKE_DEMAND(data != nullptr);
-  using std::max;
-  using std::min;
-  using std::sqrt;
-
-  data->Resize(dynamics_data.num_velocities(), contact_data.num_contacts());
-  data->time_step = time_step;
-
-  // Aliases to data.
-  const VectorX<T>& mu = contact_data.get_mu();
-  const VectorX<T>& phi0 = contact_data.get_phi0();
-  const VectorX<T>& stiffness = contact_data.get_stiffness();
-  const VectorX<T>& dissipation = contact_data.get_dissipation();
-
-  // Aliases to mutable pre-processed data.
-  VectorX<T>& R = data->R;
-  VectorX<T>& vhat = data->vhat;
-  VectorX<T>& inv_sqrt_A = data->inv_sqrt_A;
-
-  // Store operators as block-sparse matrices.
-  dynamics_data.get_A().AssembleMatrix(&data->A);
-  contact_data.get_Jc().AssembleMatrix(&data->J);
-
-  // Extract momentum matrix's per-tree diagonal blocks. Compute diagonal
-  // scaling inv_sqrt_A.
-  data->At.clear();
-  data->At.reserve(data->A.num_blocks());
-  for (const auto& block : data->A.get_blocks()) {
-    const int t1 = std::get<0>(block);
-    const int t2 = std::get<1>(block);
-    const MatrixX<T>& Aij = std::get<2>(block);
-    // We verify the assumption that M is block diagonal.
-    DRAKE_DEMAND(t1 == t2);
-    // Each block must be square.
-    DRAKE_DEMAND(Aij.rows() == Aij.cols());
-
-    const int nt = Aij.rows();  // Number of DOFs in the tree.
-    data->At.push_back(Aij);
-
-    const int start = data->A.row_start(t1);
-    DRAKE_DEMAND(start == data->A.col_start(t2));
-    inv_sqrt_A.segment(start, nt) = Aij.diagonal().cwiseInverse().cwiseSqrt();
-  }
-
-  // Computation of a diagonal approximation to the Delassus operator. N.B. This
-  // must happen before the computation of the regularization R below.
-  const int nc = phi0.size();
-  CalcDelassusDiagonalApproximation(nc, data->At, data->J,
-                                    &data->delassus_diagonal);
-
-  // We use the Delassus scaling computed above to estimate regularization
-  // parameters in the matrix R.
-  const VectorX<T>& delassus_diagonal = data->delassus_diagonal;
-  const double beta = parameters_.beta;
-  const double sigma = parameters_.sigma;
-
-  // Rigid approximation constant: Rₙ = β²/(4π²)⋅wᵢ when the contact frequency
-  // ωₙ is below the limit ωₙ⋅δt ≤ 2π. That is, the period is Tₙ = β⋅δt. See
-  // [Castro et al., 2021] for details.
-  const T beta_factor = beta * beta / (4.0 * M_PI * M_PI);
-  for (int ic = 0; ic < nc; ++ic) {
-    const int ic3 = 3 * ic;
-    const T& k = stiffness(ic);
-    const T& c = dissipation(ic);
-    DRAKE_DEMAND(k > 0 && c >= 0);
-    const T& wi = delassus_diagonal(ic);
-    const T taud = c / k;  // Damping time scale.
-    const T Rn =
-        max(beta_factor * wi, 1.0 / (time_step * k * (time_step + taud)));
-    const T Rt = sigma * wi;
-    R.template segment<3>(ic3) = Vector3<T>(Rt, Rt, Rn);
-
-    // Stabilization velocity.
-    const T vn_hat = -phi0(ic) / (time_step + taud);
-    vhat.template segment<3>(ic3) = Vector3<T>(0, 0, vn_hat);
-  }
-
-  data->Rinv = R.cwiseInverse();
-  data->v_star = dynamics_data.get_v_star();
-  data->mu = mu;
-  data->A.Multiply(data->v_star, &data->p_star);
-}
-
-template <typename T>
-void SapSolver<T>::PackSapSolverResults(const State& state,
+void SapSolver<T>::PackSapSolverResults(const systems::Context<T>& context,
                                         SapSolverResults<T>* results) const {
   DRAKE_DEMAND(results != nullptr);
-  results->Resize(data_.nv, 3 * data_.nc);
-  results->v = state.v();
-  results->gamma = EvalImpulsesCache(state).gamma;
-  results->vc = EvalVelocitiesCache(state).vc;
-  data_.J.MultiplyByTranspose(results->gamma, &results->j);
+  results->Resize(model_->problem().num_velocities(),
+                  model_->num_constraint_equations());
+
+  // For non-participating velocities the solutions is v = v*. Therefore we
+  // first initialize to v = v* and overwrite with the non-trivial participating
+  // values in the following line.
+  results->v = model_->problem().v_star();
+  const VectorX<T>& v_participating = model_->GetVelocities(context);
+  model_->velocities_permutation().ApplyInverse(v_participating, &results->v);
+
+  // Constraints equations are clustered (essentially their order is permuted
+  // for a better sparsity structure). Therefore constraint velocities and
+  // impulses are evaluated in this clustered order and permuted into the
+  // original order described by the model right after.
+  const VectorX<T>& vc_clustered = model_->EvalConstraintVelocities(context);
+  model_->impulses_permutation().ApplyInverse(vc_clustered, &results->vc);
+  const VectorX<T>& gamma_clustered = model_->EvalImpulses(context);
+  model_->impulses_permutation().ApplyInverse(gamma_clustered, &results->gamma);
+
+  // For non-participating velocities we have v=v* and the generalized impulses
+  // are zero. Therefore we first zero-out all generalized impulses and
+  // overwrite with the non-trivial non-zero values for the participating DOFs
+  // right after.
+  const VectorX<T>& tau_participating =
+      model_->EvalGeneralizedImpulses(context);
+  results->j.setZero();
+  model_->velocities_permutation().ApplyInverse(tau_participating, &results->j);
 }
 
 template <typename T>
-void SapSolver<T>::CalcStoppingCriteriaResidual(const State& state,
+void SapSolver<T>::CalcStoppingCriteriaResidual(const Context<T>& context,
                                                 T* momentum_residual,
                                                 T* momentum_scale) const {
   using std::max;
-  const auto& inv_sqrt_A = data_.inv_sqrt_A;
-  const auto& momentum_cache = EvalMomentumCache(state);
-  const VectorX<T>& p = momentum_cache.p;
-  const VectorX<T>& jc = momentum_cache.jc;
-  const VectorX<T>& ell_grad = EvalGradientsCache(state).ell_grad_v;
+  const VectorX<T>& inv_sqrt_A = model_->inv_sqrt_dynamics_matrix();
+  const VectorX<T>& p = model_->EvalMomentum(context);
+  const VectorX<T>& jc = model_->EvalGeneralizedImpulses(context);
+  const VectorX<T>& ell_grad = model_->EvalCostGradient(context);
 
   // Scale generalized momentum quantities using inv_sqrt_A so that all entries
   // have the same units and we can weigh them equally.
@@ -326,45 +83,109 @@ void SapSolver<T>::CalcStoppingCriteriaResidual(const State& state,
 }
 
 template <typename T>
-SapSolverStatus SapSolver<T>::DoSolveWithGuess(
-    const VectorX<T>& v_guess, SapSolverResults<T>* result) {
+SapSolverStatus SapSolver<T>::SolveWithGuess(
+    const SapContactProblem<T>& problem, const VectorX<T>&,
+    SapSolverResults<T>* results) {
+  if (problem.num_constraints() == 0) {
+    // In the absence of constraints the solution is trivially v = v*.
+    results->Resize(problem.num_velocities(),
+                    problem.num_constraint_equations());
+    results->v = problem.v_star();
+    results->j.setZero();
+    return SapSolverStatus::kSuccess;
+  }
   throw std::logic_error(
-      "SapSolver::DoSolveWithGuess(): Only T = double is supported.");
+      "SapSolver::SolveWithGuess(): Only T = double is supported when the set "
+      "of constraints is non-empty.");
 }
 
 template <>
-SapSolverStatus SapSolver<double>::DoSolveWithGuess(
-    const VectorX<double>& v_guess, SapSolverResults<double>* results) {
+SapSolverStatus SapSolver<double>::SolveWithGuess(
+    const SapContactProblem<double>& problem, const VectorX<double>& v_guess,
+    SapSolverResults<double>* results) {
   using std::abs;
   using std::max;
 
-  const int nv = data_.nv;
-  const int nc = data_.nc;
-  State state(nv, nc);
-  stats_ = SolverStats();
+  if (problem.num_constraints() == 0) {
+    // In the absence of constraints the solution is trivially v = v*.
+    results->Resize(problem.num_velocities(),
+                    problem.num_constraint_equations());
+    results->v = problem.v_star();
+    results->j.setZero();
+    return SapSolverStatus::kSuccess;
+  }
 
-  state.mutable_v() = v_guess;
+  // Make model for the given contact problem.
+  model_ = std::make_unique<SapModel<double>>(&problem);
+  const int nv = model_->num_velocities();
+  const int nk = model_->num_constraint_equations();
+
+  // Allocate the necessary memory to work with.
+  auto context = model_->MakeContext();
+  auto scratch = model_->MakeContext();
+  SearchDirectionData search_direction_data(nv, nk);
+  stats_ = SolverStats();
+  // The supernodal solver is expensive to instantiate and therefore we only
+  // instantiate when needed.
+  std::unique_ptr<SuperNodalSolver> supernodal_solver;
+
+  {
+    // We limit the lifetime of this reference, v, to within this scope where we
+    // immediately need it.
+    Eigen::VectorBlock<VectorX<double>> v =
+        model_->GetMutableVelocities(context.get());
+    model_->velocities_permutation().Apply(v_guess, &v);
+  }
 
   // Start Newton iterations.
   int k = 0;
-  double ell_previous = EvalCostCache(state).ell;
+  double ell = model_->EvalCost(*context);
+  double ell_previous = ell;
   bool converged = false;
+  double alpha = 1.0;
+  int num_line_search_iters = 0;
   for (;; ++k) {
     // We first verify the stopping criteria. If satisfied, we skip expensive
     // factorizations.
     double momentum_residual, momentum_scale;
-    CalcStoppingCriteriaResidual(state, &momentum_residual, &momentum_scale);
+    CalcStoppingCriteriaResidual(*context, &momentum_residual, &momentum_scale);
     stats_.optimality_criterion_reached =
         momentum_residual <=
         parameters_.abs_tolerance + parameters_.rel_tolerance * momentum_scale;
+    stats_.cost.push_back(ell);
+    stats_.alpha.push_back(alpha);
+    stats_.momentum_residual.push_back(momentum_residual);
+    stats_.momentum_scale.push_back(momentum_scale);
     // TODO(amcastro-tri): consider monitoring the duality gap.
     if (stats_.optimality_criterion_reached || stats_.cost_criterion_reached) {
       converged = true;
       break;
     } else {
-      // TODO(amcastro-tri): Instantiate supernodal solver on the first
-      // iteration if it is needed. If the stopping criteria is satisfied at k =
-      // 0 (good guess), then we skip the expensive instantiation of the solver.
+      // SAP's convergence is monotonic. We sanity check this here. We use a
+      // slop to account for round-off errors.
+      // N.B. Notice the check for monotonic convergence is placed AFTER the
+      // check for convergence. This is done puposedly to avoid round-off errors
+      // in the cost near convergence when the gradient is almost zero.
+      const double ell_scale = 0.5 * (ell + ell_previous);
+      const double ell_slop =
+          parameters_.relative_slop * std::max(1.0, ell_scale);
+      if (ell > ell_previous + ell_slop) {
+        DRAKE_LOGGER_DEBUG(
+            "At iter {} cost increased by: {}. alpha = {}. Relative momentum "
+            "residual = {}\n",
+            k, std::abs(ell - ell_previous), alpha,
+            momentum_residual / momentum_scale);
+        if (parameters_.nonmonotonic_convergence_is_error) {
+          throw std::runtime_error(
+              "SapSolver: Non-monotonic convergence detected.");
+        }
+      }
+      if (!parameters_.use_dense_algebra && supernodal_solver == nullptr) {
+        // Instantiate supernodal solver on the first iteration when needed. If
+        // the stopping criteria is satisfied at k = 0 (good guess), then we
+        // skip the expensive instantiation of the solver.
+        supernodal_solver = MakeSuperNodalSolver();
+      }
     }
 
     // Exit if the maximum number of iterations is reached, but only after
@@ -374,28 +195,34 @@ SapSolverStatus SapSolver<double>::DoSolveWithGuess(
 
     // This is the most expensive update: it performs the factorization of H to
     // solve for the search direction dv.
-    const VectorX<double>& dv = EvalSearchDirectionCache(state).dv;
+    CalcSearchDirectionData(*context, supernodal_solver.get(),
+                            &search_direction_data);
+    const VectorX<double>& dv = search_direction_data.dv;
 
-    const auto [alpha, ls_iters] = PerformBackTrackingLineSearch(state, dv);
-    stats_.num_line_search_iters += ls_iters;
+    // Perform line search.
+    switch (parameters_.line_search_type) {
+      case SapSolverParameters::LineSearchType::kBackTracking:
+        std::tie(alpha, num_line_search_iters) = PerformBackTrackingLineSearch(
+            *context, search_direction_data, scratch.get());
+        break;
+      case SapSolverParameters::LineSearchType::kExact:
+        std::tie(alpha, num_line_search_iters) = PerformExactLineSearch(
+            *context, search_direction_data, scratch.get());
+        break;
+    }
+    stats_.num_line_search_iters += num_line_search_iters;
 
     // Update state.
-    state.mutable_v() += alpha * dv;
+    model_->GetMutableVelocities(context.get()) += alpha * dv;
 
-    const double ell = EvalCostCache(state).ell;
+    ell_previous = ell;
+    ell = model_->EvalCost(*context);
+
     const double ell_scale = (ell + ell_previous) / 2.0;
     // N.B. Even though theoretically we expect ell < ell_previous, round-off
     // errors might make the difference ell_previous - ell negative, within
     // machine epsilon. Therefore we take the absolute value here.
     const double ell_decrement = std::abs(ell_previous - ell);
-
-    // SAP's convergence is monotonic. We sanity check this here. We use a slop
-    // to account for round-off errors.
-    // TODO(amcastro-tri): We might need to loosen this slop or make this an
-    // ASSERT instead.
-    const double slop =
-        50 * std::numeric_limits<double>::epsilon() * std::max(1.0, ell_scale);
-    DRAKE_DEMAND(ell <= ell_previous + slop);
 
     // N.B. Here we want alpha≈1 and therefore we impose alpha > 0.5, an
     // arbitrarily "large" value. This is to avoid a false positive on the
@@ -403,15 +230,13 @@ SapSolverStatus SapSolver<double>::DoSolveWithGuess(
     // parameter.
     stats_.cost_criterion_reached =
         ell_decrement < parameters_.cost_abs_tolerance +
-                        parameters_.cost_rel_tolerance * ell_scale &&
+                            parameters_.cost_rel_tolerance * ell_scale &&
         alpha > 0.5;
-
-    ell_previous = ell;
   }
 
   if (!converged) return SapSolverStatus::kFailure;
 
-  PackSapSolverResults(state, results);
+  PackSapSolverResults(*context, results);
 
   // N.B. If the stopping criteria is satisfied for k = 0, the solver is not
   // even instantiated and no factorizations are performed (the expensive part
@@ -422,24 +247,41 @@ SapSolverStatus SapSolver<double>::DoSolveWithGuess(
 }
 
 template <typename T>
-T SapSolver<T>::CalcLineSearchCost(const State& state_v, const T& alpha,
-                                   State* state_alpha) const {
-  // Data.
-  const VectorX<T>& R = data_.R;
-  const VectorX<T>& v_star = data_.v_star;
+T SapSolver<T>::CalcCostAlongLine(
+    const systems::Context<T>& context,
+    const SearchDirectionData& search_direction_data, const T& alpha,
+    systems::Context<T>* scratch, T* dell_dalpha, T* d2ell_dalpha2,
+    VectorX<T>* d2ell_dalpha2_scratch) const {
+  DRAKE_DEMAND(scratch != nullptr);
+  DRAKE_DEMAND(scratch != &context);
+  if (d2ell_dalpha2 != nullptr) DRAKE_DEMAND(d2ell_dalpha2_scratch != nullptr);
 
-  // Cached quantities at state v.
-  const typename Cache::SearchDirectionCache& search_direction_cache =
-      EvalSearchDirectionCache(state_v);
-  const VectorX<T>& dv = search_direction_cache.dv;
-  const VectorX<T>& dp = search_direction_cache.dp;
-  const T& d2ellA_dalpha2 = search_direction_cache.d2ellA_dalpha2;
+  // Data.
+  const VectorX<T>& R = model_->constraints_bundle().R();
+  const VectorX<T>& v_star = model_->v_star();
+
+  // Search direction quantities at state v.
+  const VectorX<T>& dv = search_direction_data.dv;
+  const VectorX<T>& dp = search_direction_data.dp;
+  const VectorX<T>& dvc = search_direction_data.dvc;
+  const T& d2ellA_dalpha2 = search_direction_data.d2ellA_dalpha2;
 
   // State at v(alpha).
-  state_alpha->mutable_v() = state_v.v() + alpha * dv;
+  Context<T>& context_alpha = *scratch;
+  const VectorX<T>& v = model_->GetVelocities(context);
+  model_->GetMutableVelocities(&context_alpha) = v + alpha * dv;
+
+  if (d2ell_dalpha2 != nullptr) {
+    // Since it is more efficient to calculate impulses (gamma) and their
+    // derivatives (G) together, this evaluation avoids calculating the impulses
+    // twice.
+    model_->EvalConstraintsHessian(context_alpha);
+  }
 
   // Update velocities and impulses at v(alpha).
-  const VectorX<T>& gamma = EvalImpulsesCache(*state_alpha).gamma;
+  // N.B. This evaluation should be cheap given we called
+  // EvalConstraintsHessian() at the very start of the scope of this function.
+  const VectorX<T>& gamma = model_->EvalImpulses(context_alpha);
 
   // Regularizer cost.
   const T ellR = 0.5 * gamma.dot(R.asDiagonal() * gamma);
@@ -453,49 +295,78 @@ T SapSolver<T>::CalcLineSearchCost(const State& state_v, const T& alpha,
   //  - dpᵀ = Δvᵀ⋅A
   //  - ellA(v) = 0.5‖v−v*‖²
   //  - d2ellA_dalpha2 = 0.5‖Δv‖²α², see [Castro et al., 2021; §VIII.C].
-  T ellA = EvalCostCache(state_v).ellA;
-  ellA += alpha * dp.dot(state_v.v() - v_star);
+  T ellA = model_->EvalMomentumCost(context);
+  ellA += alpha * dp.dot(v - v_star);
   ellA += 0.5 * alpha * alpha * d2ellA_dalpha2;
   const T ell = ellA + ellR;
+
+  // Compute first derivative.
+  if (dell_dalpha != nullptr) {
+    const VectorX<T>& v_alpha = model_->GetVelocities(context_alpha);
+
+    // First derivative.
+    const T dellA_dalpha = dp.dot(v_alpha - v_star);  // Momentum term.
+    const T dellR_dalpha = -dvc.dot(gamma);           // Regularizer term.
+    *dell_dalpha = dellA_dalpha + dellR_dalpha;
+  }
+
+  // Compute second derivative.
+  if (d2ell_dalpha2 != nullptr) {
+    // N.B. This evaluation should be cheap given we called
+    // EvalConstraintsHessian() at the very start of the scope of this function.
+    const std::vector<MatrixX<T>>& G =
+        model_->EvalConstraintsHessian(context_alpha);
+
+    // First compute d2ell_dalpha2_scratch = G⋅Δvc.
+    d2ell_dalpha2_scratch->resize(model_->num_constraint_equations());
+    const int nc = model_->num_constraints();
+    int constraint_start = 0;
+    for (int i = 0; i < nc; ++i) {
+      const MatrixX<T>& G_i = G[i];
+      // Number of equations for the i-th constraint.
+      const int ni = G_i.rows();
+      const auto dvc_i = dvc.segment(constraint_start, ni);
+      d2ell_dalpha2_scratch->segment(constraint_start, ni) = G_i * dvc_i;
+      constraint_start += ni;
+    }
+
+    // d²ℓ/dα² = Δvcᵀ⋅G⋅Δvc
+    const T d2ellR_dalpha2 = dvc.dot(*d2ell_dalpha2_scratch);
+
+    *d2ell_dalpha2 = d2ellA_dalpha2 + d2ellR_dalpha2;
+
+    // Sanity check these terms are all positive.
+    DRAKE_DEMAND(d2ellR_dalpha2 >= 0.0);
+    DRAKE_DEMAND(d2ellA_dalpha2 > 0.0);
+    DRAKE_DEMAND(*d2ell_dalpha2 > 0);
+  }
 
   return ell;
 }
 
 template <typename T>
 std::pair<T, int> SapSolver<T>::PerformBackTrackingLineSearch(
-    const State& state, const VectorX<T>& dv) const {
+    const systems::Context<T>& context,
+    const SearchDirectionData& search_direction_data,
+    systems::Context<T>* scratch) const {
+  DRAKE_DEMAND(parameters_.line_search_type ==
+               SapSolverParameters::LineSearchType::kBackTracking);
+  DRAKE_DEMAND(scratch != nullptr);
+  DRAKE_DEMAND(scratch != &context);
   using std::abs;
   // Line search parameters.
-  const double rho = parameters_.ls_rho;
-  const double c = parameters_.ls_c;
-  const int max_iterations = parameters_.ls_max_iterations;
+  const double rho = parameters_.backtracking_line_search.rho;
+  const double c = parameters_.backtracking_line_search.armijos_parameter;
+  const int max_iterations =
+      parameters_.backtracking_line_search.max_iterations;
 
   // Quantities at alpha = 0.
-  const T& ell0 = EvalCostCache(state).ell;
-  const auto& ell_grad_v0 = EvalGradientsCache(state).ell_grad_v;
+  const T& ell0 = model_->EvalCost(context);
+  const VectorX<T>& ell_grad_v0 = model_->EvalCostGradient(context);
 
   // dℓ/dα(α = 0) = ∇ᵥℓ(α = 0)⋅Δv.
+  const VectorX<T>& dv = search_direction_data.dv;
   const T dell_dalpha0 = ell_grad_v0.dot(dv);
-
-  T alpha = parameters_.ls_alpha_max;
-  // TODO(amcastro-tri): Consider removing this heap allocation from this scope.
-  State state_aux(state);  // Auxiliary workspace.
-  T ell = CalcLineSearchCost(state, alpha, &state_aux);
-
-  const double kTolerance = 50 * std::numeric_limits<double>::epsilon();
-  // N.B. We expect ell_scale != 0 since otherwise SAP's optimality condition
-  // would've been reached and the solver would not reach this point.
-  // N.B. ell = 0 implies v = v* and gamma = 0, for which the momentum residual
-  // is zero.
-  // Given that the Hessian in SAP is SPD we know that dell_dalpha0 < 0
-  // (strictly). dell_dalpha0 = 0 would mean that we reached the optimum but
-  // most certainly due to round-off errors or very tight user specified
-  // optimality tolerances, the optimality condition was not met and SAP
-  // performed an additional iteration to find a search direction that, most
-  // likely, is close to zero. We therefore detect this case with dell_dalpha0 ≈
-  // 0 and accept the search direction with alpha = 1.
-  const T ell_scale = 0.5 * (ell + ell0);
-  if (abs(dell_dalpha0 / ell_scale) < kTolerance) return std::make_pair(1.0, 0);
 
   // dℓ/dα(α = 0) is guaranteed to be strictly negative given the the Hessian of
   // the cost is positive definite. Only round-off errors in the factorization
@@ -509,6 +380,30 @@ std::pair<T, int> SapSolver<T>::PerformBackTrackingLineSearch(
         "ill-conditioned systems. Consider revisiting your model.");
   }
 
+  T alpha = parameters_.backtracking_line_search.alpha_max;
+  T dell{NAN};
+  T ell =
+      CalcCostAlongLine(context, search_direction_data, alpha, scratch, &dell);
+
+  // If the cost is still decreasing at alpha, we accept this value.
+  if (dell < 0) return std::make_pair(alpha, 0);
+
+  // N.B. ell = 0 implies v = v* and gamma = 0, the solver would've exited
+  // trivially and we would've never gotten to this point. Thus we know
+  // ell_scale != 0.
+  const double ell_scale = ExtractDoubleOrThrow(0.5 * (ell + ell0));
+
+  // N.B. SAP checks that the cost decreases monotonically using a slop to avoid
+  // false negatives due to round-off errors. Therefore if we are going to exit
+  // when the gradient is near zero, we want to ensure the error introduced by a
+  // gradient close to zero (though not exaclty zero) is much smaller than the
+  // slop. Thefore we use a relative slop much smaller than the one used to
+  // verify monotonic convergence.
+  const double ell_slop =
+      parameters_.relative_slop / 10.0 * std::max(1.0, ell_scale);
+  // N.B. We already checked that dell ≥ 0.
+  if (dell < ell_slop) return std::make_pair(alpha, 0);
+
   // Verifies if ell(alpha) satisfies Armijo's criterion.
   auto satisfies_armijo = [c, ell0, dell_dalpha0](const T& alpha_in,
                                                   const T& ell_in) {
@@ -520,9 +415,17 @@ std::pair<T, int> SapSolver<T>::PerformBackTrackingLineSearch(
   T ell_prev = ell;
 
   int iteration = 1;
-  for (; iteration <= max_iterations; ++iteration) {
+  for (; iteration < max_iterations; ++iteration) {
     alpha *= rho;
-    ell = CalcLineSearchCost(state, alpha, &state_aux);
+    ell = CalcCostAlongLine(context, search_direction_data, alpha, scratch);
+
+    // If variations in the cost are close to round-off errors (within some
+    // threshold), it is because the gradient is close to zero and we return
+    // with the latest value of alpha.
+    const T dell_dalpha_approx = (ell - ell_prev) / (alpha - alpha_prev);
+    if (abs(dell_dalpha_approx) < ell_slop)
+      return std::make_pair(alpha, iteration);
+
     // We scan discrete values of alpha from alpha_max to zero and seek for the
     // minimum value of the cost evaluated at those discrete values. Since we
     // know the cost is convex, we detect this minimum by checking the condition
@@ -541,6 +444,9 @@ std::pair<T, int> SapSolver<T>::PerformBackTrackingLineSearch(
     ell_prev = ell;
   }
 
+  // If the very last iterate satisfies Armijo's, we use it.
+  if (satisfies_armijo(alpha, ell)) return std::make_pair(alpha, iteration);
+
   // If we are here, the line-search could not find a valid parameter that
   // satisfies Armijo's criterion.
   throw std::runtime_error(
@@ -553,181 +459,247 @@ std::pair<T, int> SapSolver<T>::PerformBackTrackingLineSearch(
 }
 
 template <typename T>
-void SapSolver<T>::CallDenseSolver(const State& state, VectorX<T>* dv) const {
-  const auto& gradients_cache = EvalGradientsCache(state);
+std::pair<T, int> SapSolver<T>::PerformExactLineSearch(
+    const systems::Context<T>&, const SearchDirectionData&,
+    systems::Context<T>*) const {
+  throw std::logic_error(
+      "SapSolver::PerformExactLineSearch(): Only T = double is supported.");
+}
+
+template <>
+std::pair<double, int> SapSolver<double>::PerformExactLineSearch(
+    const systems::Context<double>& context,
+    const SearchDirectionData& search_direction_data,
+    systems::Context<double>* scratch) const {
+  DRAKE_DEMAND(parameters_.line_search_type ==
+               SapSolverParameters::LineSearchType::kExact);
+  DRAKE_DEMAND(scratch != nullptr);
+  DRAKE_DEMAND(scratch != &context);
+  // dℓ/dα(α = 0) = ∇ᵥℓ(α = 0)⋅Δv.
+  const VectorX<double>& ell_grad_v0 = model_->EvalCostGradient(context);
+  const VectorX<double>& dv = search_direction_data.dv;
+  const double dell_dalpha0 = ell_grad_v0.dot(dv);
+
+  // dℓ/dα(α = 0) is guaranteed to be strictly negative given the the Hessian of
+  // the cost is positive definite. Only round-off errors in the factorization
+  // of the Hessian for ill-conditioned systems (small regularization) can
+  // destroy this property. If so, we abort given that'd mean the model must be
+  // revisited.
+  if (dell_dalpha0 >= 0) {
+    throw std::runtime_error(
+        "The cost does not decrease along the search direction. This is "
+        "usually caused by an excessive accumulation round-off errors for "
+        "ill-conditioned systems. Consider revisiting your model.");
+  }
+
+  const double alpha_max = parameters_.exact_line_search.alpha_max;
+  double dell{NAN};
+  double d2ell{NAN};
+  VectorX<double> vec_scratch;
+  const double ell0 =
+      CalcCostAlongLine(context, search_direction_data, alpha_max, scratch,
+                        &dell, &d2ell, &vec_scratch);
+
+  // If the cost is still decreasing at alpha_max, we accept this value.
+  if (dell <= 0) return std::make_pair(alpha_max, 0);
+
+  // If the user requests very tight tolerances (say, samller than 10⁻¹⁰) then
+  // we might enter the line search with a very small gradient. If close to
+  // machine epsilon, the Newton method below might return inaccurate results.
+  // Therefore return early if we detect this situation.
+  // For these tight tolerances, we'd reach this condition close to the global
+  // minimizer of the cost. Even if the norm of the search direction Δv is
+  // small, we allow the Newton solver to take a full step and therefore we
+  // return with a step size of one.
+  if (-dell_dalpha0 <
+      parameters_.cost_abs_tolerance + parameters_.cost_rel_tolerance * ell0)
+    return std::make_pair(1.0, 0);
+
+  // N.B. We place the data needed to evaluate cost and gradients into a single
+  // struct so that cost_and_gradient only needs to capture a single pointer.
+  // This avoids heap allocations when passing the lambda to
+  // DoNewtonWithBisectionFallback().
+  struct EvalData {
+    const SapSolver<double>& solver;
+    const Context<double>& context0;  // Context at alpha = 0.
+    const SearchDirectionData& search_direction_data;
+    Context<double>& scratch;  // Context at alpha != 0.
+    // N.B. We normalize the gradient to minimize round-off errors as f(alpha) =
+    // −ℓ'(α)/dell_scale.
+    const double dell_scale;
+    VectorX<double> vec_scratch;
+  };
+
+  // N.B. At this point we know that dell_dalpha0 < 0. Also, if the line search
+  // was called it is because the residual (the gradient of the cost) is
+  // non-zero. Therefore we can safely divide by dell_dalpha0.
+  // N.B. We then define f(alpha) = −ℓ'(α)/ℓ'₀ so that f(alpha=0) = -1.
+  const double dell_scale = -dell_dalpha0;
+  EvalData data{*this, context, search_direction_data, *scratch, dell_scale};
+
+  // Cost and gradient of f(α) = −ℓ'(α)/ℓ'₀.
+  auto cost_and_gradient = [&data](double x) {
+    double dell_dalpha;
+    double d2ell_dalpha2;
+    data.solver.CalcCostAlongLine(data.context0, data.search_direction_data, x,
+                                   &data.scratch, &dell_dalpha, &d2ell_dalpha2,
+                                   &data.vec_scratch);
+    return std::make_pair(dell_dalpha / data.dell_scale,
+                          d2ell_dalpha2 / data.dell_scale);
+  };
+
+  // To estimate a guess, we approximate the cost as being quadratic around
+  // alpha = 0.
+  const double alpha_guess = std::min(-dell_dalpha0 / d2ell, alpha_max);
+
+  // N.B. If we are here, then we already know that dell_dalpha0 < 0 and dell >
+  // 0, and therefore [0, alpha_max] is a valid bracket.
+  const Bracket bracket(0., dell_dalpha0 / dell_scale, alpha_max,
+                        dell / dell_scale);
+
+  // This relative tolerance was obtained by experimentation on a large set of
+  // tests cases. We found out that with f_tolerance ∈ [10⁻¹⁴, 10⁻³] the solver
+  // is robust with small changes in performances (about 30%). We then choose a
+  // safe tolerance far enough from the lower limit (close to machine epsilon)
+  // and the upper limit (close to an inexact method).
+  const double f_tolerance = 1.0e-8;  // f = −ℓ'(α)/ℓ'₀ is dimensionless.
+  const double alpha_tolerance = f_tolerance * alpha_guess;
+  const auto [alpha, iters] = DoNewtonWithBisectionFallback(
+      cost_and_gradient, bracket, alpha_guess, alpha_tolerance, f_tolerance,
+      parameters_.exact_line_search.max_iterations);
+
+  return std::make_pair(alpha, iters);
+}
+
+template <typename T>
+MatrixX<T> SapSolver<T>::CalcDenseHessian(const Context<T>& context) const {
   // Explicitly build dense Hessian.
   // These matrices could be saved in the cache. However this method is only
   // intended as an alternative for debugging and optimizing it might not be
   // worth it.
-  const int nv = data_.nv;
-  MatrixX<T> H(nv, nv);
-  {
-    const int nc = data_.nc;
-    const auto& A = data_.A;
-    const auto& J = data_.J;
-    const auto& G = gradients_cache.G;
+  const int nv = model_->num_velocities();
+  const int nk = model_->num_constraint_equations();
 
-    const MatrixX<T> Jdense = J.MakeDenseMatrix();
-    MatrixX<T> Adense(nv, nv);
-    Adense = A.MakeDenseMatrix();
-
-    MatrixX<T> GJ(3 * nc, nv);
-    for (int ic = 0; ic < nc; ++ic) {
-      const int ic3 = 3 * ic;
-      const MatrixX<T>& G_ic = G[ic];
-      GJ.template middleRows<3>(ic3) =
-          G_ic * Jdense.template middleRows<3>(ic3);
-    }
-    H = Adense + Jdense.transpose() * GJ;
+  // Make dense dynamics matrix.
+  const std::vector<MatrixX<T>>& Acliques = model_->dynamics_matrix();
+  MatrixX<T> Adense = MatrixX<T>::Zero(nv, nv);
+  int offset = 0;
+  for (const auto& Ac : Acliques) {
+    const int nv_clique = Ac.rows();
+    Adense.block(offset, offset, nv_clique, nv_clique) = Ac;
+    offset += nv_clique;
   }
 
+  // Make dense Jacobian matrix.
+  const MatrixX<T> Jdense = model_->constraints_bundle().J().MakeDenseMatrix();
+
+  // Make dense Hessian matrix G.
+  const std::vector<MatrixX<T>>& G = model_->EvalConstraintsHessian(context);
+  MatrixX<T> Gdense = MatrixX<T>::Zero(nk, nk);
+  offset = 0;
+  for (const auto& Gi : G) {
+    const int ni = Gi.rows();
+    Gdense.block(offset, offset, ni, ni) = Gi;
+    offset += ni;
+  }
+
+  const MatrixX<T> H = Adense + Jdense.transpose() * Gdense * Jdense;
+
+  return H;
+}
+
+template <typename T>
+std::unique_ptr<SuperNodalSolver> SapSolver<T>::MakeSuperNodalSolver() const {
+  if constexpr (std::is_same_v<T, double>) {
+    const BlockSparseMatrix<T>& J = model_->constraints_bundle().J();
+    return std::make_unique<SuperNodalSolver>(J.block_rows(), J.get_blocks(),
+                                              model_->dynamics_matrix());
+  } else {
+    throw std::logic_error(
+        "SapSolver::MakeSuperNodalSolver(): SuperNodalSolver only supports T "
+        "= double.");
+  }
+}
+
+template <typename T>
+void SapSolver<T>::CallDenseSolver(const Context<T>& context,
+                                   VectorX<T>* dv) const {
+  const MatrixX<T> H = CalcDenseHessian(context);
+
   // Factorize Hessian.
-  // TODO(amcastro-tri): Make use of mat::SolveLinearSystem() for a quick and
-  // dirty way to support AutoDiffXd, at least to build unit tests.
-  const Eigen::LDLT<MatrixX<T>> Hldlt(H);
-  if (Hldlt.info() != Eigen::Success) {
+  // TODO(amcastro-tri): when T = AutoDiffXd propagate gradients analytically
+  // using the chain rule so that here we can use T = double for performance.
+  // N.B. The support for dense algebra is mostly for testing purposes, even
+  // though the computation of the dense H (and in particular of the Jᵀ⋅G⋅J
+  // term) is very costly. Therefore below we decided to trade off speed for
+  // stability when choosing to use an LDLT decomposition instead of a slightly
+  // faster, though less stable, LLT decomposition.
+  const math::LinearSolver<Eigen::LDLT, MatrixX<T>> H_ldlt(H);
+  if (H_ldlt.eigen_linear_solver().info() != Eigen::Success) {
     // TODO(amcastro-tri): Unit test this condition.
     throw std::runtime_error("Dense LDLT factorization of the Hessian failed.");
   }
 
   // Compute search direction.
-  const VectorX<T> rhs = -gradients_cache.ell_grad_v;
-  *dv = Hldlt.solve(rhs);
+  const VectorX<T> rhs = -model_->EvalCostGradient(context);
+  *dv = H_ldlt.Solve(rhs);
 }
 
 template <typename T>
-const typename SapSolver<T>::Cache::VelocitiesCache&
-SapSolver<T>::EvalVelocitiesCache(const State& state) const {
-  // This method must not depend on any other eval method. If you change it, you
-  // must update the Cache dependency diagram and matching code.
-  if (state.cache().velocities_cache().valid)
-    return state.cache().velocities_cache();
-  typename Cache::VelocitiesCache& cache =
-      state.mutable_cache().mutable_velocities_cache();
-  const auto& Jc = data_.J;
-  Jc.Multiply(state.v(), &cache.vc);
-  cache.valid = true;
-  return cache;
+void SapSolver<T>::UpdateSuperNodalSolver(
+    const Context<T>& context, SuperNodalSolver* supernodal_solver) const {
+  if constexpr (std::is_same_v<T, double>) {
+    const std::vector<MatrixX<double>>& G =
+        model_->EvalConstraintsHessian(context);
+    supernodal_solver->SetWeightMatrix(G);
+  } else {
+    unused(context);
+    unused(supernodal_solver);
+    throw std::logic_error(
+        "SapSolver::UpdateSuperNodalSolver(): SuperNodalSolver only supports T "
+        "= double.");
+  }
 }
 
 template <typename T>
-const typename SapSolver<T>::Cache::ImpulsesCache&
-SapSolver<T>::EvalImpulsesCache(const State& state) const {
-  // This method must only depend on EvalVelocitiesCache(). If you change it,
-  // you must update the Cache dependency diagram and matching code.
-  if (state.cache().impulses_cache().valid)
-    return state.cache().impulses_cache();
-  typename Cache::ImpulsesCache& cache =
-      state.mutable_cache().mutable_impulses_cache();
-  const VectorX<T>& vc = EvalVelocitiesCache(state).vc;
-  const VectorX<T>& Rinv = data_.Rinv;
-  const VectorX<T>& vhat = data_.vhat;
-  cache.y = vhat - vc;
-  // The (unprojected) impulse y=−R⁻¹⋅(vc − v̂).
-  cache.y.array() *= Rinv.array();
-  ProjectAllImpulses(cache.y, &cache.gamma);
-  ++stats_.num_impulses_cache_updates;
-  cache.valid = true;
-  return cache;
+void SapSolver<T>::CallSuperNodalSolver(const Context<T>& context,
+                                        SuperNodalSolver* supernodal_solver,
+                                        VectorX<T>* dv) const {
+  if constexpr (std::is_same_v<T, double>) {
+    UpdateSuperNodalSolver(context, supernodal_solver);
+    if (!supernodal_solver->Factor()) {
+      throw std::logic_error("SapSolver: Supernodal factorization failed.");
+    }
+    // We solve in place to avoid heap allocating additional memory for the
+    // right hand side.
+    *dv = -model_->EvalCostGradient(context);
+    supernodal_solver->SolveInPlace(dv);
+  } else {
+    unused(context);
+    unused(supernodal_solver);
+    unused(dv);
+    throw std::logic_error(
+        "SapSolver::CallSuperNodalSolver(): SuperNodalSolver only supports T "
+        "= double.");
+  }
 }
 
 template <typename T>
-const typename SapSolver<T>::Cache::MomentumCache&
-SapSolver<T>::EvalMomentumCache(const State& state) const {
-  // This method must only depend on EvalImpulsesCache(). If you change it,
-  // you must update the Cache dependency diagram and matching code.
-  if (state.cache().momentum_cache().valid)
-    return state.cache().momentum_cache();
-  typename Cache::MomentumCache& cache =
-      state.mutable_cache().mutable_momentum_cache();
-  data_.A.Multiply(state.v(), &cache.p);  // p = A⋅v.
-  const VectorX<T>& gamma = EvalImpulsesCache(state).gamma;
-  data_.J.MultiplyByTranspose(gamma, &cache.jc);
-  // = p - p* = A⋅(v−v*).
-  cache.momentum_change = cache.p - data_.p_star;
-  cache.valid = true;
-  return cache;
-}
-
-template <typename T>
-const typename SapSolver<T>::Cache::CostCache& SapSolver<T>::EvalCostCache(
-    const State& state) const {
-  // This method must only depend on EvalImpulsesCache() and
-  // EvalMomentumCache(). If you change it, you must update the Cache dependency
-  // diagram and matching code.
-  if (state.cache().cost_cache().valid) return state.cache().cost_cache();
-  typename Cache::CostCache& cache =
-      state.mutable_cache().mutable_cost_cache();
-  const auto& R = data_.R;
-  const auto& v_star = data_.v_star;
-  const VectorX<T>& v = state.v();
-  const VectorX<T>& gamma = EvalImpulsesCache(state).gamma;
-  const auto& Adv = EvalMomentumCache(state).momentum_change;
-  cache.ellA = 0.5 * Adv.dot(v - v_star);
-  cache.ellR = 0.5 * gamma.dot(R.asDiagonal() * gamma);
-  cache.ell = cache.ellA + cache.ellR;
-  cache.valid = true;
-  return cache;
-}
-
-template <typename T>
-const typename SapSolver<T>::Cache::GradientsCache&
-SapSolver<T>::EvalGradientsCache(const State& state) const {
-  // This method must only depend on EvalImpulsesCache() and
-  // EvalMomentumCache(). If you change it, you must update the Cache dependency
-  // diagram and matching code.
-  if (state.cache().gradients_cache().valid)
-    return state.cache().gradients_cache();
-  typename Cache::GradientsCache& cache =
-      state.mutable_cache().mutable_gradients_cache();
-
-  // Update ∇ᵥℓ = A⋅(v−v*) - Jᵀ⋅γ
-  const auto& momentum_cache = EvalMomentumCache(state);
-  const VectorX<T>& Adv = momentum_cache.momentum_change;  // = A⋅(v−v*)
-  const VectorX<T>& jc = momentum_cache.jc;  // = Jᵀ⋅γ
-  cache.ell_grad_v = Adv - jc;
-
-  // Update dPdy and G. G = -∂γ/∂vc = dP/dy⋅R⁻¹.
-  const VectorX<T>& y = EvalImpulsesCache(state).y;
-  CalcAllProjectionsGradients(y, &cache.dPdy);
-
-  const int nc = data_.nc;
-  const auto& R = data_.R;
-  const auto& dPdy = cache.dPdy;
-  for (int ic = 0; ic < nc; ++ic) {
-    const int ic3 = 3 * ic;
-    const auto& R_ic = R.template segment<3>(ic3);
-    const Vector3<T> Rinv_ic = R_ic.cwiseInverse();
-    const Matrix3<T>& dPdy_ic = dPdy[ic];
-    MatrixX<T>& G_ic = cache.G[ic];
-    G_ic = dPdy_ic * Rinv_ic.asDiagonal();
+void SapSolver<T>::CalcSearchDirectionData(
+    const systems::Context<T>& context, SuperNodalSolver* supernodal_solver,
+    SapSolver<T>::SearchDirectionData* data) const {
+  DRAKE_DEMAND(parameters_.use_dense_algebra || (supernodal_solver != nullptr));
+  // Update search direction dv.
+  if (!parameters_.use_dense_algebra) {
+    CallSuperNodalSolver(context, supernodal_solver, &data->dv);
+  } else {
+    CallDenseSolver(context, &data->dv);
   }
 
-  ++stats_.num_gradients_cache_updates;
-  cache.valid = true;
-  return cache;
-}
-
-template <typename T>
-const typename SapSolver<T>::Cache::SearchDirectionCache&
-SapSolver<T>::EvalSearchDirectionCache(const State& state) const {
-  // This method must only depend on EvalGradientsCache(). If you change it, you
-  // must update the Cache dependency diagram and matching code.
-  if (state.cache().search_direction_cache().valid)
-    return state.cache().search_direction_cache();
-  typename Cache::SearchDirectionCache& cache =
-      state.mutable_cache().mutable_search_direction_cache();
-
-  // Update search direction dv.
-  CallDenseSolver(state, &cache.dv);
-
   // Update Δp, Δvc and d²ellA/dα².
-  data_.J.Multiply(cache.dv, &cache.dvc);
-  data_.A.Multiply(cache.dv, &cache.dp);
-  cache.d2ellA_dalpha2 = cache.dv.dot(cache.dp);
-
-  cache.valid = true;
-  return cache;
+  model_->constraints_bundle().J().Multiply(data->dv, &data->dvc);
+  model_->MultiplyByDynamicsMatrix(data->dv, &data->dp);
+  data->d2ellA_dalpha2 = data->dv.dot(data->dp);
 }
 
 }  // namespace internal
@@ -735,4 +707,5 @@ SapSolver<T>::EvalSearchDirectionCache(const State& state) const {
 }  // namespace multibody
 }  // namespace drake
 
-template class ::drake::multibody::contact_solvers::internal::SapSolver<double>;
+DRAKE_DEFINE_CLASS_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_NONSYMBOLIC_SCALARS(
+    class ::drake::multibody::contact_solvers::internal::SapSolver)

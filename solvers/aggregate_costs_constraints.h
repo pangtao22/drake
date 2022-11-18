@@ -62,7 +62,8 @@ struct Bound {
  * (lower, upper) bounds of that variable as the tightest bounds of @p
  * bounding_box_constraints.
  */
-std::unordered_map<symbolic::Variable, Bound> AggregateBoundingBoxConstraints(
+[[nodiscard]] std::unordered_map<symbolic::Variable, Bound>
+AggregateBoundingBoxConstraints(
     const std::vector<Binding<BoundingBoxConstraint>>&
         bounding_box_constraints);
 
@@ -81,11 +82,22 @@ void AggregateBoundingBoxConstraints(const MathematicalProgram& prog,
                                      Eigen::VectorXd* lower,
                                      Eigen::VectorXd* upper);
 
+
+/**
+ For linear expression A * vars where `vars` might contain duplicated entries,
+ rewrite this linear expression as A_new * vars_new where vars_new doesn't
+ contain duplicated entries.
+ */
+void AggregateDuplicateVariables(const Eigen::SparseMatrix<double>& A,
+                                 const VectorX<symbolic::Variable>& vars,
+                                 Eigen::SparseMatrix<double>* A_new,
+                                 VectorX<symbolic::Variable>* vars_new);
+
 /**
  * Returns the first non-convex quadratic cost among @p quadratic_costs. If all
  * quadratic costs are convex, then return a nullptr.
  */
-const Binding<QuadraticCost>* FindNonconvexQuadraticCost(
+[[nodiscard]] const Binding<QuadraticCost>* FindNonconvexQuadraticCost(
     const std::vector<Binding<QuadraticCost>>& quadratic_costs);
 
 namespace internal {

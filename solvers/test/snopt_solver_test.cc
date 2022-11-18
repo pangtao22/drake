@@ -1,5 +1,6 @@
 #include "drake/solvers/snopt_solver.h"
 
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <regex>
@@ -8,7 +9,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "drake/common/filesystem.h"
 #include "drake/common/temp_directory.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
@@ -144,25 +144,25 @@ GTEST_TEST(SnoptTest, TestPrintFile) {
   const SnoptSolver solver;
   {
     const std::string print_file = temp_directory() + "/snopt.out";
-    EXPECT_FALSE(filesystem::exists({print_file}));
+    EXPECT_FALSE(std::filesystem::exists({print_file}));
     SolverOptions solver_options;
     solver_options.SetOption(SnoptSolver::id(), "Print file", print_file);
     const auto result = solver.Solve(prog, {}, solver_options);
     EXPECT_TRUE(result.is_success());
-    EXPECT_TRUE(filesystem::exists({print_file}));
+    EXPECT_TRUE(std::filesystem::exists({print_file}));
   }
 
   // This is to verify we can set the print out file through CommonSolverOption.
   {
     const std::string print_file_common =
         temp_directory() + "/snopt_common.out";
-    EXPECT_FALSE(filesystem::exists({print_file_common}));
+    EXPECT_FALSE(std::filesystem::exists({print_file_common}));
     SolverOptions solver_options;
     solver_options.SetOption(CommonSolverOption::kPrintFileName,
                              print_file_common);
     const auto result = solver.Solve(prog, {}, solver_options);
     EXPECT_TRUE(result.is_success());
-    EXPECT_TRUE(filesystem::exists({print_file_common}));
+    EXPECT_TRUE(std::filesystem::exists({print_file_common}));
   }
 
   // Now set the solver option with both CommonSolverOption and solver specific
@@ -175,11 +175,11 @@ GTEST_TEST(SnoptTest, TestPrintFile) {
     solver_options.SetOption(solver.id(), "Print file", print_file);
     solver_options.SetOption(CommonSolverOption::kPrintFileName,
                              print_file_common);
-    EXPECT_FALSE(filesystem::exists({print_file_common}));
-    EXPECT_FALSE(filesystem::exists({print_file}));
+    EXPECT_FALSE(std::filesystem::exists({print_file_common}));
+    EXPECT_FALSE(std::filesystem::exists({print_file}));
     solver.Solve(prog, {}, solver_options);
-    EXPECT_TRUE(filesystem::exists({print_file}));
-    EXPECT_FALSE(filesystem::exists({print_file_common}));
+    EXPECT_TRUE(std::filesystem::exists({print_file}));
+    EXPECT_FALSE(std::filesystem::exists({print_file_common}));
   }
 }
 
@@ -562,10 +562,15 @@ GTEST_TEST(SnoptSolverTest, TestNonconvexQP) {
   }
 }
 
+GTEST_TEST(SnoptSolverTest, TestL2NormCost) {
+  SnoptSolver solver;
+  TestL2NormCost(solver, 1e-6);
+}
+
 TEST_P(TestEllipsoidsSeparation, TestSOCP) {
   SnoptSolver snopt_solver;
   if (snopt_solver.available()) {
-    SolveAndCheckSolution(snopt_solver, 1.E-8);
+    SolveAndCheckSolution(snopt_solver, {}, 1.E-8);
   }
 }
 
@@ -586,7 +591,7 @@ INSTANTIATE_TEST_SUITE_P(SnoptTest, TestQPasSOCP,
 TEST_P(TestFindSpringEquilibrium, TestSOCP) {
   SnoptSolver snopt_solver;
   if (snopt_solver.available()) {
-    SolveAndCheckSolution(snopt_solver, 2E-3);
+    SolveAndCheckSolution(snopt_solver, {}, 2E-3);
   }
 }
 
@@ -602,6 +607,44 @@ GTEST_TEST(TestSOCP, MaximizeGeometricMeanTrivialProblem1) {
     prob.CheckSolution(result, 4E-6);
   }
 }
+
+class ThrowCost final : public Cost {
+ public:
+  ThrowCost() : Cost(1, "ThrowCost") {}
+
+ private:
+  void DoEval(const Eigen::Ref<const Eigen::VectorXd>& x,
+              Eigen::VectorXd* y) const final {
+    EvalGeneric();
+  }
+
+  void DoEval(const Eigen::Ref<const AutoDiffVecXd>& x,
+              AutoDiffVecXd* y) const final {
+    EvalGeneric();
+  }
+
+  void DoEval(const Eigen::Ref<const VectorX<symbolic::Variable>>& x,
+              VectorX<symbolic::Expression>* y) const final {
+    EvalGeneric();
+  }
+
+  void EvalGeneric() const {
+    throw std::runtime_error("ThrowCost::EvalGeneric");
+  }
+};
+
+GTEST_TEST(SnoptTest, TestCostExceptionHandling) {
+  MathematicalProgram prog;
+  const auto x = prog.NewContinuousVariables<1>();
+  prog.AddCost(std::make_shared<ThrowCost>(), x);
+  SnoptSolver solver;
+  if (solver.available()) {
+    DRAKE_EXPECT_THROWS_MESSAGE(
+        solver.Solve(prog),
+        "Exception.*SNOPT.*ThrowCost.*");
+  }
+}
+
 }  // namespace test
 }  // namespace solvers
 }  // namespace drake

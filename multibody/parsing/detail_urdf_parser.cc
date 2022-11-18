@@ -10,10 +10,11 @@
 #include <unordered_set>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include <Eigen/Dense>
+#include <drake_vendor/tinyxml2.h>
 #include <fmt/format.h>
-#include <tinyxml2.h>
 
 #include "drake/common/sorted_pair.h"
 #include "drake/math/rotation_matrix.h"
@@ -29,6 +30,7 @@
 #include "drake/multibody/tree/planar_joint.h"
 #include "drake/multibody/tree/prismatic_joint.h"
 #include "drake/multibody/tree/revolute_joint.h"
+#include "drake/multibody/tree/screw_joint.h"
 #include "drake/multibody/tree/universal_joint.h"
 #include "drake/multibody/tree/weld_joint.h"
 
@@ -91,6 +93,7 @@ class UrdfParser {
                            std::string* type,
                            std::string* parent_link_name,
                            std::string* child_link_name);
+  void ParseScrewJointThreadPitch(XMLElement* node, double* screw_thread_pitch);
   void ParseCollisionFilterGroup(XMLElement* node);
   void ParseBody(XMLElement* node, MaterialMap* materials);
   SpatialInertia<double> ExtractSpatialInertiaAboutBoExpressedInB(
@@ -105,6 +108,8 @@ class UrdfParser {
         node, attribute_name, val,
         diagnostic_.MakePolicyForNode(node));
   }
+  void ParseMechanicalReduction(const XMLElement& node);
+
 
   void Warning(const XMLNode& location, std::string message) const {
     diagnostic_.Warning(location, std::move(message));
@@ -112,6 +117,17 @@ class UrdfParser {
 
   void Error(const XMLNode& location, std::string message) const {
     diagnostic_.Error(location, std::move(message));
+  }
+
+  // Warn about documented URDF elements ignored by Drake.
+  void WarnUnsupportedElement(const XMLElement& node, const std::string& tag) {
+    diagnostic_.WarnUnsupportedElement(node, tag);
+  }
+
+  // Warn about documented URDF attributes ignored by Drake.
+  void WarnUnsupportedAttribute(const XMLElement& node,
+                                const std::string& attribute) {
+    diagnostic_.WarnUnsupportedAttribute(node, attribute);
   }
 
  private:
@@ -187,6 +203,9 @@ void UrdfParser::ParseBody(XMLElement* node, MaterialMap* materials) {
       drake_ignore == std::string("true")) {
     return;
   }
+  // Seen in the ROS urdfdom XSD Schema.
+  // See https://github.com/ros/urdfdom/blob/dbecca0/xsd/urdf.xsd
+  WarnUnsupportedAttribute(*node, "type");
 
   std::string body_name;
   if (!ParseStringAttribute(node, "name", &body_name)) {
@@ -294,10 +313,11 @@ void UrdfParser::ParseCollisionFilterGroup(XMLElement* node) {
                          attribute_name, &attribute_value);
     return attribute_value == std::string("true") ? true : false;
   };
-  ParseCollisionFilterGroupCommon(model_instance_, node, w_.plant,
-                                  next_child_element, next_sibling_element,
-                                  has_attribute, get_string_attribute,
-                                  get_bool_attribute, get_string_attribute);
+  ParseCollisionFilterGroupCommon(
+      diagnostic_.MakePolicyForNode(node), model_instance_, node, w_.plant,
+      w_.collision_resolver, next_child_element, next_sibling_element,
+      has_attribute, get_string_attribute, get_bool_attribute,
+      get_string_attribute);
 }
 
 // Parses a joint URDF specification to obtain the names of the joint, parent
@@ -395,6 +415,27 @@ void UrdfParser::ParseJointDynamics(XMLElement* node, double* damping) {
   }
 }
 
+void UrdfParser::ParseScrewJointThreadPitch(XMLElement* node,
+                                            double* screw_thread_pitch) {
+  // Always set a value for the output-only argument, even if parsing fails.
+  *screw_thread_pitch = 0.0;
+  XMLElement* screw_thread_pitch_node =
+      node->FirstChildElement("drake:screw_thread_pitch");
+  if (screw_thread_pitch_node) {
+    if (!ParseScalarAttribute(screw_thread_pitch_node, "value",
+                              screw_thread_pitch)) {
+      Error(*screw_thread_pitch_node, "A screw joint has a"
+            " <drake:screw_thread_pitch> tag that is missing the 'value'"
+            " attribute.");
+      return;
+    }
+  } else {
+      Error(*node, "A screw joint is missing the <drake:screw_thread_pitch>"
+            " tag.");
+      return;
+  }
+}
+
 const Body<double>* UrdfParser::GetBodyForElement(
     const std::string& element_name,
     const std::string& link_name) {
@@ -421,6 +462,9 @@ void UrdfParser::ParseJoint(
       drake_ignore == std::string("true")) {
     return;
   }
+  WarnUnsupportedElement(*node, "calibration");
+  WarnUnsupportedElement(*node, "mimic");
+  WarnUnsupportedElement(*node, "safety_controller");
 
   // Parses the parent and child link names.
   std::string name, type, parent_name, child_name;
@@ -535,6 +579,14 @@ void UrdfParser::ParseJoint(
     }
     plant->AddJoint<PlanarJoint>(name, *parent_body, X_PJ,
                                  *child_body, std::nullopt, damping_vec);
+  } else if (type.compare("screw") == 0) {
+    throw_on_custom_joint(true);
+    ParseJointDynamics(node, &damping);
+    double screw_thread_pitch;
+    ParseScrewJointThreadPitch(node, &screw_thread_pitch);
+    plant->AddJoint<ScrewJoint>(name, *parent_body, X_PJ, *child_body,
+                                std::nullopt, axis, screw_thread_pitch,
+                                damping);
   } else if (type.compare("universal") == 0) {
     throw_on_custom_joint(true);
     ParseJointDynamics(node, &damping);
@@ -549,9 +601,32 @@ void UrdfParser::ParseJoint(
   joint_effort_limits->emplace(name, effort);
 }
 
+void UrdfParser::ParseMechanicalReduction(const XMLElement& node) {
+  const XMLElement* child = node.FirstChildElement("mechanicalReduction");
+  if (!child) { return; }
+  const char* text = child->GetText();
+  if (!text) { return; }
+  std::vector<double> values = ConvertToDoubles(text);
+  if (values.size() == 1 && values[0] == 1) { return; }
+  Warning(*child, fmt::format(
+              "A '{}' element contains a mechanicalReduction element with a"
+              " value '{}' other than the default of 1. MultibodyPlant does"
+              " not currently support non-default mechanical reductions.",
+              node.Name(), text));
+}
+
 void UrdfParser::ParseTransmission(
     const JointEffortLimits& joint_effort_limits,
     XMLElement* node) {
+  WarnUnsupportedElement(*node, "leftActuator");
+  WarnUnsupportedElement(*node, "rightActuator");
+  WarnUnsupportedElement(*node, "flexJoint");
+  WarnUnsupportedElement(*node, "rollJoint");
+  WarnUnsupportedElement(*node, "gap_joint");
+  WarnUnsupportedElement(*node, "passive_joint");
+  WarnUnsupportedElement(*node, "use_simulated_gripper_joint");
+  ParseMechanicalReduction(*node);
+
   // Determines the transmission type.
   std::string type;
   XMLElement* type_node = node->FirstChildElement("type");
@@ -581,6 +656,8 @@ void UrdfParser::ParseTransmission(
     Error(*node, "Transmission is missing an actuator element.");
     return;
   }
+  ParseMechanicalReduction(*actuator_node);
+  // `actuator/hardwareInterface` child tags are silently ignored.
 
   std::string actuator_name;
   if (!ParseStringAttribute(actuator_node, "name", &actuator_name)) {
@@ -594,6 +671,8 @@ void UrdfParser::ParseTransmission(
     Error(*node, "Transmission is missing a joint element.");
     return;
   }
+  // `joint/hardwareInterface` child tags are silently ignored.
+
 
   std::string joint_name;
   if (!ParseStringAttribute(joint_node, "name", &joint_name)) {
@@ -751,6 +830,9 @@ std::optional<ModelInstanceIndex> UrdfParser::Parse() {
     Error(*xml_doc_, "URDF does not contain a robot tag.");
     return {};
   }
+  // See https://github.com/ros/urdfdom/blob/dbecca0/urdf_parser/src/model.cpp#L124-L131
+  WarnUnsupportedAttribute(*node, "version");
+  // <gazebo> child tags are silently ignored.
 
   std::string model_name = model_name_;
   if (model_name.empty() && !ParseStringAttribute(node, "name", &model_name)) {
@@ -868,6 +950,29 @@ std::optional<ModelInstanceIndex> AddModelFromUrdf(
   UrdfParser parser(&data_source, model_name_in, parent_model_name,
                     data_source.GetRootDir(), &xml_doc, workspace);
   return parser.Parse();
+}
+
+UrdfParserWrapper::UrdfParserWrapper() {}
+
+UrdfParserWrapper::~UrdfParserWrapper() {}
+
+std::optional<ModelInstanceIndex> UrdfParserWrapper::AddModel(
+    const DataSource& data_source, const std::string& model_name,
+    const std::optional<std::string>& parent_model_name,
+    const ParsingWorkspace& workspace) {
+  return AddModelFromUrdf(data_source, model_name, parent_model_name,
+                          workspace);
+}
+
+std::vector<ModelInstanceIndex> UrdfParserWrapper::AddAllModels(
+    const DataSource& data_source,
+    const std::optional<std::string>& parent_model_name,
+    const ParsingWorkspace& workspace) {
+  auto result = AddModel(data_source, {}, parent_model_name, workspace);
+  if (result.has_value()) {
+    return {*result};
+  }
+  return {};
 }
 
 }  // namespace internal

@@ -1,20 +1,22 @@
 #include <vector>
 
+#include <Eigen/Core>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <unsupported/Eigen/AutoDiff>
 
-#include "drake/common/autodiff.h"
+#include "drake/common/eigen_types.h"
 #include "drake/common/name_value.h"
 #include "drake/common/test_utilities/limit_malloc.h"
 #include "drake/common/yaml/yaml_io.h"
 #include "drake/common/yaml/yaml_read_archive.h"
 
-using drake::yaml::SaveYamlString;
-using drake::yaml::YamlReadArchive;
-
 namespace drake {
 namespace yaml {
 namespace {
+
+using drake::yaml::SaveYamlString;
+using drake::yaml::internal::YamlReadArchive;
 
 struct Inner {
   template <typename Archive>
@@ -50,7 +52,7 @@ GTEST_TEST(YamlPerformanceTest, VectorNesting) {
   Map data;
   double dummy = 1.0;
   const std::vector keys{"a", "b", "c", "d", "e"};
-  for (const std::string& key : keys) {
+  for (const char* const key : keys) {
     Outer& outer = data.items[key];
     outer.inners.resize(kDim);
     for (Inner& inner : outer.inners) {
@@ -92,7 +94,7 @@ GTEST_TEST(YamlPerformanceTest, VectorNesting) {
 
   // Double-check that we actually did the work.
   ASSERT_EQ(new_data.items.size(), keys.size());
-  for (const std::string& key : keys) {
+  for (const char* const key : keys) {
     Outer& outer = new_data.items[key];
     ASSERT_EQ(outer.inners.size(), kDim);
     for (Inner& inner : outer.inners) {

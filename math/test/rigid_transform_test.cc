@@ -381,10 +381,6 @@ GTEST_TEST(RigidTransform, IsIdentity) {
   RigidTransform<double> X1;
   EXPECT_TRUE(X1.IsExactlyIdentity());
   EXPECT_TRUE(X1.IsNearlyIdentity(0.0));
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  EXPECT_TRUE(X1.IsIdentityToEpsilon(0.0));
-#pragma GCC diagnostic pop
   EXPECT_TRUE(X1.rotation().IsExactlyIdentity());
   EXPECT_TRUE((X1.translation().array() == 0).all());
 
@@ -399,11 +395,6 @@ GTEST_TEST(RigidTransform, IsIdentity) {
   EXPECT_FALSE(X2.IsExactlyIdentity());
   EXPECT_FALSE(X2.IsNearlyIdentity(3.99));
   EXPECT_TRUE(X2.IsNearlyIdentity(4.01));
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  EXPECT_FALSE(X2.IsIdentityToEpsilon(3.99));
-  EXPECT_TRUE(X2.IsIdentityToEpsilon(4.01));
-#pragma GCC diagnostic pop
 
   // Change position vector to zero vector.
   const Vector3d zero_vector(0, 0, 0);
@@ -552,11 +543,6 @@ GTEST_TEST(RigidTransform, SymbolicRigidTransformSimpleTests) {
   // Test IsNearlyIdentity() nominally works with Expression.
   test_Bool = X.IsNearlyIdentity(kEpsilon);
   EXPECT_TRUE(test_Bool);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  test_Bool = X.IsIdentityToEpsilon(kEpsilon);
-  EXPECT_TRUE(test_Bool);
-#pragma GCC diagnostic pop
 
   // Test IsExactlyEqualTo() nominally works for Expression.
   const RigidTransform<Expression>& X_built_in_identity =
@@ -579,11 +565,6 @@ GTEST_TEST(RigidTransform, SymbolicRigidTransformSimpleTests) {
   // Test IsNearlyIdentity() works with Expression.
   test_Bool = X.IsNearlyIdentity(kEpsilon);
   EXPECT_FALSE(test_Bool);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  test_Bool = X.IsIdentityToEpsilon(kEpsilon);
-  EXPECT_FALSE(test_Bool);
-#pragma GCC diagnostic pop
 
   // Test IsExactlyEqualTo() works for Expression.
   test_Bool = X.IsExactlyEqualTo(X_built_in_identity);
@@ -612,11 +593,6 @@ GTEST_TEST(RigidTransform, SymbolicRigidTransformThrowsExceptions) {
 
   test_Bool = X_symbolic.IsNearlyIdentity(kEpsilon);
   EXPECT_THROW(test_Bool.Evaluate(), std::exception);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-  test_Bool = X_symbolic.IsIdentityToEpsilon(kEpsilon);
-  EXPECT_THROW(test_Bool.Evaluate(), std::exception);
-#pragma GCC diagnostic pop
 
   const RigidTransform<Expression>& X_identity =
       RigidTransform<Expression>::Identity();
@@ -715,6 +691,40 @@ GTEST_TEST(RigidTransform, OperatorMultiplyByTranslation3AndViceVersa) {
 
   // Verify X_AC is the inverse of X_CA.
   EXPECT_TRUE(X_AC.IsNearlyEqualTo(X_CA.inverse(), 32 * kEpsilon));
+}
+
+// Test multiplying a RigidTransform by an Eigen::Vector4.
+GTEST_TEST(RigidTransform, OperatorMultiplyByVector4) {
+  // Create a RigidTransform X_AB that relates the orientation and position of a
+  // frame A with origin point Ao and a frame B with origin point Bo.
+  const RigidTransform<double> X_AB = GetRigidTransformA();
+
+  // Verify X_AB multiplied by an Eigen::Vector4 p4_BoQ_B whose first 3 elements
+  // are the position vector from Bo to a point Q, expressed in frame B and
+  // whose 4ᵗʰ element is 1 produces Eigen::Vector4 p4_AoQ_A whose first 3
+  // elements are the position vector from Ao to Q, expressed in frame A and
+  // whose 4ᵗʰ element is 1.
+  const Eigen::Vector4d p4_BoQ_B(-12, -9, 7, 1);     // 4 element position.
+  const Eigen::Vector4d p4_AoQ_A = X_AB * p4_BoQ_B;  // 4 element position.
+  const Eigen::Vector3d p_BoQ_B = p4_BoQ_B.head(3);  // 3 element position.
+  const Eigen::Vector3d p_AoQ_A = X_AB * p_BoQ_B;    // 3 element position.
+  EXPECT_TRUE(CompareMatrices(p4_AoQ_A.head(3), p_AoQ_A, kEpsilon));
+  EXPECT_EQ(p4_AoQ_A(3), 1.0);  // Ensure the 4ᵗʰ element is 1.
+
+  // Verify X_AB multiplied by the Eigen::Vector4 vec4_B whose first 3 elements
+  // represent an arbitrary vector (e.g., force or velocity) expressed in
+  // frame B and whose 4ᵗʰ element is 0 produces Eigen::Vector4 vec4_A whose
+  // first 3 elements are vec_B expressed in frame A and whose 4ᵗʰ element is 0.
+  const Eigen::Vector4d vec4_B(-11, -8, 10, 0);   // 4 element arbitrary vector.
+  const Eigen::Vector4d vec4_A = X_AB * vec4_B;   // 4 element arbitrary vector.
+  const Eigen::Vector3d vec3_B = vec4_B.head(3);  // 3 element arbitrary vector.
+  const Eigen::Vector3d vec3_A = X_AB.rotation() * vec3_B;
+  EXPECT_TRUE(CompareMatrices(vec4_A.head(3), vec3_A, kEpsilon));
+  EXPECT_EQ(vec4_A(3), 0.0);  // Ensure the 4ᵗʰ element is 0.
+
+  // Verify that X_AB multiplied by an invalid vector throws an exception.
+  const Eigen::Vector4d bad_vector(1, 2, 3, 4);  // 4ᵗʰ element is not 0 or 1.
+  DRAKE_EXPECT_THROWS_MESSAGE(X_AB * bad_vector, ".*is not 0 or 1.*");
 }
 
 // Tests RigidTransform X_AB multiplied by a 3 x n matrix whose columns are

@@ -3,7 +3,7 @@
 #include "optitrack/optitrack_frame_t.hpp"
 #include <gtest/gtest.h>
 
-#include "drake/geometry/frame_kinematics_vector.h"
+#include "drake/geometry/kinematics_vector.h"
 #include "drake/math/rigid_transform.h"
 #include "drake/systems/framework/context.h"
 
@@ -47,7 +47,7 @@ GTEST_TEST(OptitrackSenderTest, OptitrackLcmSenderTest) {
   auto output = dut.AllocateOutput();
   dut.get_input_port(0).FixValue(context.get(), pose_vector);
 
-  dut.CalcUnrestrictedUpdate(*context, &context->get_mutable_state());
+  dut.CalcForcedUnrestrictedUpdate(*context, &context->get_mutable_state());
   dut.CalcOutput(*context, output.get());
   auto output_value = output->get_data(0);
 

@@ -35,7 +35,7 @@ GTEST_TEST(MultibodyPositionToGeometryPoseTest, BadConstruction) {
     MultibodyPlant<double> mbp(0.0);
     SceneGraph<double> scene_graph;
     mbp.RegisterAsSourceForSceneGraph(&scene_graph);
-    Parser(&mbp).AddModelFromFile(
+    Parser(&mbp).AddModels(
         FindResourceOrThrow("drake/manipulation/models/iiwa_description/iiwa7"
                             "/iiwa7_no_collision.sdf"));
     DRAKE_EXPECT_THROWS_MESSAGE(MultibodyPositionToGeometryPose<double>{mbp},
@@ -49,7 +49,7 @@ GTEST_TEST(MultibodyPositionToGeometryPoseTest, Ownership) {
   auto raw_ptr = mbp.get();
   SceneGraph<double> scene_graph;
   mbp->RegisterAsSourceForSceneGraph(&scene_graph);
-  Parser(mbp.get()).AddModelFromFile(
+  Parser(mbp.get()).AddModels(
       FindResourceOrThrow("drake/manipulation/models/iiwa_description/iiwa7"
                           "/iiwa7_no_collision.sdf"));
   mbp->Finalize();
@@ -86,7 +86,7 @@ GTEST_TEST(MultibodyPositionToGeometryPoseTest, InputOutput) {
   MultibodyPlant<double> mbp(0.0);
   SceneGraph<double> scene_graph;
   mbp.RegisterAsSourceForSceneGraph(&scene_graph);
-  Parser(&mbp).AddModelFromFile(
+  Parser(&mbp).AddModels(
       FindResourceOrThrow("drake/manipulation/models/iiwa_description/iiwa7"
                           "/iiwa7_no_collision.sdf"));
   mbp.Finalize();
@@ -125,7 +125,7 @@ GTEST_TEST(MultibodyPositionToGeometryPoseTest, FullStateInput) {
   auto mbp = make_unique<MultibodyPlant<double>>(0.0);
   SceneGraph<double> scene_graph;
   mbp->RegisterAsSourceForSceneGraph(&scene_graph);
-  Parser(mbp.get()).AddModelFromFile(
+  Parser(mbp.get()).AddModels(
       FindResourceOrThrow("drake/manipulation/models/iiwa_description/iiwa7"
                           "/iiwa7_no_collision.sdf"));
   mbp->Finalize();
@@ -151,7 +151,7 @@ GTEST_TEST(MultibodyPositionToGeometryPoseTest, FullStateInput) {
           *state_context);
 
   EXPECT_EQ(position_output.size(), state_output.size());
-  for (const auto& id : position_output.frame_ids()) {
+  for (const auto& id : position_output.ids()) {
     EXPECT_TRUE(
         position_output.value(id).IsExactlyEqualTo(state_output.value(id)));
   }

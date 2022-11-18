@@ -13,6 +13,7 @@
 #include "drake/common/drake_deprecated.h"
 #include "drake/common/eigen_types.h"
 #include "drake/geometry/proximity/mesh_traits.h"
+#include "drake/math/linear_solve.h"
 #include "drake/math/rigid_transform.h"
 
 namespace drake {
@@ -176,7 +177,9 @@ class VolumeMesh {
    */
   int num_vertices() const { return vertices_.size(); }
 
-  /** Calculates volume of a tetrahedral element.
+  /** Calculates volume of a tetrahedral element. It is a signed volume, i.e.,
+   it can be negative depending on the order of the four vertices of the
+   tetrahedron.
    @pre `f ∈ [0, num_elements())`.
    */
   T CalcTetrahedronVolume(int e) const {
@@ -193,7 +196,6 @@ class VolumeMesh {
     // b, c. With this convention, the computed volume will be positive,
     // otherwise negative.
     const T volume = (d - a).dot((b - a).cross(c - a)) / T(6.0);
-    DRAKE_ASSERT(volume > T(0));
     return volume;
   }
 
@@ -244,7 +246,8 @@ class VolumeMesh {
     }
     Vector4<ReturnType> b;
     b << ReturnType(1.0), p_MQ;
-    const Vector4<ReturnType> b_Q = A.partialPivLu().solve(b);
+    const math::LinearSolver<Eigen::PartialPivLU, Matrix4<ReturnType>> A_lu(A);
+    const Vector4<ReturnType> b_Q = A_lu.Solve(b);
     // TODO(DamrongGuoy): Save the inverse of the matrix instead of
     //  calculating it on the fly. We can reduce to 3x3 system too.  See
     //  issue #11653.

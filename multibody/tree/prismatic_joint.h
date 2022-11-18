@@ -69,40 +69,29 @@ class PrismaticJoint final : public Joint<T> {
       const Frame<T>& frame_on_child, const Vector3<double>& axis,
       double pos_lower_limit = -std::numeric_limits<double>::infinity(),
       double pos_upper_limit = std::numeric_limits<double>::infinity(),
-      double damping = 0)
-      : Joint<T>(name, frame_on_parent, frame_on_child,
-                 VectorX<double>::Constant(1, pos_lower_limit),
-                 VectorX<double>::Constant(1, pos_upper_limit),
-                 VectorX<double>::Constant(
-                     1, -std::numeric_limits<double>::infinity()),
-                 VectorX<double>::Constant(
-                     1, std::numeric_limits<double>::infinity()),
-                 VectorX<double>::Constant(
-                     1, -std::numeric_limits<double>::infinity()),
-                 VectorX<double>::Constant(
-                     1, std::numeric_limits<double>::infinity())) {
-    const double kEpsilon = std::sqrt(std::numeric_limits<double>::epsilon());
-    DRAKE_THROW_UNLESS(!axis.isZero(kEpsilon));
-    DRAKE_THROW_UNLESS(damping >= 0);
-    axis_ = axis.normalized();
-    damping_ = damping;
-  }
+      double damping = 0);
 
-  const std::string& type_name() const override {
-    static const never_destroyed<std::string> name{kTypeName};
-    return name.access();
-  }
+  const std::string& type_name() const override;
 
   /// Returns the axis of translation for `this` joint as a unit vector.
   /// Since the measures of this axis in either frame F or M are the same (see
-  /// this class's documentation for frames's definitions) then,
+  /// this class's documentation for frame definitions) then,
   /// `axis = axis_F = axis_M`.
   const Vector3<double>& translation_axis() const {
     return axis_;
   }
 
   /// Returns `this` joint's damping constant in N⋅s/m.
-  double damping() const { return damping_; }
+  double damping() const { return this->damping_vector()[0]; }
+
+  /// Sets the default value of viscous damping for this joint, in N⋅s/m.
+  /// @throws std::exception if damping is negative.
+  /// @pre the MultibodyPlant must not be finalized.
+  void set_default_damping(double damping) {
+    DRAKE_THROW_UNLESS(damping >= 0);
+    DRAKE_DEMAND(!this->get_parent_tree().topology_is_valid());
+    this->set_default_damping_vector(Vector1d(damping));
+  }
 
   /// Returns the position lower limit for `this` joint in meters.
   double position_lower_limit() const {
@@ -347,9 +336,6 @@ class PrismaticJoint final : public Joint<T> {
   // This is the joint's axis expressed in either M or F since axis_M = axis_F.
   // It is a unit vector.
   Vector3<double> axis_;
-
-  /// This joint's damping constant in N⋅s/m.
-  double damping_{0};
 };
 
 template <typename T> const char PrismaticJoint<T>::kTypeName[] = "prismatic";

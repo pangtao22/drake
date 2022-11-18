@@ -92,8 +92,6 @@ drake_cc_library(
 
 drake_cc_googletest(
     name = "yaml_doxygen_test",
-    data = [
-    ],
     deps = [
         ":yaml_io",
         "//common:find_resource",

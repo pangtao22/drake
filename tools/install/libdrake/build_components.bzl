@@ -13,6 +13,7 @@ LIBDRAKE_COMPONENTS = [
     "//common",
     "//common/proto",
     "//common/schema",
+    "//common/symbolic",
     "//common/trajectories",
     "//common/yaml",
     "//common:drake_marker_shared_library",  # unpackaged
@@ -41,13 +42,12 @@ LIBDRAKE_COMPONENTS = [
     "//geometry/optimization",
     "//geometry/proximity",
     "//geometry/query_results",
-    "//geometry/render",
-    "//geometry/render/gl_renderer",
     "//geometry/render/shaders",
+    "//geometry/render_gl",
+    "//geometry/render_vtk",
     "//lcm",
     "//manipulation/kinova_jaco",
     "//manipulation/kuka_iiwa",
-    "//manipulation/perception",
     "//manipulation/planner",
     "//manipulation/schunk_wsg",
     "//manipulation/util",
@@ -61,6 +61,7 @@ LIBDRAKE_COMPONENTS = [
     "//multibody/constraint",
     "//multibody/contact_solvers",
     "//multibody/contact_solvers/sap",
+    "//multibody/fem",
     "//multibody/hydroelastics",
     "//multibody/inverse_kinematics",
     "//multibody/math",
@@ -69,15 +70,13 @@ LIBDRAKE_COMPONENTS = [
     "//multibody/parsing",
     "//multibody/plant",
     "//multibody/plant:contact_results_to_lcm",  # unpackaged
-    "//multibody/plant:contact_results_to_meshcat",  # unpackaged
-    "//multibody/plant:contact_results_to_meshcat_params",  # unpackaged
+    "//multibody/rational",
     "//multibody/topology:multibody_graph",  # unpackaged
     "//multibody/tree",
     "//multibody/triangle_quadrature",
     "//perception",
+    "//planning",
     "//solvers",
-    "//solvers/fbstab",
-    "//solvers/fbstab/components",
     "//systems/analysis",
     "//systems/controllers",
     "//systems/estimators",
@@ -88,7 +87,5 @@ LIBDRAKE_COMPONENTS = [
     "//systems/rendering",
     "//systems/sensors",
     "//systems/trajectory_optimization",
-    # //common:filesystem (indirectly)
-    # //common:nice_type_name_override_header (indirectly)
-    # //geometry/render/gl_renderer:apple_only_no_render_engine_gl_factory (indirectly)  # noqa
+    "//visualization",
 ]

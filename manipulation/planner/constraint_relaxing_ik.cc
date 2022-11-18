@@ -20,8 +20,10 @@ ConstraintRelaxingIk::ConstraintRelaxingIk(
     const std::string& end_effector_link_name)
     : rand_generator_(kDefaultRandomSeed),
       plant_(0) {
-  const auto model_instance =
-      multibody::Parser(&plant_).AddModelFromFile(model_path);
+  const auto models = multibody::Parser(&plant_).AddModels(model_path);
+  DRAKE_THROW_UNLESS(models.size() == 1);
+  const auto model_instance = models[0];
+
 
   // Check if our robot is welded to the world.  If not, try welding the first
   // link.
@@ -39,7 +41,8 @@ ConstraintRelaxingIk::ConstraintRelaxingIk(
 bool ConstraintRelaxingIk::PlanSequentialTrajectory(
     const std::vector<IkCartesianWaypoint>& waypoints,
     const VectorX<double>& q_current,
-    std::vector<Eigen::VectorXd>* q_sol_out) {
+    std::vector<Eigen::VectorXd>* q_sol_out,
+    const std::function<bool(int)>& keep_going) {
   DRAKE_DEMAND(q_sol_out != nullptr);
   int num_steps = static_cast<int>(waypoints.size());
 
@@ -77,6 +80,14 @@ bool ConstraintRelaxingIk::PlanSequentialTrajectory(
     while (true) {
       if (!waypoint.constrain_orientation)
         DRAKE_DEMAND(mode == RelaxMode::kRelaxPosTol);
+
+      // Allow for user-directed early termination.
+      if (keep_going != nullptr) {
+        const int waypoint_index = static_cast<int>(q_sol_out->size()) - 1;
+        if (keep_going(waypoint_index) == false) {
+          return false;
+        }
+      }
 
       std::vector<int> info;
       std::vector<std::string> infeasible_constraints;

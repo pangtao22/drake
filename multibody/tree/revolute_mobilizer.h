@@ -45,14 +45,12 @@ class RevoluteMobilizer final : public MobilizerImpl<T, 1, 1> {
   // @pre `axis_F` must be a non-zero vector with norm at least root square of
   // machine epsilon. This vector can have any length (subject to the norm
   // restriction above), only the direction is used.
-  // @throws std::exception if the L2 norm of `axis_F` is less than the square
-  // root of machine epsilon.
   RevoluteMobilizer(const Frame<T>& inboard_frame_F,
                     const Frame<T>& outboard_frame_M,
                     const Vector3<double>& axis_F) :
       MobilizerBase(inboard_frame_F, outboard_frame_M), axis_F_(axis_F) {
     double kEpsilon = std::sqrt(std::numeric_limits<double>::epsilon());
-    DRAKE_THROW_UNLESS(!axis_F.isZero(kEpsilon));
+    DRAKE_DEMAND(!axis_F_.isZero(kEpsilon));
     axis_F_.normalize();
   }
 
@@ -60,6 +58,9 @@ class RevoluteMobilizer final : public MobilizerImpl<T, 1, 1> {
   // elements.
   std::string position_suffix(int position_index_in_mobilizer) const final;
   std::string velocity_suffix(int velocity_index_in_mobilizer) const final;
+
+  bool can_rotate() const final    { return true; }
+  bool can_translate() const final { return false; }
 
   // @retval axis_F The rotation axis as a unit vector expressed in the inboard
   //                frame F.

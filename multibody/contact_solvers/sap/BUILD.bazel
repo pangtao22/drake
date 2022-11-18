@@ -23,6 +23,8 @@ drake_cc_package_library(
         ":sap_constraint_bundle",
         ":sap_contact_problem",
         ":sap_friction_cone_constraint",
+        ":sap_holonomic_constraint",
+        ":sap_limit_constraint",
         ":sap_model",
         ":sap_solver",
         ":sap_solver_results",
@@ -85,6 +87,28 @@ drake_cc_library(
 )
 
 drake_cc_library(
+    name = "sap_holonomic_constraint",
+    srcs = ["sap_holonomic_constraint.cc"],
+    hdrs = ["sap_holonomic_constraint.h"],
+    deps = [
+        ":sap_constraint",
+        "//common:default_scalars",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
+    name = "sap_limit_constraint",
+    srcs = ["sap_limit_constraint.cc"],
+    hdrs = ["sap_limit_constraint.h"],
+    deps = [
+        ":sap_constraint",
+        "//common:default_scalars",
+        "//common:essential",
+    ],
+)
+
+drake_cc_library(
     name = "sap_friction_cone_constraint",
     srcs = ["sap_friction_cone_constraint.cc"],
     hdrs = ["sap_friction_cone_constraint.h"],
@@ -106,6 +130,7 @@ drake_cc_library(
         ":sap_contact_problem",
         "//common:default_scalars",
         "//common:essential",
+        "//math:linear_solve",
         "//multibody/contact_solvers:block_sparse_matrix",
         "//systems/framework:context",
         "//systems/framework:leaf_system",
@@ -117,12 +142,15 @@ drake_cc_library(
     srcs = ["sap_solver.cc"],
     hdrs = ["sap_solver.h"],
     deps = [
+        ":sap_model",
         ":sap_solver_results",
         "//common:default_scalars",
         "//common:essential",
+        "//math:linear_solve",
         "//multibody/contact_solvers:block_sparse_matrix",
-        "//multibody/contact_solvers:contact_solver_utils",
+        "//multibody/contact_solvers:newton_with_bisection",
         "//multibody/contact_solvers:point_contact_data",
+        "//multibody/contact_solvers:supernodal_solver",
         "//multibody/contact_solvers:system_dynamics_data",
     ],
 )
@@ -170,6 +198,24 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
+    name = "sap_holonomic_constraint_test",
+    deps = [
+        ":sap_holonomic_constraint",
+        "//common:pointer_cast",
+        "//common/test_utilities:eigen_matrix_compare",
+    ],
+)
+
+drake_cc_googletest(
+    name = "sap_limit_constraint_test",
+    deps = [
+        ":sap_limit_constraint",
+        "//common:pointer_cast",
+        "//common/test_utilities:eigen_matrix_compare",
+    ],
+)
+
+drake_cc_googletest(
     name = "sap_friction_cone_constraint_test",
     deps = [
         ":sap_friction_cone_constraint",
@@ -178,6 +224,7 @@ drake_cc_googletest(
         "//math:gradient",
         "//solvers:constraint",
         "//solvers:mathematical_program",
+        "//solvers:scs_solver",
         "//solvers:solve",
     ],
 )
@@ -201,14 +248,26 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
+    name = "sap_solver_autodiff_test",
+    deps = [
+        ":sap_friction_cone_constraint",
+        ":sap_solver",
+        ":sap_solver_results",
+        "//common/test_utilities:expect_throws_message",
+    ],
+)
+
+drake_cc_googletest(
     name = "sap_solver_test",
     deps = [
+        ":sap_friction_cone_constraint",
         ":sap_solver",
         ":sap_solver_results",
         "//common/test_utilities:eigen_matrix_compare",
         "//common/test_utilities:expect_throws_message",
         "//multibody/contact_solvers:block_sparse_linear_operator",
         "//multibody/contact_solvers:block_sparse_matrix",
+        "//multibody/contact_solvers:contact_solver_utils",
     ],
 )
 

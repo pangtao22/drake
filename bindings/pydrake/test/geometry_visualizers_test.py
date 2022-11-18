@@ -1,5 +1,6 @@
 import pydrake.geometry as mut
 
+import copy
 import unittest
 
 import numpy as np
@@ -27,13 +28,10 @@ class TestGeometryVisualizers(unittest.TestCase):
         params = mut.DrakeVisualizerParams(
             publish_period=0.1, role=mut.Role.kIllustration,
             default_color=mut.Rgba(0.1, 0.2, 0.3, 0.4),
-            show_hydroelastic=False)
-        self.assertEqual(repr(params), "".join([
-            "DrakeVisualizerParams("
-            "publish_period=0.1, "
-            "role=Role.kIllustration, "
-            "default_color=Rgba(r=0.1, g=0.2, b=0.3, a=0.4), "
-            "show_hydroelastic=False)"]))
+            show_hydroelastic=False,
+            use_role_channel_suffix=False)
+        self.assertIn("publish_period", repr(params))
+        copy.copy(params)
 
         # Add some subscribers to detect message broadcast.
         load_channel = "DRAKE_VIEWER_LOAD_ROBOT"
@@ -92,9 +90,12 @@ class TestGeometryVisualizers(unittest.TestCase):
         params = mut.MeshcatParams(
             host="*",
             port=port,
-            web_url_pattern="http://host:{port}")
+            web_url_pattern="http://host:{port}",
+            show_stats_plot=False)
         meshcat = mut.Meshcat(params=params)
         self.assertEqual(meshcat.port(), port)
+        self.assertIn("host", repr(params))
+        copy.copy(params)
         with self.assertRaises(RuntimeError):
             meshcat2 = mut.Meshcat(port=port)
         self.assertIn("http", meshcat.web_url())
@@ -128,6 +129,13 @@ class TestGeometryVisualizers(unittest.TestCase):
             rgba=mut.Rgba(0.3, 0.3, 0.3),
             wireframe=True,
             wireframe_line_width=2.0)
+        meshcat.SetTriangleColorMesh(
+            path="/test/triangle_mesh",
+            vertices=np.array([[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]]).T,
+            faces=np.array([[0, 1, 2], [3, 0, 2]]).T,
+            colors=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0]]).T,
+            wireframe=False,
+            wireframe_line_width=2.0)
         meshcat.SetProperty(path="/Background",
                             property="visible",
                             value=True)
@@ -138,10 +146,16 @@ class TestGeometryVisualizers(unittest.TestCase):
         meshcat.Set2dRenderMode(
             X_WC=RigidTransform(), xmin=-1, xmax=1, ymin=-1, ymax=1)
         meshcat.ResetRenderMode()
-        meshcat.AddButton(name="button")
+        meshcat.AddButton(name="button", keycode="KeyB")
         self.assertEqual(meshcat.GetButtonClicks(name="button"), 0)
         meshcat.DeleteButton(name="button")
-        meshcat.AddSlider(name="slider", min=0, max=1, step=0.01, value=0.5)
+        meshcat.AddSlider(name="slider",
+                          min=0,
+                          max=1,
+                          step=0.01,
+                          value=0.5,
+                          decrement_keycode="ArrowLeft",
+                          increment_keycode="ArrowRight")
         meshcat.SetSliderValue(name="slider", value=0.7)
         self.assertAlmostEqual(meshcat.GetSliderValue(
             name="slider"), 0.7, delta=1e-14)
@@ -149,7 +163,47 @@ class TestGeometryVisualizers(unittest.TestCase):
         meshcat.DeleteAddedControls()
         self.assertIn("data:application/octet-binary;base64",
                       meshcat.StaticHtml())
+        gamepad = meshcat.GetGamepad()
+        # Check default values (assuming no gamepad messages have arrived):
+        self.assertIsNone(gamepad.index)
+        self.assertEqual(len(gamepad.button_values), 0)
+        self.assertEqual(len(gamepad.axes), 0)
+        meshcat.SetRealtimeRate(1.0)
         meshcat.Flush()
+
+        # PerspectiveCamera
+        camera = mut.Meshcat.PerspectiveCamera(fov=80,
+                                               aspect=1.2,
+                                               near=0.2,
+                                               far=200,
+                                               zoom=1.3)
+        self.assertEqual(camera.fov, 80)
+        self.assertEqual(camera.aspect, 1.2)
+        self.assertEqual(camera.near, 0.2)
+        self.assertEqual(camera.far, 200)
+        self.assertEqual(camera.zoom, 1.3)
+        self.assertIn("fov", repr(camera))
+        copy.copy(camera)
+        meshcat.SetCamera(camera=camera, path="mypath")
+
+        # OrthographicCamera
+        camera = mut.Meshcat.OrthographicCamera(left=0.1,
+                                                right=1.3,
+                                                top=0.3,
+                                                bottom=1.4,
+                                                near=0.2,
+                                                far=200,
+                                                zoom=1.3)
+        self.assertEqual(camera.left, 0.1)
+        self.assertEqual(camera.right, 1.3)
+        self.assertEqual(camera.top, 0.3)
+        self.assertEqual(camera.bottom, 1.4)
+        self.assertEqual(camera.near, 0.2)
+        self.assertEqual(camera.far, 200)
+        self.assertEqual(camera.zoom, 1.3)
+        self.assertIn("left", repr(camera))
+        copy.copy(camera)
+        meshcat.SetCamera(camera=camera, path="mypath")
 
     def test_meshcat_animation(self):
         animation = mut.MeshcatAnimation(frames_per_second=64)
@@ -187,8 +241,9 @@ class TestGeometryVisualizers(unittest.TestCase):
         params.default_color = mut.Rgba(0.5, 0.5, 0.5)
         params.prefix = "py_visualizer"
         params.delete_on_initialization_event = False
-        self.assertNotIn("object at 0x", repr(params))
-        vis = mut.MeshcatVisualizerCpp_[T](meshcat=meshcat, params=params)
+        self.assertIn("publish_period", repr(params))
+        copy.copy(params)
+        vis = mut.MeshcatVisualizer_[T](meshcat=meshcat, params=params)
         vis.Delete()
         self.assertIsInstance(vis.query_object_input_port(), InputPort_[T])
         animation = vis.StartRecording(set_transforms_while_recording=True)
@@ -200,11 +255,11 @@ class TestGeometryVisualizers(unittest.TestCase):
 
         builder = DiagramBuilder_[T]()
         scene_graph = builder.AddSystem(mut.SceneGraph_[T]())
-        mut.MeshcatVisualizerCpp_[T].AddToBuilder(builder=builder,
-                                                  scene_graph=scene_graph,
-                                                  meshcat=meshcat,
-                                                  params=params)
-        mut.MeshcatVisualizerCpp_[T].AddToBuilder(
+        mut.MeshcatVisualizer_[T].AddToBuilder(builder=builder,
+                                               scene_graph=scene_graph,
+                                               meshcat=meshcat,
+                                               params=params)
+        mut.MeshcatVisualizer_[T].AddToBuilder(
             builder=builder,
             query_object_port=scene_graph.get_query_output_port(),
             meshcat=meshcat,
@@ -212,15 +267,15 @@ class TestGeometryVisualizers(unittest.TestCase):
 
     def test_meshcat_visualizer_scalar_conversion(self):
         meshcat = mut.Meshcat()
-        vis = mut.MeshcatVisualizerCpp(meshcat)
+        vis = mut.MeshcatVisualizer(meshcat)
         vis_autodiff = vis.ToAutoDiffXd()
         self.assertIsInstance(vis_autodiff,
-                              mut.MeshcatVisualizerCpp_[AutoDiffXd])
+                              mut.MeshcatVisualizer_[AutoDiffXd])
 
     @numpy_compare.check_nonsymbolic_types
     def test_meshcat_point_cloud_visualizer(self, T):
         meshcat = mut.Meshcat()
-        visualizer = mut.MeshcatPointCloudVisualizerCpp_[T](
+        visualizer = mut.MeshcatPointCloudVisualizer_[T](
             meshcat=meshcat, path="cloud", publish_period=1/12.0)
         visualizer.set_point_size(0.1)
         visualizer.set_default_rgba(mut.Rgba(0, 0, 1, 1))
@@ -230,12 +285,12 @@ class TestGeometryVisualizers(unittest.TestCase):
         visualizer.cloud_input_port().FixValue(
           context, AbstractValue.Make(cloud))
         self.assertIsInstance(visualizer.pose_input_port(), InputPort_[T])
-        visualizer.Publish(context)
+        visualizer.ForcedPublish(context)
         visualizer.Delete()
         if T == float:
             ad_visualizer = visualizer.ToAutoDiffXd()
             self.assertIsInstance(
-                ad_visualizer, mut.MeshcatPointCloudVisualizerCpp_[AutoDiffXd])
+                ad_visualizer, mut.MeshcatPointCloudVisualizer_[AutoDiffXd])
 
     def test_start_meshcat(self):
         # StartMeshcat only performs interesting work on cloud notebook hosts.

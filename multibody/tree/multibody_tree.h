@@ -5,6 +5,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -886,6 +887,10 @@ class MultibodyTree {
   // retrieve a local copy of their topology.
   const MultibodyTreeTopology& get_topology() const { return topology_; }
 
+  // See MultibodyPlant method.
+  std::vector<BodyIndex> GetBodiesKinematicallyAffectedBy(
+      const std::vector<JointIndex>& joint_indexes) const;
+
   // Returns the mobilizer model for joint with index `joint_index`. The index
   // is invalid if the joint is not modeled with a mobilizer.
   MobilizerIndex get_joint_mobilizer(JointIndex joint_index) const {
@@ -1136,6 +1141,12 @@ class MultibodyTree {
   Vector3<T> CalcCenterOfMassPositionInWorld(
       const systems::Context<T>& context,
       const std::vector<ModelInstanceIndex>& model_instances) const;
+
+  // See MultibodyPlant method.
+  SpatialInertia<T> CalcSpatialInertia(
+      const systems::Context<T>& context,
+      const Frame<T>& frame_F,
+      const std::vector<BodyIndex>& body_indexes) const;
 
   // See MultibodyPlant method.
   Vector3<T> CalcCenterOfMassTranslationalVelocityInWorld(
@@ -1866,6 +1877,41 @@ class MultibodyTree {
     vdot_B = D_B⁻¹ * ej_B - g_B_Wᵀ * Aplus_WB,            [Jain, 2010. Alg. 7.2]
   </pre>
 
+  <h3> Additional Diagonal Inertias </h3>
+  @anchor additional_diagonal_inertias
+
+  We can model additional diagonal inertias by considering external generalized
+  forces of the form: <pre>
+    tau_B <-- -d_B * vdot_B + tau_B                                         (17)
+  </pre>
+  That is, we update tau_B to include the term -d_B * vdot_B, for the mobilities
+  of each body B. Such form of the generalized forces can be used to model fluid
+  virtual masses, reflected inertias and/or even effective inertias result of
+  discrete time stepping schemes.
+
+  When Eq. (17) is used into Eq. (14), the update for vdot_B in Eq. (15) remains
+  exactly the same but with D_B updated to: <pre>
+    D_B <-- D_B + d_B
+  </pre>
+  With this modification to D_B, the algorithm remains the same.
+
+  We remark that the modeling of this term is equivalent to adding a diagonal
+  term D = diag{d_B} (the concantenation of each d_B to form the diagonal matrix
+  D) to the mass matrix. This can be seen by considering the Newton-Euler
+  equations of motion: <pre>
+    M⋅v̇ + C⋅v = τ − D⋅v̇
+  </pre>
+  which can then rewritten as: <pre>
+    (M+D)⋅v̇ + C⋅v = τ
+  </pre>
+  resulting on the same Newton-Euler equations but with the updated mass matrix
+  M+D.
+
+  We have not made any assumptions on the sign of the coefficients of D.
+  However, physical models (e.g. reflected rotor inertias) will typically lead
+  to a positive D, making the effective mass matrix M+D more diagonally
+  dominant.
+
   <h3> Notation </h3>
   @anchor forward_dynamics_notation
 
@@ -1940,8 +1986,7 @@ class MultibodyTree {
   // contains `Ab_WB` for the body with node index `body_node_index`.
   void CalcSpatialAccelerationBias(
       const systems::Context<T>& context,
-      std::vector<SpatialAcceleration<T>>* Ab_WB_all)
-      const;
+      std::vector<SpatialAcceleration<T>>* Ab_WB_all) const;
 
   // Computes the articulated body force bias `Zb_Bo_W = Pplus_PB_W * Ab_WB`
   // for each articulated body B. On output `Zb_Bo_W_all[body_node_index]`
@@ -1950,7 +1995,40 @@ class MultibodyTree {
       const systems::Context<T>& context,
       std::vector<SpatialForce<T>>* Zb_Bo_W_all) const;
 
+  /*
+  @anchor forward_dynamics_with_diagonal_terms_apis
+  @name Alternative ABA Signatures to include diagonal inertia terms.
+  These "advanced" level alternative APIs are provided so that we can
+  include the modeling of additional diagonal inertias as discussed in @ref
+  additional_diagonal_inertias. The additional inertias affect both articulated
+  body inertias and bias terms, CalcArticulatedBodyInertiaCache() and
+  CalcArticulatedBodyForceBias() respectively. These in turn must be included in
+  CalcArticulatedBodyForceCache() to compute the ABA force cache needed to
+  finally compute accelerations with CalcArticulatedBodyAccelerations(). */
+  void CalcArticulatedBodyInertiaCache(
+      const systems::Context<T>& context, const VectorX<T>& diagonal_inertias,
+      ArticulatedBodyInertiaCache<T>* abic) const;
+
+  void CalcArticulatedBodyForceBias(
+      const systems::Context<T>& context,
+      const ArticulatedBodyInertiaCache<T>& abic,
+      std::vector<SpatialForce<T>>* Zb_Bo_W_all) const;
+
+  void CalcArticulatedBodyForceCache(
+      const systems::Context<T>& context,
+      const ArticulatedBodyInertiaCache<T>& abic,
+      const std::vector<SpatialForce<T>>& Zb_Bo_W_cache,
+      const MultibodyForces<T>& forces,
+      ArticulatedBodyForceCache<T>* aba_force_cache) const;
+
+  void CalcArticulatedBodyAccelerations(
+      const systems::Context<T>& context,
+      const ArticulatedBodyInertiaCache<T>& abic,
+      const ArticulatedBodyForceCache<T>& aba_force_cache,
+      AccelerationKinematicsCache<T>* ac) const;
   // @}
+
+  // @} Closes "Articulated Body Algorithm Forward Dynamics" Doxygen section.
 
   // @}
   // Closes "Computational methods" Doxygen section.
@@ -2405,6 +2483,27 @@ class MultibodyTree {
     DRAKE_DEMAND(topology_is_valid());
     return discrete_state_index_;
   }
+
+  // Calculates the total default mass of all bodies in a set of BodyIndex.
+  // @param[in] body_indexes A set of BodyIndex.
+  // @retval Total mass of all bodies in body_indexes or 0 if there is no mass.
+  double CalcTotalDefaultMass(const std::set<BodyIndex>& body_indexes) const;
+
+  // In the set of bodies associated with BodyIndex, returns true if any of
+  // the bodies have a NaN default rotational inertia.
+  // @param[in] body_indexes A set of BodyIndex.
+  bool IsAnyDefaultRotationalInertiaNaN(
+      const std::set<BodyIndex>& body_indexes) const;
+
+  // In the set of bodies associated with BodyIndex, returns true if all the
+  // bodies have a zero default rotational inertia.
+  // @param[in] body_indexes A set of BodyIndex.
+  bool AreAllDefaultRotationalInertiaZero(
+      const std::set<BodyIndex>& body_indexes) const;
+
+  // Throw an exception if there are bodies whose default mass or inertia
+  // properties will cause subsequent numerical problems.
+  void ThrowDefaultMassInertiaError() const;
 
  private:
   // Make MultibodyTree templated on every other scalar type a friend of

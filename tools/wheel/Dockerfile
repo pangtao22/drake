@@ -20,13 +20,13 @@ RUN /image/provision-base.sh
 
 FROM base AS incubator
 
-ADD image/dependencies/ /dependencies/src/
+ADD image/dependencies/ /opt/drake-wheel-build/dependencies/src/
 ADD image/build-dependencies.sh /image/
 
 RUN /image/build-dependencies.sh
 
+ADD image/vtk-args /opt/drake-wheel-build/vtk/
 ADD image/build-vtk.sh /image/
-ADD image/vtk-args /vtk/
 
 RUN /image/build-vtk.sh
 
@@ -37,10 +37,11 @@ RUN /image/build-vtk.sh
 FROM incubator AS clean
 
 ARG PYTHON=3
+ARG PYTHON_SHA=
 
-ADD image/provision-python.sh /image/
+ADD image/provision-python.sh image/build-python.sh /image/
 
-RUN /image/provision-python.sh ${PYTHON}
+RUN /image/provision-python.sh ${PYTHON} ${PYTHON_SHA}
 
 # -----------------------------------------------------------------------------
 # Inject the primary build scripts.
@@ -48,7 +49,7 @@ RUN /image/provision-python.sh ${PYTHON}
 
 ADD image/build-drake.sh /image/
 ADD image/pip-drake.patch /image/
-ADD image/drake-src.tar.xz /drake/
+ADD image/drake-src.tar.xz /opt/drake-wheel-build/drake/
 
 # -----------------------------------------------------------------------------
 # Build the Drake wheel.
@@ -63,7 +64,8 @@ RUN --mount=type=ssh \
     /image/build-drake.sh
 
 ADD image/build-wheel.sh /image/
-ADD image/setup.py /wheel/
+ADD image/setup.py /opt/drake-wheel-build/wheel/
+ADD content /opt/drake-wheel-content
 
 ENV DRAKE_VERSION=${DRAKE_VERSION}
 

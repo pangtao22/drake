@@ -15,7 +15,6 @@
           <izz>0.164814</izz>
         </inertia>
       </inertial>
-      <self_collide>0</self_collide>
       <kinematic>0</kinematic>
       <visual name="visual">
         <geometry>
@@ -30,7 +29,6 @@
       </visual>
       <collision name="collision">
         <laser_retro>0</laser_retro>
-        <max_contacts>10</max_contacts>
         <geometry>
           <box>
             <size>0.146 0.0725 0.05</size>
@@ -99,7 +97,6 @@
           <izz>0.16</izz>
         </inertia>
       </inertial>
-      <self_collide>0</self_collide>
       <kinematic>0</kinematic>
       <visual name="visual">
         <geometry>
@@ -113,40 +110,39 @@
         </material>
       </visual>
       <collision name="left_top">
-	<pose> -0.008 0.021 0 0 0 0 </pose>
-	<geometry>
-	  <sphere>
+        <pose> -0.008 0.021 0 0 0 0 </pose>
+        <geometry>
+          <sphere>
             <radius> 0.001 </radius>
           </sphere>
         </geometry>
       </collision>
       <collision name="left_bottom">
-	<pose> -0.008 0.041 0 0 0 0 </pose>
-	<geometry>
-	  <sphere>
+        <pose> -0.008 0.041 0 0 0 0 </pose>
+        <geometry>
+          <sphere>
             <radius> 0.001 </radius>
           </sphere>
         </geometry>
       </collision>
       <collision name="left_left">
-	<pose> -0.008 0.031 -0.01 0 0 0 </pose>
-	<geometry>
-	  <sphere>
+        <pose> -0.008 0.031 -0.01 0 0 0 </pose>
+        <geometry>
+          <sphere>
             <radius> 0.001 </radius>
           </sphere>
         </geometry>
       </collision>
       <collision name="left_right">
-	<pose> -0.008 0.031 0.01 0 0 0 </pose>
-	<geometry>
-	  <sphere>
+        <pose> -0.008 0.031 0.01 0 0 0 </pose>
+        <geometry>
+          <sphere>
             <radius> 0.001 </radius>
           </sphere>
         </geometry>
       </collision>                      
       <collision name="collision">
         <laser_retro>0</laser_retro>
-        <max_contacts>10</max_contacts>
         <geometry>
           <box>
             <size>0.012 0.082 0.02</size>
@@ -212,7 +208,6 @@
           <izz>0.16</izz>
         </inertia>
       </inertial>
-      <self_collide>0</self_collide>
       <kinematic>0</kinematic>
       <visual name="visual">
         <geometry>
@@ -226,40 +221,39 @@
         </material>
       </visual>
       <collision name="right_top">
-	<pose> -0.008 0.021 0 0 0 0 </pose>
-	<geometry>
-	  <sphere>
+        <pose> -0.008 0.021 0 0 0 0 </pose>
+        <geometry>
+          <sphere>
             <radius> 0.001 </radius>
           </sphere>
         </geometry>
       </collision>
       <collision name="right_bottom">
-	<pose> -0.008 0.041 0 0 0 0 </pose>
-	<geometry>
-	  <sphere>
+        <pose> -0.008 0.041 0 0 0 0 </pose>
+        <geometry>
+          <sphere>
             <radius> 0.001 </radius>
           </sphere>
         </geometry>
       </collision>
       <collision name="right_left">
-	<pose> -0.008 0.031 -0.01 0 0 0 </pose>
-	<geometry>
-	  <sphere>
+        <pose> -0.008 0.031 -0.01 0 0 0 </pose>
+        <geometry>
+          <sphere>
             <radius> 0.001 </radius>
           </sphere>
         </geometry>
       </collision>
       <collision name="right_right">
-	<pose> -0.008 0.031 0.01 0 0 0 </pose>
-	<geometry>
-	  <sphere>
+        <pose> -0.008 0.031 0.01 0 0 0 </pose>
+        <geometry>
+          <sphere>
             <radius> 0.001 </radius>
           </sphere>
         </geometry>
       </collision>                  
       <collision name="collision">
         <laser_retro>0</laser_retro>
-        <max_contacts>10</max_contacts>
         <geometry>
           <box>
             <size>0.012 0.082 0.02</size>
@@ -324,7 +318,6 @@
           <upper>0</upper>
           <effort>80</effort>
           <stiffness>15000</stiffness>
-          <dissipation>50</dissipation>
         </limit>
         <dynamics>
           <spring_reference>0</spring_reference>
@@ -333,18 +326,6 @@
           <friction>0</friction>
         </dynamics>
       </axis>
-      <physics>
-        <ode>
-          <limit>
-            <cfm>0</cfm>
-            <erp>0.2</erp>
-          </limit>
-          <suspension>
-            <cfm>0</cfm>
-            <erp>0.2</erp>
-          </suspension>
-        </ode>
-      </physics>
     </joint>
     <joint name="right_finger_sliding_joint" type="prismatic">
       <parent>body</parent>
@@ -358,7 +339,6 @@
           <upper>0.055</upper>
           <effort>80</effort>
           <stiffness>15000</stiffness>
-          <dissipation>50</dissipation>
         </limit>
         <dynamics>
           <spring_reference>0</spring_reference>
@@ -367,20 +347,7 @@
           <friction>0</friction>
         </dynamics>
       </axis>
-      <physics>
-        <ode>
-          <limit>
-            <cfm>0</cfm>
-            <erp>0.2</erp>
-          </limit>
-          <suspension>
-            <cfm>0</cfm>
-            <erp>0.2</erp>
-          </suspension>
-        </ode>
-      </physics>
     </joint>
     <static>0</static>
-    <allow_auto_disable>1</allow_auto_disable>
   </model>
 </sdf>

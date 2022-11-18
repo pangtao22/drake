@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include <tinyxml2.h>
+#include <drake_vendor/tinyxml2.h>
 
 #include "drake/common/diagnostic_policy.h"
 #include "drake/multibody/parsing/detail_common.h"
@@ -38,6 +38,14 @@ class TinyXml2Diagnostic {
   // greater than the lifetime of the returned policy.
   drake::internal::DiagnosticPolicy MakePolicyForNode(
       const tinyxml2::XMLNode* location) const;
+
+  // Warn about spec-documented elements ignored by Drake.
+  void WarnUnsupportedElement(const tinyxml2::XMLElement& node,
+                              const std::string& tag) const;
+
+  // Warn about spec-documented attributes ignored by Drake.
+  void WarnUnsupportedAttribute(const tinyxml2::XMLElement& node,
+                                const std::string& attribute) const;
 
  private:
   // Makes a diagnostic detail record based on an XMLNode.
