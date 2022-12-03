@@ -11,10 +11,14 @@ from pydrake.autodiffutils import AutoDiffXd
 from pydrake.symbolic import Expression, Variable
 from pydrake.lcm import DrakeLcm
 from pydrake.math import RigidTransform
+from pydrake.multibody.fem import (
+    DeformableBodyConfig_
+)
 from pydrake.multibody.tree import (
     BallRpyJoint_,
     Body_,
     BodyIndex,
+    CalcSpatialInertia,
     ConstraintIndex,
     DoorHinge_,
     DoorHingeConfig,
@@ -65,6 +69,7 @@ from pydrake.multibody.plant import (
     ContactResults_,
     ContactResultsToLcmSystem,
     CoulombFriction_,
+    DeformableModel,
     DiscreteContactSolver,
     ExternallyAppliedSpatialForce_,
     ExternallyAppliedSpatialForceMultiplexer_,
@@ -91,6 +96,7 @@ from pydrake.common.value import AbstractValue, Value
 from pydrake.geometry import (
     Box,
     GeometryId,
+    GeometryInstance,
     GeometrySet,
     HydroelasticContactRepresentation,
     Meshcat,
@@ -100,6 +106,8 @@ from pydrake.geometry import (
     SignedDistancePair_,
     SignedDistanceToPoint_,
     Sphere,
+    SurfaceTriangle,
+    TriangleSurfaceMesh,
 )
 from pydrake.math import (
     RigidTransform_,
@@ -672,6 +680,19 @@ class TestPlant(unittest.TestCase):
         # N.B. `numpy_compare.assert_equal(IsNaN(), True)` does not work.
         if T != Expression:
             self.assertTrue(spatial_inertia.IsNaN())
+
+    def test_geometry_spatial_inertia_apis(self):
+        box = Box(1, 2, 3)
+        M_BBo_B = CalcSpatialInertia(shape=box, density=2.5)
+        self.assertIsInstance(M_BBo_B, SpatialInertia_[float])
+
+        t_a = SurfaceTriangle(v0=0, v1=1, v2=2)
+        v0 = (0, 0, 1)
+        v1 = (1, 0, 0)
+        v2 = (0, 1, 0)
+        mesh = TriangleSurfaceMesh(triangles=(t_a,), vertices=(v0, v1, v2))
+        M_MMo_M = CalcSpatialInertia(mesh=mesh, density=2.5)
+        self.assertIsInstance(M_MMo_M, SpatialInertia_[float])
 
     @numpy_compare.check_all_types
     def test_friction_api(self, T):
@@ -2539,3 +2560,49 @@ class TestPlant(unittest.TestCase):
         self.assertTrue(plant.HasUniqueFreeBaseBody(model_instance))
         body = plant.GetUniqueFreeBaseBodyOrThrow(model_instance)
         self.assertEqual(body.index(), added_body.index())
+
+    def test_deformable_model(self):
+        builder = DiagramBuilder_[float]()
+        plant, scene_graph = AddMultibodyPlantSceneGraph(builder, 1.0e-3)
+        dut = DeformableModel(plant)
+        self.assertEqual(dut.num_bodies(), 0)
+        # Add a deformable body to the model.
+        deformable_body_config = DeformableBodyConfig_[float]()
+        geometry = GeometryInstance(X_PG=RigidTransform(),
+                                    shape=Sphere(1.), name="sphere")
+        props = ProximityProperties()
+        props.AddProperty("material", "coulomb_friction",
+                          CoulombFriction_[float](1.0, 1.0))
+        geometry.set_proximity_properties(props)
+        body_id = dut.RegisterDeformableBody(
+            geometry_instance=geometry,
+            config=deformable_body_config,
+            resolution_hint=1.0)
+
+        geometry_id = dut.GetGeometryId(body_id)
+        self.assertEqual(dut.GetBodyId(geometry_id), body_id)
+
+        # Verify that a body has been added to the model.
+        self.assertEqual(dut.num_bodies(), 1)
+        self.assertIsInstance(dut.GetReferencePositions(body_id), np.ndarray)
+        # Add the model to the plant.
+        plant.AddPhysicalModel(dut)
+        registered_models = plant.physical_models()
+        self.assertEqual(len(registered_models), 1)
+        self.assertEqual(registered_models[0].num_bodies(), 1)
+        # Turn on SAP and finalize.
+        plant.set_discrete_contact_solver(DiscreteContactSolver.kSap)
+        plant.Finalize()
+
+        # Post-finalize operations.
+        self.assertIsInstance(
+            dut.vertex_positions_port(), OutputPort_[float])
+        builder.Connect(dut.vertex_positions_port(),
+                        scene_graph.get_source_configuration_port(
+                            plant.get_source_id()))
+        self.assertEqual(dut.GetDiscreteStateIndex(body_id), 1)
+
+        diagram = builder.Build()
+        # Ensure we can simulate this system.
+        simulator = Simulator_[float](diagram)
+        simulator.AdvanceTo(0.01)
