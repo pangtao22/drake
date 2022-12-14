@@ -37,7 +37,7 @@ CIrisToyRobotTest::CIrisToyRobotTest() {
       plant_->world_body(),
       math::RigidTransform(math::RollPitchYawd(0.5, 0.2, -0.3),
                            Eigen::Vector3d(0.2, -0.5, 0.1)),
-      geometry::Box(0.05, 0.03, 0.05), "world_box", proximity_properties);
+      geometry::Box(0.02, 0.03, 0.01), "world_box", proximity_properties);
   world_sphere_ = plant_->RegisterCollisionGeometry(
       plant_->world_body(),
       math::RigidTransform(Eigen::Vector3d(-0.1, -0.5, 0.2)), Sphere(0.04),
@@ -78,9 +78,9 @@ CIrisToyRobotTest::CIrisToyRobotTest() {
       Eigen::Vector3d::UnitY());
   plant_->get_mutable_joint(joint1.index())
       .set_position_limits(Vector1d(-0.5 * M_PI), Vector1d(0.7 * M_PI));
-  body1_cylinder_ = plant_->RegisterCollisionGeometry(
+  body1_capsule_ = plant_->RegisterCollisionGeometry(
       body1, math::RigidTransformd(Eigen::Vector3d(0.2, -0.1, 0.05)),
-      Cylinder(0.04, 0.2), "body1_cylinder", proximity_properties);
+      Capsule(0.04, 0.2), "body1_capsule", proximity_properties);
   const std::string convex_obj =
       FindResourceOrThrow("drake/geometry/optimization/dev/test/convex.obj");
   body1_convex_ = plant_->RegisterCollisionGeometry(
@@ -120,11 +120,11 @@ CIrisToyRobotTest::CIrisToyRobotTest() {
   plant_->get_mutable_joint(joint3.index())
       .set_position_limits(Vector1d(-0.7 * M_PI), Vector1d(0.6 * M_PI));
   body3_box_ = plant_->RegisterCollisionGeometry(
-      body3, math::RigidTransformd(Eigen::Vector3d(0.1, -0.1, 0.02)),
-      Box(0.2, 0.05, 0.1), "body3_box", proximity_properties);
-  body3_cylinder_ = plant_->RegisterCollisionGeometry(
+      body3, math::RigidTransformd(Eigen::Vector3d(-0.1, -0.1, 0.02)),
+      Box(0.02, 0.05, 0.02), "body3_box", proximity_properties);
+  body3_sphere_ = plant_->RegisterCollisionGeometry(
       body3, math::RigidTransformd(Eigen::Vector3d(0.1, 0.02, 0.2)),
-      Cylinder(0.04, 0.2), "body3_cylinder", proximity_properties);
+      Sphere(0.04), "body3_sphere", proximity_properties);
 
   plant_->Finalize();
   diagram_ = builder.Build();

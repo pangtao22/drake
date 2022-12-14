@@ -28,6 +28,7 @@
 #include "drake/multibody/plant/make_discrete_update_manager.h"
 #include "drake/multibody/plant/slicing_and_indexing.h"
 #include "drake/multibody/tree/prismatic_joint.h"
+#include "drake/multibody/tree/quaternion_floating_joint.h"
 #include "drake/multibody/tree/revolute_joint.h"
 #include "drake/multibody/triangle_quadrature/gaussian_triangle_quadrature_rule.h"
 
@@ -390,6 +391,7 @@ MultibodyPlant<T>::MultibodyPlant(const MultibodyPlant<U>& other)
     }
 
     coupler_constraints_specs_ = other.coupler_constraints_specs_;
+    distance_constraints_specs_ = other.distance_constraints_specs_;
 
     // cache_indexes_ is set in DeclareCacheEntries() in
     // DeclareStateCacheAndPorts() in FinalizePlantOnly().
@@ -453,6 +455,51 @@ ConstraintIndex MultibodyPlant<T>::AddCouplerConstraint(const Joint<T>& joint0,
 
   coupler_constraints_specs_.push_back(internal::CouplerConstraintSpecs{
       joint0.index(), joint1.index(), gear_ratio, offset});
+
+  return constraint_index;
+}
+
+template <typename T>
+ConstraintIndex MultibodyPlant<T>::AddDistanceConstraint(
+    const Body<T>& body_A, const Vector3<double>& p_AP, const Body<T>& body_B,
+    const Vector3<double>& p_BQ, double distance, double stiffness,
+    double damping) {
+  // N.B. The manager is setup at Finalize() and therefore we must require
+  // constraints to be added pre-finalize.
+  DRAKE_MBP_THROW_IF_FINALIZED();
+
+  if (!is_discrete()) {
+    throw std::runtime_error(
+        "Currently distance constraints are only supported for discrete "
+        "MultibodyPlant models.");
+  }
+
+  // TAMSI does not support distance constraints. For all other solvers, we let
+  // the discrete update manger throw an exception at finalize time.
+  if (contact_solver_enum_ == DiscreteContactSolver::kTamsi) {
+    throw std::runtime_error(
+        "Currently this MultibodyPlant is set to use the TAMSI solver. TAMSI "
+        "does not support distance constraints. Use "
+        "set_discrete_contact_solver(DiscreteContactSolver::kSap) to use the "
+        "SAP solver instead. For other solvers, refer to "
+        "DiscreteContactSolver.");
+  }
+
+  DRAKE_THROW_UNLESS(body_A.index() != body_B.index());
+
+  internal::DistanceConstraintSpecs spec{body_A.index(), p_AP, body_B.index(),
+                                         p_BQ, distance, stiffness, damping};
+  if (!spec.IsValid()) {
+    const std::string msg = fmt::format(
+        "Invalid set of parameters for constraint between bodies '{}' and "
+        "'{}'. distance = {}, stiffness = {}, damping = {}.",
+        body_A.name(), body_B.name(), distance, stiffness, damping);
+    throw std::runtime_error(msg);
+  }
+
+  const ConstraintIndex constraint_index(num_constraints());
+
+  distance_constraints_specs_.push_back(spec);
 
   return constraint_index;
 }
@@ -840,6 +887,17 @@ template<typename T>
 void MultibodyPlant<T>::Finalize() {
   // After finalizing the base class, tree is read-only.
   internal::MultibodyTreeSystem<T>::Finalize();
+
+  // Add free joints created by tree's finalize to the multibody graph.
+  // Until the call to Finalize(), all joints are added through calls to
+  // MultibodyPlant APIs and therefore registered in the graph. This accounts
+  // for the QuaternionFloatingJoint added for each free body that was not
+  // explicitly given a parent joint. It is important that this loop happens
+  // AFTER finalizing the internal tree.
+  for (JointIndex i{multibody_graph_.num_joints()}; i < num_joints(); ++i) {
+    RegisterJointInGraph(get_joint(i));
+  }
+
   if (geometry_source_is_registered()) {
     ApplyDefaultCollisionFilters();
     ExcludeCollisionsWithVisualGeometry();
@@ -1053,12 +1111,14 @@ template <typename T>
 void MultibodyPlant<T>::ApplyDefaultCollisionFilters() {
   DRAKE_DEMAND(geometry_source_is_registered());
   // Disallow collisions between adjacent bodies. Adjacency is implied by the
-  // existence of a joint between bodies.
+  // existence of a joint between bodies, except in the case of 6-dof joints or
+  // joints in which the parent body is `world`.
   for (JointIndex j{0}; j < num_joints(); ++j) {
     const Joint<T>& joint = get_joint(j);
     const Body<T>& child = joint.child_body();
     const Body<T>& parent = joint.parent_body();
     if (parent.index() == world_index()) continue;
+    if (joint.type_name() == QuaternionFloatingJoint<T>::kTypeName) continue;
     std::optional<FrameId> child_id = GetBodyFrameIdIfExists(child.index());
     std::optional<FrameId> parent_id = GetBodyFrameIdIfExists(parent.index());
 
@@ -1970,6 +2030,28 @@ void MultibodyPlant<T>::AddAppliedExternalGeneralizedForces(
   }
 }
 
+template <typename T>
+void MultibodyPlant<T>::CalcGeneralizedForces(
+    const systems::Context<T>& context, const MultibodyForces<T>& forces,
+    VectorX<T>* generalized_forces) const {
+  this->ValidateContext(context);
+  DRAKE_THROW_UNLESS(forces.CheckHasRightSizeForModel(*this));
+  DRAKE_THROW_UNLESS(generalized_forces != nullptr);
+  generalized_forces->resize(num_velocities());
+  // Heap allocate the necessary workspace.
+  // TODO(amcastro-tri): Get rid of these heap allocations.
+  std::vector<SpatialAcceleration<T>> A_scratch(num_bodies());
+  std::vector<SpatialForce<T>> F_scratch(num_bodies());
+  const VectorX<T> zero_vdot = VectorX<T>::Zero(num_velocities());
+  // TODO(amcastro-tri): For performance, update this implementation to exclude
+  // terms involving accelerations.
+  const bool zero_velocities = true;
+  internal_tree().CalcInverseDynamics(
+      context, zero_vdot, forces.body_forces(), forces.generalized_forces(),
+      zero_velocities, &A_scratch, &F_scratch, generalized_forces);
+  *generalized_forces = -*generalized_forces;
+}
+
 template<typename T>
 void MultibodyPlant<T>::AddAppliedExternalSpatialForces(
     const systems::Context<T>& context, MultibodyForces<T>* forces) const {
@@ -2231,15 +2313,6 @@ void MultibodyPlant<T>::CalcJointLockingIndices(
     }
   }
 
-  for (BodyIndex body_index(1); body_index < num_bodies(); ++body_index) {
-    const Body<T>& body = get_body(body_index);
-    if (body.is_floating() && !body.is_locked(context)) {
-      for (int k = 0; k < 6; ++k) {
-        indices[unlocked_cursor++] =
-            body.floating_velocities_start() - num_positions() + k;
-      }
-    }
-  }
   DRAKE_ASSERT(unlocked_cursor <= num_velocities());
 
   // Use size to indicate exactly how many velocities are unlocked.

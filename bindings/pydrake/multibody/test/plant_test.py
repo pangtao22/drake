@@ -20,6 +20,7 @@ from pydrake.multibody.tree import (
     BodyIndex,
     CalcSpatialInertia,
     ConstraintIndex,
+    default_model_instance,
     DoorHinge_,
     DoorHingeConfig,
     FixedOffsetFrame_,
@@ -38,12 +39,14 @@ from pydrake.multibody.tree import (
     MultibodyForces_,
     PlanarJoint_,
     PrismaticJoint_,
+    PrismaticSpring_,
+    QuaternionFloatingJoint_,
     RevoluteJoint_,
+    RevoluteSpring_,
+    RigidBody_,
+    RotationalInertia_,
     ScrewJoint,
     ScrewJoint_,
-    RevoluteSpring_,
-    RotationalInertia_,
-    RigidBody_,
     SpatialInertia_,
     UniformGravityFieldElement_,
     UnitInertia_,
@@ -52,7 +55,6 @@ from pydrake.multibody.tree import (
     world_frame_index,
     world_index,
     world_model_instance,
-    default_model_instance
 )
 from pydrake.multibody.math import (
     SpatialForce_,
@@ -89,6 +91,7 @@ from pydrake.multibody.benchmarks.acrobot import (
 from pydrake.common.cpp_param import List
 from pydrake.common import FindResourceOrThrow
 from pydrake.common.deprecation import install_numpy_warning_filters
+from pydrake.common.eigen_geometry import Quaternion_
 from pydrake.common.test_utilities import numpy_compare
 from pydrake.common.test_utilities.deprecation import catch_drake_warnings
 from pydrake.common.test_utilities.pickle_compare import assert_pickle
@@ -712,13 +715,12 @@ class TestPlant(unittest.TestCase):
         i = ModelInstanceIndex(0)
         RigidBody(body_name="body_name", M_BBo_B=M)
         RigidBody(body_name="body_name", model_instance=i, M_BBo_B=M)
-        with catch_drake_warnings(expected_count=1):
-            RigidBody(M_BBo_B=M)
 
     @numpy_compare.check_all_types
     def test_multibody_force_element(self, T):
         MultibodyPlant = MultibodyPlant_[T]
         LinearSpringDamper = LinearSpringDamper_[T]
+        PrismaticSpring = PrismaticSpring_[T]
         RevoluteSpring = RevoluteSpring_[T]
         DoorHinge = DoorHinge_[T]
         LinearBushingRollPitchYaw = LinearBushingRollPitchYaw_[T]
@@ -735,6 +737,8 @@ class TestPlant(unittest.TestCase):
         body_a = plant.AddRigidBody(name="body_a",
                                     M_BBo_B=spatial_inertia)
         body_b = plant.AddRigidBody(name="body_b",
+                                    M_BBo_B=spatial_inertia)
+        body_c = plant.AddRigidBody(name="body_c",
                                     M_BBo_B=spatial_inertia)
         linear_spring_index = ForceElementIndex(plant.num_force_elements())
         linear_spring = plant.AddForceElement(LinearSpringDamper(
@@ -754,6 +758,12 @@ class TestPlant(unittest.TestCase):
         door_hinge_config = DoorHingeConfig()
         door_hinge = plant.AddForceElement(DoorHinge(
             joint=revolute_joint, config=door_hinge_config))
+        prismatic_joint = plant.AddJoint(PrismaticJoint_[T](
+                name="prismatic_joint", frame_on_parent=body_b.body_frame(),
+                frame_on_child=body_c.body_frame(), axis=[0, 0, 1],
+                damping=0.))
+        prismatic_spring = plant.AddForceElement(PrismaticSpring(
+            joint=prismatic_joint, nominal_position=0.1, stiffness=100.))
 
         torque_stiffness = np.array([10.0, 11.0, 12.0])
         torque_damping = np.array([1.0, 1.1, 1.2])
@@ -804,6 +814,11 @@ class TestPlant(unittest.TestCase):
                 angle=0.01), -2.265)
             self.assertEqual(door_hinge.CalcHingeTorque(
                 angle=0.01, angular_rate=0.0), -2.265)
+
+        # Test PrismaticSpring accessors
+        self.assertEqual(prismatic_spring.joint(), prismatic_joint)
+        self.assertEqual(prismatic_spring.nominal_position(), 0.1)
+        self.assertEqual(prismatic_spring.stiffness(), 100.)
 
         # Test LinearBushingRollPitchYaw accessors.
         self.assertIs(bushing.link0(), body_a)
@@ -1637,6 +1652,35 @@ class TestPlant(unittest.TestCase):
                 damping=damping,
             )
 
+        def make_quaternion_floating_joint(plant, P, C):
+            return QuaternionFloatingJoint_[T](
+                name="quaternion_floating",
+                frame_on_parent=P,
+                frame_on_child=C,
+                angular_damping=damping,
+                translational_damping=damping,
+            )
+
+        def make_revolute_joint(plant, P, C):
+            # First, check that the sans-limits overload works.
+            RevoluteJoint_[T](
+                name="revolute",
+                frame_on_parent=P,
+                frame_on_child=C,
+                axis=x_axis,
+                damping=damping,
+            )
+            # Then, create one using limits.
+            return RevoluteJoint_[T](
+                name="revolute",
+                frame_on_parent=P,
+                frame_on_child=C,
+                axis=x_axis,
+                pos_lower_limit=-1.5,
+                pos_upper_limit=1.5,
+                damping=damping,
+            )
+
         def make_screw_joint(plant, P, C):
             # First, check that the deprecated overload works.
             with catch_drake_warnings(expected_count=1):
@@ -1663,26 +1707,6 @@ class TestPlant(unittest.TestCase):
                 damping=damping,
             )
 
-        def make_revolute_joint(plant, P, C):
-            # First, check that the sans-limits overload works.
-            RevoluteJoint_[T](
-                name="revolute",
-                frame_on_parent=P,
-                frame_on_child=C,
-                axis=x_axis,
-                damping=damping,
-            )
-            # Then, create one using limits.
-            return RevoluteJoint_[T](
-                name="revolute",
-                frame_on_parent=P,
-                frame_on_child=C,
-                axis=x_axis,
-                pos_lower_limit=-1.5,
-                pos_upper_limit=1.5,
-                damping=damping,
-            )
-
         def make_universal_joint(plant, P, C):
             return UniversalJoint_[T](
                 name="universal",
@@ -1702,9 +1726,10 @@ class TestPlant(unittest.TestCase):
         make_joint_list = [
             make_ball_rpy_joint,
             make_planar_joint,
-            make_screw_joint,
             make_prismatic_joint,
+            make_quaternion_floating_joint,
             make_revolute_joint,
+            make_screw_joint,
             make_universal_joint,
             make_weld_joint,
         ]
@@ -1820,6 +1845,32 @@ class TestPlant(unittest.TestCase):
                 joint.acceleration_upper_limit()
                 joint.get_default_translation()
                 joint.set_default_translation(translation=0.0)
+            elif joint.name() == "quaternion_floating":
+                self.assertEqual(joint.angular_damping(), damping)
+                self.assertEqual(joint.translational_damping(), damping)
+                joint.get_quaternion(context=context)
+                joint.get_position(context=context)
+                joint.get_pose(context=context)
+                joint.get_angular_velocity(context=context)
+                joint.get_translational_velocity(context=context)
+                joint.set_quaternion(context=context, q_FM=Quaternion_[T]())
+                joint.SetFromRotationMatrix(context=context,
+                                            R_FM=RotationMatrix_[T]())
+                joint.set_position(context=context, p_FM=[0, 0, 0])
+                joint.set_pose(context=context, X_FM=RigidTransform_[T]())
+                joint.set_angular_velocity(context=context, w_FM=[0, 0, 0])
+                joint.set_translational_velocity(context=context,
+                                                 v_FM=[0, 0, 0])
+                joint.set_random_position_distribution(p_FM=[0, 0, 0])
+                joint.set_random_quaternion_distribution(
+                    q_FM=Quaternion_[Expression]())
+                joint.set_random_quaternion_distribution_to_uniform()
+                joint.get_default_quaternion()
+                joint.get_default_position()
+                joint.get_default_pose()
+                joint.set_default_quaternion(q_FM=Quaternion_[float]())
+                joint.set_default_position(p_FM=[0, 0, 0])
+                joint.SetDefaultPose(X_FM=RigidTransform_[float]())
             elif joint.name() == "revolute":
                 numpy_compare.assert_equal(joint.revolute_axis(), x_axis)
                 self.assertEqual(joint.damping(), damping)
@@ -1901,15 +1952,6 @@ class TestPlant(unittest.TestCase):
             name="body2",
             M_BBo_B=SpatialInertia_[float]())
 
-        # Old keyword arguments raise a warning.
-        with catch_drake_warnings(expected_count=1) as w:
-            world_body1 = WeldJoint_[float](
-                name="world_body1",
-                frame_on_parent_P=plant.world_frame(),
-                frame_on_child_C=body1.body_frame(),
-                X_PC=RigidTransform_[float].Identity())
-            self.assertIn("2022-12-01", str(w[0].message))
-
         # No keywords defaults to the first constructor defined in the binding.
         # No warning.
         world_body2 = WeldJoint_[float](
@@ -1926,14 +1968,6 @@ class TestPlant(unittest.TestCase):
         body2 = plant.AddRigidBody(
             name="body2",
             M_BBo_B=SpatialInertia_[float]())
-
-        # Old keyword arguments raise a warning.
-        with catch_drake_warnings(expected_count=1) as w:
-            plant.WeldFrames(
-                frame_on_parent_P=plant.world_frame(),
-                frame_on_child_C=body1.body_frame(),
-                X_PC=RigidTransform_[float].Identity())
-            self.assertIn("2022-12-01", str(w[0].message))
 
         # No keywords defaults to the first function named `WeldFrames` defined
         # in the binding. No warning.
@@ -2057,10 +2091,6 @@ class TestPlant(unittest.TestCase):
         X = RigidTransform_[float].Identity()
         FixedOffsetFrame(name="name", P=P, X_PF=X, model_instance=None)
         FixedOffsetFrame(name="name", bodyB=B, X_BF=X)
-        with catch_drake_warnings(expected_count=1):
-            FixedOffsetFrame(P=P, X_PF=X)
-        with catch_drake_warnings(expected_count=1):
-            FixedOffsetFrame(bodyB=B, X_BF=X)
 
     @numpy_compare.check_all_types
     def test_coupler_constraint_api(self, T):
