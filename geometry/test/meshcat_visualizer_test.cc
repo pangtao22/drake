@@ -103,6 +103,8 @@ TEST_F(MeshcatVisualizerWithIiwaTest, PublishPeriod) {
 // Confirms that all geometry registered to iiwa_link_7 in the urdf (in all
 // three allowed roles) gets properly added.
 TEST_F(MeshcatVisualizerWithIiwaTest, Roles) {
+  // This also tests adding multiple MeshcatVisualizers to a single meshcat,
+  // which is a common workflow in Python notebooks.
   MeshcatVisualizerParams params;
   for (Role role : {Role::kProximity, Role::kIllustration, Role::kPerception}) {
     params.role = role;
@@ -123,6 +125,15 @@ TEST_F(MeshcatVisualizerWithIiwaTest, Roles) {
   params.role = Role::kUnassigned;
   DRAKE_EXPECT_THROWS_MESSAGE(SetUpDiagram(params),
                               ".*Role::kUnassigned.*");
+}
+
+// Tests that adding multiple MeshcatVisualizers using the same role to a
+// single meshcat works, as this is a common workflow in Python notebooks.
+TEST_F(MeshcatVisualizerWithIiwaTest, DuplicateRole) {
+  MeshcatVisualizerParams params;
+  params.role = Role::kIllustration;
+  SetUpDiagram(params);
+  SetUpDiagram(params);
 }
 
 TEST_F(MeshcatVisualizerWithIiwaTest, Prefix) {
@@ -279,6 +290,23 @@ TEST_F(MeshcatVisualizerWithIiwaTest, ScalarConversion) {
   ad_diagram->ForcedPublish(*ad_context);
 }
 
+TEST_F(MeshcatVisualizerWithIiwaTest, UpdateAlphaSliders) {
+  MeshcatVisualizerParams params;
+  params.enable_alpha_slider = true;
+  SetUpDiagram(params);
+  systems::Simulator<double> simulator(*diagram_);
+
+  // Simulate for a moment and publish to populate the visualizer.
+  simulator.AdvanceTo(0.1);
+  diagram_->ForcedPublish(*context_);
+
+  meshcat_->SetSliderValue("visualizer α", 0.5);
+
+  // Simulate and publish again to cause an update.
+  simulator.AdvanceTo(0.1);
+  diagram_->ForcedPublish(*context_);
+}
+
 GTEST_TEST(MeshcatVisualizerTest, MultipleModels) {
   auto meshcat = std::make_shared<Meshcat>();
 
@@ -288,10 +316,10 @@ GTEST_TEST(MeshcatVisualizerTest, MultipleModels) {
   std::string urdf = FindResourceOrThrow(
       "drake/manipulation/models/iiwa_description/urdf/"
       "iiwa14_no_collision.urdf");
-  auto iiwa0 = multibody::Parser(&plant).AddModelFromFile(urdf);
+  auto iiwa0 = multibody::Parser(&plant).AddModels(urdf).at(0);
   plant.WeldFrames(plant.world_frame(),
                    plant.GetBodyByName("base", iiwa0).body_frame());
-  auto iiwa1 = multibody::Parser(&plant).AddModelFromFile(urdf, "second_iiwa");
+  auto iiwa1 = multibody::Parser(&plant, "second").AddModels(urdf).at(0);
   plant.WeldFrames(plant.world_frame(),
                    plant.GetBodyByName("base", iiwa1).body_frame());
   plant.Finalize();
@@ -311,18 +339,18 @@ GTEST_TEST(MeshcatVisualizerTest, MultipleModels) {
   auto context = diagram->CreateDefaultContext();
 
   EXPECT_FALSE(meshcat->HasPath("/drake/visualizer/iiwa14"));
-  EXPECT_FALSE(meshcat->HasPath("/drake/visualizer/second_iiwa"));
+  EXPECT_FALSE(meshcat->HasPath("/drake/visualizer/second/iiwa14"));
 
   diagram->ForcedPublish(*context);
 
   EXPECT_TRUE(meshcat->HasPath("/drake/visualizer/iiwa14"));
-  EXPECT_TRUE(meshcat->HasPath("/drake/visualizer/second_iiwa"));
+  EXPECT_TRUE(meshcat->HasPath("/drake/visualizer/second/iiwa14"));
   for (int link = 0; link < 8; link++) {
     EXPECT_NE(meshcat->GetPackedTransform(
                   fmt::format("/drake/visualizer/iiwa14/iiwa_link_{}", link)),
               "");
     EXPECT_NE(meshcat->GetPackedTransform(fmt::format(
-                  "/drake/visualizer/second_iiwa/iiwa_link_{}", link)),
+                  "/drake/visualizer/second/iiwa14/iiwa_link_{}", link)),
               "");
   }
 }

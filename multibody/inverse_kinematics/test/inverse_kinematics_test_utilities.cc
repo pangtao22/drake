@@ -6,6 +6,7 @@
 #include "drake/common/default_scalars.h"
 #include "drake/common/find_resource.h"
 #include "drake/multibody/parsing/parser.h"
+#include "drake/multibody/plant/coulomb_friction.h"
 #include "drake/systems/framework/diagram_builder.h"
 
 using drake::geometry::SceneGraph;
@@ -27,7 +28,7 @@ IiwaKinematicConstraintTest::IiwaKinematicConstraintTest() {
   plant_->RegisterAsSourceForSceneGraph(
       builder.AddSystem<SceneGraph<double>>());
   multibody::Parser parser{plant_};
-  parser.AddModelFromFile(iiwa_path, "iiwa");
+  parser.AddModels(iiwa_path);
   plant_->WeldFrames(plant_->world_frame(),
                      plant_->GetFrameByName("iiwa_link_0"));
   plant_->Finalize();

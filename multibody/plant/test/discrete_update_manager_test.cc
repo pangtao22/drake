@@ -60,13 +60,6 @@ class DummyDiscreteUpdateManager final : public DiscreteUpdateManager<T> {
     return data;
   }
 
-  // This method will be removed with the resolution of #16955 and therefore a
-  // no-op is implemented simply to be able to instantiate this class.
-  const std::vector<internal::DiscreteContactPair<T>>& EvalDiscreteContactPairs(
-      const systems::Context<T>&) const final {
-    DRAKE_UNREACHABLE();
-  }
-
  private:
   /* Allow different specializations to access each other's private data for
    cloning to a different scalar type. */
@@ -105,7 +98,7 @@ class DummyDiscreteUpdateManager final : public DiscreteUpdateManager<T> {
   }
 
   /* Declares a cache entry that stores twice the additional state value. */
-  void DeclareCacheEntries() final {
+  void DoDeclareCacheEntries() final {
     cache_index_ = this->DeclareCacheEntry(
                            "Twice the additional_state value",
                            systems::ValueProducer(
@@ -158,6 +151,11 @@ class DummyDiscreteUpdateManager final : public DiscreteUpdateManager<T> {
       additional_data += 2.0 * VectorX<T>::Ones(additional_data.size());
     }
   }
+
+  // TODO(joemasterjohn): Add a unit test here for when the contact results
+  // calculated by the manager are hooked up to MultibodyPlant.
+  void DoCalcContactResults(const systems::Context<T>& context,
+                            ContactResults<T>* contact_results) const final {}
 
  private:
   systems::DiscreteStateIndex additional_state_index_;

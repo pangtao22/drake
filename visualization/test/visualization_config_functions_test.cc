@@ -71,13 +71,16 @@ GTEST_TEST(VisualizationConfigFunctionsTest, ParamConversionDefault) {
             config.default_illustration_color);
   EXPECT_EQ(meshcat_params.at(0).delete_on_initialization_event,
             config.delete_on_initialization_event);
+  EXPECT_EQ(meshcat_params.at(0).enable_alpha_slider,
+            config.enable_alpha_sliders);
 
   EXPECT_EQ(meshcat_params.at(1).role, Role::kProximity);
   EXPECT_EQ(meshcat_params.at(1).publish_period, config.publish_period);
-  EXPECT_EQ(meshcat_params.at(1).default_color,
-            config.default_proximity_color);
+  EXPECT_EQ(meshcat_params.at(1).default_color, config.default_proximity_color);
   EXPECT_EQ(meshcat_params.at(1).delete_on_initialization_event,
             config.delete_on_initialization_event);
+  EXPECT_EQ(meshcat_params.at(1).enable_alpha_slider,
+            config.enable_alpha_sliders);
 }
 
 // Tests the mapping from non-default schema data to geometry params.
@@ -86,6 +89,7 @@ GTEST_TEST(VisualizationConfigFunctionsTest, ParamConversionSpecial) {
   config.publish_period = 0.5;
   config.publish_proximity = false;
   config.default_illustration_color = Rgba(0.25, 0.25, 0.25, 0.25);
+  config.enable_alpha_sliders = true;
 
   const std::vector<DrakeVisualizerParams> drake_params =
       ConvertVisualizationConfigToDrakeParams(config);
@@ -101,6 +105,7 @@ GTEST_TEST(VisualizationConfigFunctionsTest, ParamConversionSpecial) {
   EXPECT_EQ(meshcat_params.at(0).role, Role::kIllustration);
   EXPECT_EQ(meshcat_params.at(0).publish_period, 0.5);
   EXPECT_EQ(meshcat_params.at(0).default_color, Rgba(0.25, 0.25, 0.25, 0.25));
+  EXPECT_EQ(meshcat_params.at(0).enable_alpha_slider, true);
 }
 
 // Tests everything disabled.
@@ -124,8 +129,7 @@ GTEST_TEST(VisualizationConfigFunctionsTest, ApplyDefault) {
   DrakeLcm drake_lcm;
   std::set<std::string> observed_channels;
   drake_lcm.SubscribeAllChannels(
-      [&observed_channels](std::string_view channel, const void* /* buffer */,
-                           int /* size */) {
+      [&](std::string_view channel, const void* /* buffer */, int /* size */) {
         observed_channels.emplace(channel);
       });
   LcmBuses lcm_buses;
@@ -144,13 +148,26 @@ GTEST_TEST(VisualizationConfigFunctionsTest, ApplyDefault) {
 
   // Simulate for a moment and make sure everything showed up.
   simulator.AdvanceTo(0.25);
-  while (drake_lcm.HandleSubscriptions(1) > 0) {}
-  EXPECT_THAT(observed_channels, testing::IsSupersetOf({
+  while (drake_lcm.HandleSubscriptions(1) > 0) {
+    // Loop until we're idle.
+  }
+  // clang-format off
+  const auto expected_channels = {
       "DRAKE_VIEWER_LOAD_ROBOT",
       "DRAKE_VIEWER_LOAD_ROBOT_PROXIMITY",
       "DRAKE_VIEWER_DRAW",
       "DRAKE_VIEWER_DRAW_PROXIMITY",
-      "CONTACT_RESULTS"}));
+      "CONTACT_RESULTS"
+  };
+  // clang-format on
+  EXPECT_THAT(observed_channels, testing::IsSupersetOf(expected_channels));
+
+  // Check that alpha sliders don't exist by default.
+  DRAKE_EXPECT_THROWS_MESSAGE(
+      meshcat->GetSliderValue("illustration α"),
+      ".*does not have any slider named illustration.*");
+  DRAKE_EXPECT_THROWS_MESSAGE(meshcat->GetSliderValue("proximity α"),
+                              ".*does not have any slider named proximity.*");
 }
 
 // Overall acceptance test with nothing enabled.
@@ -163,7 +180,9 @@ GTEST_TEST(VisualizationConfigFunctionsTest, ApplyNothing) {
 
   // We'll fail in case any message is transmitted.
   DrakeLcm drake_lcm;
-  drake_lcm.SubscribeAllChannels([](auto...) { GTEST_FAIL(); });
+  drake_lcm.SubscribeAllChannels([](auto...) {
+    GTEST_FAIL();
+  });
   LcmBuses lcm_buses;
   lcm_buses.Add("default", &drake_lcm);
 
@@ -178,7 +197,7 @@ GTEST_TEST(VisualizationConfigFunctionsTest, ApplyNothing) {
   for (const auto* system : builder.GetSystems()) {
     const std::string& name = system->get_name();
     if (name.find("MeshcatVisualizer") != std::string::npos) {
-        ++meshcat_count;
+      ++meshcat_count;
     }
   }
   EXPECT_EQ(meshcat_count, 0);
@@ -207,10 +226,31 @@ GTEST_TEST(VisualizationConfigFunctionsTest, NoMeshcat) {
   for (const auto* system : builder.GetSystems()) {
     const std::string& name = system->get_name();
     if (name.find("MeshcatVisualizer") != std::string::npos) {
-        ++meshcat_count;
+      ++meshcat_count;
     }
   }
   EXPECT_EQ(meshcat_count, 2);
+}
+
+// Check that turning on the alpha sliders functions as expected.
+GTEST_TEST(VisualizationConfigFunctionsTest, AlphaSliders) {
+  DrakeLcm drake_lcm;
+  LcmBuses lcm_buses;
+  lcm_buses.Add("default", &drake_lcm);
+
+  // Add MbP and SG, then the default visualization.
+  DiagramBuilder<double> builder;
+  auto [plant, scene_graph] = AddMultibodyPlantSceneGraph(&builder, 0.0);
+  plant.Finalize();
+  std::shared_ptr<Meshcat> meshcat = std::make_shared<Meshcat>();
+  VisualizationConfig config;
+  config.enable_alpha_sliders = true;
+  ApplyVisualizationConfig(config, &builder, &lcm_buses, &plant, &scene_graph,
+                           meshcat);
+
+  // Check that alpha sliders exist.
+  meshcat->GetSliderValue("illustration α");
+  meshcat->GetSliderValue("proximity α");
 }
 
 // The AddDefault... sugar shouldn't crash.
@@ -226,9 +266,8 @@ GTEST_TEST(VisualizationConfigFunctionsTest, AddDefault) {
 // A missing plant causes an exception.
 GTEST_TEST(VisualizationConfigFunctionsTest, NoPlant) {
   DiagramBuilder<double> builder;
-  DRAKE_EXPECT_THROWS_MESSAGE(
-      AddDefaultVisualization(&builder),
-      ".*does not contain.*plant.*");
+  DRAKE_EXPECT_THROWS_MESSAGE(AddDefaultVisualization(&builder),
+                              ".*does not contain.*plant.*");
 }
 
 // A missing scene_graph causes an exception.
@@ -237,9 +276,8 @@ GTEST_TEST(VisualizationConfigFunctionsTest, NoSceneGraph) {
   auto* plant = builder.AddSystem<MultibodyPlant<double>>(0.0);
   plant->set_name("plant");
   plant->Finalize();
-  DRAKE_EXPECT_THROWS_MESSAGE(
-      AddDefaultVisualization(&builder),
-      ".*does not contain.*scene_graph.*");
+  DRAKE_EXPECT_THROWS_MESSAGE(AddDefaultVisualization(&builder),
+                              ".*does not contain.*scene_graph.*");
 }
 
 // Type confusion causes an exception.
@@ -248,9 +286,8 @@ GTEST_TEST(VisualizationConfigFunctionsTest, WrongSystemTypes) {
   auto [plant, scene_graph] = AddMultibodyPlantSceneGraph(&builder, 0.0);
   plant.set_name("scene_graph");
   scene_graph.set_name("plant");
-  DRAKE_EXPECT_THROWS_MESSAGE(
-      AddDefaultVisualization(&builder),
-      ".*not cast.*");
+  DRAKE_EXPECT_THROWS_MESSAGE(AddDefaultVisualization(&builder),
+                              ".*not cast.*");
 }
 
 }  // namespace
