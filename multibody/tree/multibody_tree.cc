@@ -442,6 +442,20 @@ std::vector<JointIndex> MultibodyTree<T>::GetJointIndices(
 }
 
 template <typename T>
+std::vector<JointActuatorIndex> MultibodyTree<T>::GetJointActuatorIndices(
+    ModelInstanceIndex model_instance) const {
+  DRAKE_THROW_UNLESS(model_instance < instance_name_to_index_.size());
+  return model_instances_.at(model_instance)->GetJointActuatorIndices();
+}
+
+template <typename T>
+std::vector<JointIndex> MultibodyTree<T>::GetActuatedJointIndices(
+    ModelInstanceIndex model_instance) const {
+  DRAKE_THROW_UNLESS(model_instance < instance_name_to_index_.size());
+  return model_instances_.at(model_instance)->GetActuatedJointIndices();
+}
+
+template <typename T>
 std::vector<FrameIndex> MultibodyTree<T>::GetFrameIndices(
     ModelInstanceIndex model_instance) const {
   DRAKE_THROW_UNLESS(model_instance < instance_name_to_index_.size());
@@ -531,9 +545,16 @@ ModelInstanceIndex MultibodyTree<T>::GetModelInstanceByName(
     std::string_view name) const {
   const auto it = instance_name_to_index_.find(name);
   if (it == instance_name_to_index_.end()) {
+    std::vector<std::string_view> valid_names;
+    valid_names.reserve(instance_name_to_index_.size());
+    for (const auto& [valid_name, _] : instance_name_to_index_) {
+      valid_names.push_back(valid_name.view());
+    }
+    std::sort(valid_names.begin(), valid_names.end());
     throw std::logic_error(fmt::format(
-        "GetModelInstanceByName(): There is no model instance named '{}'.",
-        name));
+        "GetModelInstanceByName(): There is no model instance named '{}'. The "
+        "current model instances are '{}'.",
+        name, fmt::join(valid_names, "', '")));
   }
   return it->second;
 }

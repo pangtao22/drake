@@ -6,11 +6,10 @@
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 #include <fmt/format.h>
-#include <fmt/ostream.h>
 
-#include "drake/bindings/pydrake/common/deprecation_pybind.h"
 #include "drake/bindings/pydrake/common/eigen_pybind.h"
 #include "drake/bindings/pydrake/documentation_pybind.h"
+#include "drake/bindings/pydrake/math_operators_pybind.h"
 #include "drake/bindings/pydrake/pydrake_pybind.h"
 #include "drake/bindings/pydrake/symbolic_py_unapply.h"
 #include "drake/bindings/pydrake/symbolic_types_pybind.h"
@@ -75,7 +74,7 @@ PYBIND11_MODULE(symbolic, m) {
       .def("__repr__",
           [](const Variable& self) {
             return fmt::format(
-                "Variable('{}', {})", self.to_string(), self.get_type());
+                "Variable('{}', {})", self.get_name(), self.get_type());
           })
       .def("__hash__",
           [](const Variable& self) { return std::hash<Variable>{}(self); })
@@ -146,7 +145,7 @@ PYBIND11_MODULE(symbolic, m) {
       .def(py::self != Expression())
       .def(py::self != py::self)
       .def(py::self != double());
-  internal::BindSymbolicMathOverloads<Variable>(&var_cls);
+  internal::BindMathOperators<Variable>(&var_cls);
   DefCopyAndDeepCopy(&var_cls);
 
   // Bind the free function TaylorExpand.
@@ -461,8 +460,8 @@ PYBIND11_MODULE(symbolic, m) {
       .def("Jacobian", &Expression::Jacobian, py::arg("vars"),
           doc.Expression.Jacobian.doc);
   // TODO(eric.cousineau): Clean this overload stuff up (#15041).
-  pydrake::internal::BindSymbolicMathOverloads<Expression>(&expr_cls);
-  pydrake::internal::BindSymbolicMathOverloads<Expression>(&m);
+  pydrake::internal::BindMathOperators<Expression>(&expr_cls);
+  pydrake::internal::BindMathOperators<Expression>(&m);
   DefCopyAndDeepCopy(&expr_cls);
 
   m.def("if_then_else", &symbolic::if_then_else, py::arg("f_cond"),
@@ -813,6 +812,10 @@ PYBIND11_MODULE(symbolic, m) {
       .def("AddProduct", &Polynomial::AddProduct, py::arg("coeff"),
           py::arg("m"), doc.Polynomial.AddProduct.doc)
       .def("Expand", &Polynomial::Expand, doc.Polynomial.Expand.doc)
+      .def("SubstituteAndExpand", &Polynomial::SubstituteAndExpand,
+          py::arg("indeterminate_substitution"),
+          py::arg("substitutions_cached_data") = std::nullopt,
+          doc.Polynomial.SubstituteAndExpand.doc)
       .def("RemoveTermsWithSmallCoefficients",
           &Polynomial::RemoveTermsWithSmallCoefficients,
           py::arg("coefficient_tol"),
@@ -911,6 +914,13 @@ PYBIND11_MODULE(symbolic, m) {
             return p.Jacobian(vars);
           },
           py::arg("vars"), doc.Polynomial.Jacobian.doc);
+
+  py::class_<Polynomial::SubstituteAndExpandCacheData>(m,
+      "SubstituteAndExpandCacheData",
+      doc.Polynomial.SubstituteAndExpandCacheData.doc)
+      .def(py::init<>())
+      .def("get_data", &Polynomial::SubstituteAndExpandCacheData::get_data,
+          py_rvp::reference);
 
   // Bind CalcPolynomialWLowerTriangularPart
   m.def(

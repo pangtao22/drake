@@ -1,5 +1,3 @@
-# -*- python -*-
-
 load(
     "@drake//tools/skylark:drake_cc.bzl",
     "drake_cc_googletest",
@@ -14,6 +12,7 @@ drake_cc_package_library(
     name = "trajectories",
     visibility = ["//visibility:public"],
     deps = [
+        ":bezier_curve",
         ":bspline_trajectory",
         ":discrete_time_trajectory",
         ":path_parameterized_trajectory",
@@ -142,6 +141,20 @@ drake_cc_library(
     ],
 )
 
+drake_cc_library(
+    name = "bezier_curve",
+    srcs = [
+        "bezier_curve.cc",
+    ],
+    hdrs = [
+        "bezier_curve.h",
+    ],
+    deps = [
+        ":trajectory",
+        "//math:binomial_coefficient",
+    ],
+)
+
 # === test/ ===
 
 drake_cc_library(
@@ -257,6 +270,14 @@ drake_cc_googletest(
         "//common/yaml",
         "//math:compute_numerical_gradient",
         "//math:gradient",
+    ],
+)
+
+drake_cc_googletest(
+    name = "bezier_curve_test",
+    deps = [
+        ":bezier_curve",
+        "//common/test_utilities",
     ],
 )
 

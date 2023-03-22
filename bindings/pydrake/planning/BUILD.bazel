@@ -1,5 +1,3 @@
-# -*- python -*-
-
 load("@drake//tools/install:install.bzl", "install")
 load(
     "@drake//tools/skylark:pybind.bzl",
@@ -70,6 +68,7 @@ drake_py_unittest(
     ],
     deps = [
         ":planning",
+        "//bindings/pydrake/common/test_utilities:deprecation_py",
         "//bindings/pydrake/common/test_utilities:numpy_compare_py",
     ],
 )

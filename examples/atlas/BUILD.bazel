@@ -1,14 +1,21 @@
-# -*- python -*-
-# This file contains rules for Bazel; see drake/doc/bazel.rst.
-
 load(
     "@drake//tools/skylark:drake_cc.bzl",
     "drake_cc_binary",
 )
 load("//tools/lint:lint.bzl", "add_lint_tests")
+load("//tools/skylark:drake_data.bzl", "models_filegroup")
 load("//tools/install:install_data.bzl", "install_data")
 
 package(default_visibility = ["//visibility:public"])
+
+models_filegroup(
+    name = "models",
+)
+
+install_data(
+    name = "install_data",
+    data = [":models"],
+)
 
 drake_cc_binary(
     name = "atlas_run_dynamics",
@@ -32,7 +39,5 @@ drake_cc_binary(
         "@gflags",
     ],
 )
-
-install_data()
 
 add_lint_tests()

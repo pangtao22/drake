@@ -45,6 +45,7 @@ from pydrake.multibody.tree import (
     RevoluteSpring_,
     RigidBody_,
     RotationalInertia_,
+    ScopedName,
     ScrewJoint,
     ScrewJoint_,
     SpatialInertia_,
@@ -293,6 +294,9 @@ class TestPlant(unittest.TestCase):
         self.assertEqual(plant.num_joints(), benchmark.num_joints())
         self.assertEqual(plant.num_actuators(), benchmark.num_actuators())
         self.assertEqual(
+            plant.num_actuators(model_instance),
+            benchmark.num_actuators())
+        self.assertEqual(
             plant.num_model_instances(), benchmark.num_model_instances() + 1)
         self.assertEqual(plant.num_positions(), benchmark.num_positions())
         self.assertEqual(
@@ -324,7 +328,7 @@ class TestPlant(unittest.TestCase):
         self._test_joint_api(T, shoulder)
         check_repr(
             shoulder,
-            "<RevoluteJoint_[float] name='ShoulderJoint' index=0 "
+            "<RevoluteJoint name='ShoulderJoint' index=0 "
             "model_instance=2>")
         np.testing.assert_array_equal(
             shoulder.position_lower_limits(), [-np.inf])
@@ -334,6 +338,10 @@ class TestPlant(unittest.TestCase):
             name="ShoulderJoint", model_instance=model_instance))
         self._test_joint_actuator_api(
             T, plant.GetJointActuatorByName(name="ElbowJoint"))
+        self.assertEqual(
+            plant.GetJointActuatorByName(name="ElbowJoint"),
+            plant.GetJointActuatorByName(name="ElbowJoint",
+                                         model_instance=model_instance))
         link1 = plant.GetBodyByName(name="Link1")
         self._test_body_api(T, link1)
         self.assertIs(
@@ -348,12 +356,12 @@ class TestPlant(unittest.TestCase):
         self.assertEqual(len(plant.GetBodyIndices(model_instance)), 2)
         check_repr(
             link1,
-            "<RigidBody_[float] name='Link1' index=1 model_instance=2>")
+            "<RigidBody name='Link1' index=1 model_instance=2>")
         self._test_frame_api(T, plant.GetFrameByName(name="Link1"))
         link1_frame = plant.GetFrameByName(name="Link1")
         check_repr(
             link1_frame,
-            "<BodyFrame_[float] name='Link1' index=1 model_instance=2>")
+            "<BodyFrame name='Link1' index=1 model_instance=2>")
         self.assertIs(
             link1_frame,
             plant.GetFrameByName(name="Link1", model_instance=model_instance))
@@ -384,18 +392,41 @@ class TestPlant(unittest.TestCase):
             joint_index=JointIndex(0)))
         self.assertEqual([JointIndex(0), JointIndex(1)],
                          plant.GetJointIndices(model_instance=model_instance))
+        elbow = plant.GetJointByName(name="ElbowJoint")
+        self.assertEqual(
+            [elbow.index()],
+            plant.GetActuatedJointIndices(model_instance=model_instance))
         joint_actuator = plant.get_joint_actuator(
             actuator_index=JointActuatorIndex(0))
         self.assertIsInstance(joint_actuator, JointActuator)
+        self.assertEqual(
+            [joint_actuator.index()],
+            plant.GetJointActuatorIndices(model_instance=model_instance))
         check_repr(
             joint_actuator,
-            "<JointActuator_[float] name='ElbowJoint' index=0 "
+            "<JointActuator name='ElbowJoint' index=0 "
             "model_instance=2>")
         self.assertIsInstance(
             plant.get_frame(frame_index=world_frame_index()), Frame)
         self.assertEqual("acrobot", plant.GetModelInstanceName(
             model_instance=model_instance))
         self.assertIn("acrobot", plant.GetTopologyGraphvizString())
+
+    def test_scoped_name(self):
+        ScopedName()
+        ScopedName(namespace_name="foo", element_name="bar")
+        ScopedName.Make(namespace_name="foo", element_name="bar")
+        ScopedName.Join(name1="foo", name2="bar")
+        dut = ScopedName.Parse(scoped_name="foo::bar")
+        self.assertEqual(dut.get_namespace(), "foo")
+        self.assertEqual(dut.get_element(), "bar")
+        self.assertEqual(dut.get_full(), "foo::bar")
+        self.assertEqual(dut.to_string(), "foo::bar")
+        dut.set_namespace("robot1")
+        dut.set_element("torso")
+        self.assertEqual(str(dut), "robot1::torso")
+        self.assertEqual(repr(dut), "ScopedName('robot1', 'torso')")
+        copy.copy(dut)
 
     def _test_multibody_tree_element_mixin(self, T, element):
         cls = type(element)
@@ -413,6 +444,7 @@ class TestPlant(unittest.TestCase):
         self.assertIsInstance(frame.is_world_frame(), bool)
         self.assertIsInstance(frame.is_body_frame(), bool)
         self.assertIsInstance(frame.name(), str)
+        self.assertIsInstance(frame.scoped_name(), ScopedName)
 
         self.assertIsInstance(
             frame.GetFixedPoseInBodyFrame(),
@@ -427,6 +459,7 @@ class TestPlant(unittest.TestCase):
         self.assertIsInstance(body, Body)
         self._test_multibody_tree_element_mixin(T, body)
         self.assertIsInstance(body.name(), str)
+        self.assertIsInstance(body.scoped_name(), ScopedName)
         self.assertIsInstance(body.get_num_flexible_positions(), int)
         self.assertIsInstance(body.get_num_flexible_velocities(), int)
         self.assertIsInstance(body.is_floating(), bool)
@@ -777,7 +810,7 @@ class TestPlant(unittest.TestCase):
         if T == float:
             self.assertEqual(
                 repr(linear_spring),
-                "<LinearSpringDamper_[float] index=1 model_instance=1>")
+                "<LinearSpringDamper index=1 model_instance=1>")
         revolute_joint = plant.AddJoint(RevoluteJoint_[T](
                 name="revolve_joint", frame_on_parent=body_a.body_frame(),
                 frame_on_child=body_b.body_frame(), axis=[0, 0, 1],
@@ -983,9 +1016,17 @@ class TestPlant(unittest.TestCase):
 
             Js_V_ABp_E = plant.CalcJacobianSpatialVelocity(
                 context=context, with_respect_to=wrt, frame_B=base_frame,
-                p_BP=np.zeros(3), frame_A=world_frame,
+                p_BoBp_B=np.zeros(3), frame_A=world_frame,
                 frame_E=world_frame)
             self.assert_sane(Js_V_ABp_E)
+
+            with catch_drake_warnings(expected_count=1) as w:
+                Js_V_ABp_E = plant.CalcJacobianSpatialVelocity(
+                    context=context, with_respect_to=wrt, frame_B=base_frame,
+                    p_BP=np.zeros(3), frame_A=world_frame,
+                    frame_E=world_frame)
+                self.assert_sane(Js_V_ABp_E)
+
             self.assertEqual(Js_V_ABp_E.shape, (6, nw))
             Js_w_AB_E = plant.CalcJacobianAngularVelocity(
                 context=context, with_respect_to=wrt, frame_B=base_frame,
@@ -1773,6 +1814,11 @@ class TestPlant(unittest.TestCase):
                 self.assertTrue(plant.HasJointActuatorNamed(
                     "tau", default_model_instance()))
                 self.assertIsInstance(actuator, JointActuator_[T])
+
+            if joint.name() in ["prismatic", "revolute"]:
+                # This must be called pre-Finalize().
+                joint.set_default_damping(damping=damping)
+
             plant.Finalize()
             self._test_joint_api(T, joint)
             if joint.num_velocities() == 1 and T == float:
@@ -2023,14 +2069,6 @@ class TestPlant(unittest.TestCase):
             frame.GetPoseInParentFrame(context).GetAsMatrix34(),
             numpy_compare.to_float(X_PF.GetAsMatrix34()))
 
-        # TODO(2023-03-01) Remove with completion of deprecation.
-        with catch_drake_warnings(expected_count=1) as w:
-            frame.SetPoseInBodyFrame(context=context, X_PF=X_PF)
-            numpy_compare.assert_float_equal(
-                frame.CalcPoseInBodyFrame(context).GetAsMatrix34(),
-                numpy_compare.to_float(X_PF.GetAsMatrix34()))
-        self.assertIn("2023-03-01", str(w[0].message))
-
     @numpy_compare.check_all_types
     def test_frame_context_methods(self, T):
         plant = MultibodyPlant_[T](0.0)
@@ -2214,6 +2252,10 @@ class TestPlant(unittest.TestCase):
         Bj = plant.MakeActuatorSelectorMatrix(
             user_to_joint_index_map=[sample_joint.index()])
         numpy_compare.assert_float_equal(Bj, np.array([[1.]]))
+
+        S = plant.MakeStateSelectorMatrix(
+            user_to_joint_index_map=[sample_joint.index()])
+        numpy_compare.assert_float_equal(S, np.mat("0 1.0 0 0; 0 0 0 1.0"))
 
         forces = MultibodyForces(plant=plant)
         plant.CalcForceElementsContribution(context=context, forces=forces)

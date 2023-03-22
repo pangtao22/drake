@@ -1,12 +1,10 @@
-# -*- python -*-
-# This file contains rules for Bazel; see drake/doc/bazel.rst.
-
 load(
     "@drake//tools/skylark:drake_cc.bzl",
     "drake_cc_binary",
     "drake_cc_googletest",
     "drake_cc_library",
 )
+load("//tools/skylark:drake_data.bzl", "models_filegroup")
 load("//tools/install:install_data.bzl", "install_data")
 load(
     "@drake//tools/vector_gen:vector_gen.bzl",
@@ -15,6 +13,15 @@ load(
 load("//tools/lint:lint.bzl", "add_lint_tests")
 
 package(default_visibility = ["//visibility:public"])
+
+models_filegroup(
+    name = "models",
+)
+
+install_data(
+    name = "install_data",
+    data = [":models"],
+)
 
 drake_cc_vector_gen_library(
     name = "cart_pole_params",
@@ -52,7 +59,5 @@ drake_cc_googletest(
         "//multibody/plant",
     ],
 )
-
-install_data()
 
 add_lint_tests()

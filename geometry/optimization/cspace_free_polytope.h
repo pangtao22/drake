@@ -41,12 +41,20 @@ struct PlaneSeparatesGeometries {
 };
 
 /**
- This class tries to find large convex region in the configuration space, such
- that this whole convex set is collision free.
+ This class tries to find large convex polytopes in the tangential-configuration
+ space, such that all configurations in the convex polytopes is collision free.
+ By tangential-configuration space, we mean the revolute joint angle θ is
+ replaced by t = tan(θ/2).
  For more details, refer to the paper
- "Finding and Optimizing Certified, Colision-Free Regions in Configuration Space
- for Robot Manipulators" by Alexandre Amice, Hongkai Dai, Peter Werner, Annan
- Zhang and Russ Tedrake.
+
+ Certified Polyhedral Decomposition of Collisoin-Free Configuration Space
+ by Hongkai Dai*, Alexandre Amice*, Peter Werner, Annan Zhang and Russ Tedrake.
+
+ A conference version is published at
+
+ Finding and Optimizing Certified, Colision-Free Regions in Configuration Space
+ for Robot Manipulators
+ by Alexandre Amice*, Hongkai Dai*, Peter Werner, Annan Zhang and Russ Tedrake.
  */
 class CspaceFreePolytope {
  public:
@@ -65,8 +73,10 @@ class CspaceFreePolytope {
      For non-polytopic collision geometries, we will impose a matrix-sos
      constraint X(s) being psd, with a slack indeterminates y, such that the
      polynomial
+     <pre>
      p(s, y) = ⌈ 1 ⌉ᵀ * X(s) * ⌈ 1 ⌉
                ⌊ y ⌋           ⌊ y ⌋
+     </pre>
      is positive. This p(s, y) polynomial doesn't contain the cross term of y
      (namely it doesn't have y(i)*y(j), i≠j). When we select the monomial
      basis for this polynomial, we can also exclude the cross term of y in the
@@ -76,13 +86,17 @@ class CspaceFreePolytope {
      want to certify that
      a(0) + a(1)*y₀ + a(2)*y₁ + a(3)*y₀² + a(4)*y₁² is positive
      (this polynomial doesn't have the cross term y₀*y₁), we can write it as
+     <pre>
      ⌈ 1⌉ᵀ * A₀ * ⌈ 1⌉ + ⌈ 1⌉ᵀ * A₁ * ⌈ 1⌉
      ⌊y₀⌋         ⌊y₀⌋   ⌊y₁⌋         ⌊y₁⌋
+     </pre>
      with two small psd matrices A₀, A₁
      Instead of
+     <pre>
      ⌈ 1⌉ᵀ * A * ⌈ 1⌉
      |y₀|        |y₀|
      ⌊y₁⌋        ⌊y₁⌋
+     </pre>
      with one large psd matrix A. The first parameterization won't have the
      cross term y₀*y₁ by construction, while the second parameterization
      requires imposing extra constraints on certain off-diagonal terms in A
@@ -105,6 +119,9 @@ class CspaceFreePolytope {
    @param plane_order The order of the polynomials in the plane to separate a
    pair of collision geometries.
    @param q_star Refer to RationalForwardKinematics for its meaning.
+
+   @note CspaceFreePolytope knows nothing about contexts. The plant and
+   scene_graph must be fully configured before instantiating this class.
    */
   CspaceFreePolytope(const multibody::MultibodyPlant<double>* plant,
                      const geometry::SceneGraph<double>* scene_graph,
@@ -139,27 +156,51 @@ class CspaceFreePolytope {
   /**
    When searching for the separating plane, we want to certify that the
    numerator of a rational is non-negative in the C-space region C*s<=d,
-   s_lower<= s <=s_upper. Hence for each of the rational we will introduce
+   s_lower <= s <= s_upper. Hence for each of the rational we will introduce
    Lagrangian multipliers for the polytopic constraint d-C*s >= 0, s - s_lower
    >= 0, s_upper - s >= 0.
    */
-  struct SeparatingPlaneLagrangians {
+  class SeparatingPlaneLagrangians {
+   public:
     SeparatingPlaneLagrangians(int C_rows, int s_size)
-        : polytope(C_rows), s_lower(s_size), s_upper(s_size) {}
-    // The Lagrangians for d - C*s >= 0.
-    VectorX<symbolic::Polynomial> polytope;
-    // The Lagrangians for s - s_lower >= 0.
-    VectorX<symbolic::Polynomial> s_lower;
-    // The Lagrangians for s_upper - s >= 0.
-    VectorX<symbolic::Polynomial> s_upper;
+        : polytope_(C_rows), s_lower_(s_size), s_upper_(s_size) {}
 
+    /** Substitutes the decision variables in each Lagrangians with its value in
+     * result, returns the substitution result.
+     */
     [[nodiscard]] SeparatingPlaneLagrangians GetSolution(
         const solvers::MathematicalProgramResult& result) const;
+
+    /// The Lagrangians for d - C*s >= 0.
+    const VectorX<symbolic::Polynomial>& polytope() const { return polytope_; }
+
+    /// The Lagrangians for d - C*s >= 0.
+    VectorX<symbolic::Polynomial>& mutable_polytope() { return polytope_; }
+
+    /// The Lagrangians for s - s_lower >= 0.
+    const VectorX<symbolic::Polynomial>& s_lower() const { return s_lower_; }
+
+    /// The Lagrangians for s - s_lower >= 0.
+    VectorX<symbolic::Polynomial>& mutable_s_lower() { return s_lower_; }
+
+    /// The Lagrangians for s_upper - s >= 0.
+    const VectorX<symbolic::Polynomial>& s_upper() const { return s_upper_; }
+
+    /// The Lagrangians for s_upper - s >= 0.
+    VectorX<symbolic::Polynomial>& mutable_s_upper() { return s_upper_; }
+
+   private:
+    // The Lagrangians for d - C*s >= 0.
+    VectorX<symbolic::Polynomial> polytope_;
+    // The Lagrangians for s - s_lower >= 0.
+    VectorX<symbolic::Polynomial> s_lower_;
+    // The Lagrangians for s_upper - s >= 0.
+    VectorX<symbolic::Polynomial> s_upper_;
   };
 
   /**
    We certify that a pair of geometries is collision free in the C-space region
-   {s | Cs<=d, s_lower<=s<=s_upper}, by finding the separating plane and the
+   {s | Cs<=d, s_lower<=s<=s_upper} by finding the separating plane and the
    Lagrangian multipliers. This struct contains the certificate, that the
    separating plane {x | aᵀx+b=0 } separates the two geometries in
    separating_planes()[plane_index] in the C-space polytope.
@@ -417,7 +458,7 @@ class CspaceFreePolytope {
 
   /**
    Constructs the MathematicalProgram which searches for a separation
-   certificate for a pair of geometries for a C-space polytope.Search for the
+   certificate for a pair of geometries for a C-space polytope. Search for the
    separation certificate for a pair of geometries for a C-space polytope
    {s | C*s<=d, s_lower<=s<=s_upper}.
    */
@@ -437,6 +478,14 @@ class CspaceFreePolytope {
   SolveSeparationCertificateProgram(
       const SeparationCertificateProgram& certificate_program,
       const FindSeparationCertificateGivenPolytopeOptions& options) const;
+
+ protected:
+  [[nodiscard]] const symbolic::Variables& get_s_set() const { return s_set_; }
+
+  [[nodiscard]] std::vector<PlaneSeparatesGeometries>&
+  get_mutable_plane_geometries() {
+    return plane_geometries_;
+  }
 
  private:
   // Forward declaration the tester class. This tester class will expose the
@@ -561,6 +610,8 @@ class CspaceFreePolytope {
   /** Adds the constraint that the ellipsoid {Q*u+s₀ | uᵀu≤1} is inside the
      polytope {s | C*s <= d} with margin δ. Namely for the i'th face cᵢᵀs≤dᵢ, we
      have |cᵢᵀQ|₂ ≤ dᵢ − cᵢᵀs₀ − δᵢ and |cᵢ|₂≤1
+     cᵢᵀ is the i'th row of C, dᵢ is the i'th entry of d, δᵢ is the i'th entry
+     of ellipsoid_margins.
      Note that this function does NOT add the constraint δ>=0
    */
   void AddEllipsoidContainmentConstraint(

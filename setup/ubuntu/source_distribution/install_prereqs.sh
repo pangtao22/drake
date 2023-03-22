@@ -128,9 +128,10 @@ fi
 if [[ "${codename}" == "jammy" ]]; then
   status=$(dpkg-query --show --showformat='${db:Status-Abbrev}' libgcc-12-dev 2>/dev/null || true)
   if [[ "${status}" == "ii " ]]; then
-    status=$(dpkg-query --show --showformat='${db:Status-Abbrev}' libstdc++-12-dev 2>/dev/null || true)
-    if [[ "${status}" != "ii " ]]; then
-      apt-get install ${maybe_yes} --no-install-recommends libgcc-12-dev libstdc++-12-dev
+    status_stdcxx=$(dpkg-query --show --showformat='${db:Status-Abbrev}' libstdc++-12-dev 2>/dev/null || true)
+    status_fortran=$(dpkg-query --show --showformat='${db:Status-Abbrev}' libgfortran-12-dev 2>/dev/null || true)
+    if [[ "${status_stdcxx}" != "ii " || "${status_fortran}" != "ii " ]]; then
+      apt-get install ${maybe_yes} --no-install-recommends libgcc-12-dev libstdc++-12-dev libgfortran-12-dev
     fi
   fi
 fi
@@ -196,7 +197,7 @@ if [[ $(arch) = "aarch64" ]]; then
   fi
 else
   dpkg_install_from_wget \
-    bazel 6.0.0 \
-    https://releases.bazel.build/6.0.0/release/bazel_6.0.0-linux-x86_64.deb \
-    b27749e59d7d57d9cf6ca0edce7fbd26bb677797217429052d62ee0f2d008b35
+    bazel 6.1.1 \
+    https://releases.bazel.build/6.1.1/release/bazel_6.1.1-linux-x86_64.deb \
+    a90246165f0972629506132975a7c5d5aecd42453e03e0f88e175a33601cdf70
 fi

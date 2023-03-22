@@ -75,7 +75,9 @@ std::shared_ptr<MosekSolver::License> MosekSolver::AcquireLicense() {
   return GetScopedSingleton<MosekSolver::License>();
 }
 
-bool MosekSolver::is_available() { return true; }
+bool MosekSolver::is_available() {
+  return true;
+}
 
 void MosekSolver::DoSolve(const MathematicalProgram& prog,
                           const Eigen::VectorXd& initial_guess,
@@ -207,7 +209,19 @@ void MosekSolver::DoSolve(const MathematicalProgram& prog,
              prog.positive_semidefinite_constraints().empty() &&
              prog.linear_matrix_inequality_constraints().empty() &&
              prog.exponential_cone_constraints().empty()) {
-    solution_type = MSK_SOL_BAS;
+    // The program is LP.
+    int ipm_basis{};
+    if (rescode == MSK_RES_OK) {
+      rescode = MSK_getintparam(impl.task(), MSK_IPAR_INTPNT_BASIS, &ipm_basis);
+    }
+    // By default ipm_basis > 0 and Mosek will do a basis identification to
+    // clean up the solution after the interior point method (IPM), then we can
+    // query the basis solution. Otherwise we will only query the IPM solution.
+    if (ipm_basis > 0) {
+      solution_type = MSK_SOL_BAS;
+    } else {
+      solution_type = MSK_SOL_ITR;
+    }
   } else {
     solution_type = MSK_SOL_ITR;
   }
@@ -216,9 +230,7 @@ void MosekSolver::DoSolve(const MathematicalProgram& prog,
   // integer/binary variables. See
   // https://docs.mosek.com/latest/rmosek/tutorial-mio-shared.html#specifying-an-initial-solution
   // for more details.
-  const bool has_any_finite_initial_guess =
-      initial_guess.unaryExpr([](double g) { return std::isfinite(g); }).any();
-  if (has_any_finite_initial_guess) {
+  if (initial_guess.array().isFinite().any()) {
     DRAKE_ASSERT(initial_guess.size() == prog.num_vars());
     for (int i = 0; i < prog.num_vars(); ++i) {
       const auto& map_to_mosek =

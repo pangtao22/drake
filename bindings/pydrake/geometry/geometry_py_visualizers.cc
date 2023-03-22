@@ -185,6 +185,18 @@ void DoScalarIndependentDefinitions(py::module m) {
     constexpr auto& cls_doc = doc.Meshcat;
     py::class_<Class, std::shared_ptr<Class>> meshcat(
         m, "Meshcat", cls_doc.doc);
+
+    // Meshcat::SideOfFaceToRender enumeration
+    constexpr auto& side_doc = doc.Meshcat.SideOfFaceToRender;
+    py::enum_<Meshcat::SideOfFaceToRender>(
+        meshcat, "SideOfFaceToRender", side_doc.doc)
+        .value("kFrontSide", Meshcat::SideOfFaceToRender::kFrontSide,
+            side_doc.kFrontSide.doc)
+        .value("kBackSide", Meshcat::SideOfFaceToRender::kBackSide,
+            side_doc.kBackSide.doc)
+        .value("kDoubleSide", Meshcat::SideOfFaceToRender::kDoubleSide,
+            side_doc.kDoubleSide.doc);
+
     meshcat  // BR
         .def(py::init<std::optional<int>>(), py::arg("port") = std::nullopt,
             cls_doc.ctor.doc_1args_port)
@@ -208,11 +220,12 @@ void DoScalarIndependentDefinitions(py::module m) {
             py::arg("rgba") = Rgba(.9, .9, .9, 1.), cls_doc.SetObject.doc_cloud)
         .def("SetObject",
             py::overload_cast<std::string_view,
-                const TriangleSurfaceMesh<double>&, const Rgba&, bool, double>(
-                &Class::SetObject),
+                const TriangleSurfaceMesh<double>&, const Rgba&, bool, double,
+                Meshcat::SideOfFaceToRender>(&Class::SetObject),
             py::arg("path"), py::arg("mesh"),
             py::arg("rgba") = Rgba(0.1, 0.1, 0.1, 1.0),
             py::arg("wireframe") = false, py::arg("wireframe_line_width") = 1.0,
+            py::arg("side") = Meshcat::SideOfFaceToRender::kDoubleSide,
             cls_doc.SetObject.doc_triangle_surface_mesh)
         .def("SetLine", &Class::SetLine, py::arg("path"), py::arg("vertices"),
             py::arg("line_width") = 1.0,
@@ -225,12 +238,19 @@ void DoScalarIndependentDefinitions(py::module m) {
             py::arg("vertices"), py::arg("faces"),
             py::arg("rgba") = Rgba(0.1, 0.1, 0.1, 1.0),
             py::arg("wireframe") = false, py::arg("wireframe_line_width") = 1.0,
+            py::arg("side") = Meshcat::SideOfFaceToRender::kDoubleSide,
             cls_doc.SetTriangleMesh.doc)
         .def("SetTriangleColorMesh", &Class::SetTriangleColorMesh,
             py::arg("path"), py::arg("vertices"), py::arg("faces"),
             py::arg("colors"), py::arg("wireframe") = false,
             py::arg("wireframe_line_width") = 1.0,
+            py::arg("side") = Meshcat::SideOfFaceToRender::kDoubleSide,
             cls_doc.SetTriangleColorMesh.doc)
+        .def("PlotSurface", &Class::PlotSurface, py::arg("path"), py::arg("X"),
+            py::arg("Y"), py::arg("Z"),
+            py::arg("rgba") = Rgba(0.1, 0.1, 0.9, 1.0),
+            py::arg("wireframe") = false, py::arg("wireframe_line_width") = 1.0,
+            cls_doc.PlotSurface.doc)
         .def("SetCamera",
             py::overload_cast<Meshcat::PerspectiveCamera, std::string>(
                 &Class::SetCamera),
@@ -249,9 +269,10 @@ void DoScalarIndependentDefinitions(py::module m) {
         .def("ResetRenderMode", &Class::ResetRenderMode,
             cls_doc.ResetRenderMode.doc)
         .def("SetTransform",
-            py::overload_cast<std::string_view, const math::RigidTransformd&>(
-                &Class::SetTransform),
+            py::overload_cast<std::string_view, const math::RigidTransformd&,
+                const std::optional<double>&>(&Class::SetTransform),
             py::arg("path"), py::arg("X_ParentPath"),
+            py::arg("time_in_recording") = std::nullopt,
             cls_doc.SetTransform.doc_RigidTransform)
         .def("SetTransform",
             py::overload_cast<std::string_view,
@@ -261,19 +282,23 @@ void DoScalarIndependentDefinitions(py::module m) {
         .def("SetRealtimeRate", &Class::SetRealtimeRate, py::arg("rate"),
             cls_doc.SetRealtimeRate.doc)
         .def("SetProperty",
-            py::overload_cast<std::string_view, std::string, bool>(
-                &Class::SetProperty),
+            py::overload_cast<std::string_view, std::string, bool,
+                const std::optional<double>&>(&Class::SetProperty),
             py::arg("path"), py::arg("property"), py::arg("value"),
+            py::arg("time_in_recording") = std::nullopt,
             cls_doc.SetProperty.doc_bool)
         .def("SetProperty",
-            py::overload_cast<std::string_view, std::string, double>(
-                &Class::SetProperty),
+            py::overload_cast<std::string_view, std::string, double,
+                const std::optional<double>&>(&Class::SetProperty),
             py::arg("path"), py::arg("property"), py::arg("value"),
+            py::arg("time_in_recording") = std::nullopt,
             cls_doc.SetProperty.doc_double)
         .def("SetProperty",
             py::overload_cast<std::string_view, std::string,
-                const std::vector<double>&>(&Class::SetProperty),
+                const std::vector<double>&, const std::optional<double>&>(
+                &Class::SetProperty),
             py::arg("path"), py::arg("property"), py::arg("value"),
+            py::arg("time_in_recording") = std::nullopt,
             cls_doc.SetProperty.doc_vector_double)
         .def("SetAnimation", &Class::SetAnimation, py::arg("animation"),
             +cls_doc.SetAnimation.doc)
@@ -291,12 +316,25 @@ void DoScalarIndependentDefinitions(py::module m) {
             py::arg("value"), cls_doc.SetSliderValue.doc)
         .def("GetSliderValue", &Class::GetSliderValue, py::arg("name"),
             cls_doc.GetSliderValue.doc)
+        .def("GetSliderNames", &Class::GetSliderNames,
+            cls_doc.GetSliderNames.doc)
         .def("DeleteSlider", &Class::DeleteSlider, py::arg("name"),
             cls_doc.DeleteSlider.doc)
         .def("DeleteAddedControls", &Class::DeleteAddedControls,
             cls_doc.DeleteAddedControls.doc)
         .def("GetGamepad", &Class::GetGamepad, cls_doc.GetGamepad.doc)
         .def("StaticHtml", &Class::StaticHtml, cls_doc.StaticHtml.doc)
+        .def("StartRecording", &Class::StartRecording,
+            py::arg("frames_per_second") = 32.0,
+            py::arg("set_visualizations_while_recording") = true,
+            cls_doc.StartRecording.doc)
+        .def("StopRecording", &Class::StopRecording, cls_doc.StopRecording.doc)
+        .def("PublishRecording", &Class::PublishRecording,
+            cls_doc.PublishRecording.doc)
+        .def("DeleteRecording", &Class::DeleteRecording,
+            cls_doc.DeleteRecording.doc)
+        .def("get_mutable_recording", &Class::get_mutable_recording,
+            py_rvp::reference_internal, cls_doc.get_mutable_recording.doc)
         .def("HasPath", &Class::HasPath, py::arg("path"), cls_doc.HasPath.doc);
     // Note: we intentionally do not bind the advanced methods (GetPacked...)
     // which were intended primarily for testing in C++.

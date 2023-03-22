@@ -32,11 +32,26 @@ PYBIND11_MODULE(parsing, m) {
     using Class = PackageMap;
     constexpr auto& cls_doc = doc.PackageMap;
     py::class_<Class> cls(m, "PackageMap", cls_doc.doc);
+    {
+      using Nested = PackageMap::RemoteParams;
+      constexpr auto& nested_doc = cls_doc.RemoteParams;
+      py::class_<Nested> nested(cls, "RemoteParams", nested_doc.doc);
+      nested.def(ParamInit<Nested>());
+      nested.def("ToJson", &Nested::ToJson, nested_doc.ToJson.doc);
+      DefAttributesUsingSerialize(&nested, nested_doc);
+      DefReprUsingSerialize(&nested);
+      DefCopyAndDeepCopy(&nested);
+    }
     cls  // BR
         .def(py::init<>(), cls_doc.ctor.doc)
+        .def(py::init<const Class&>(), py::arg("other"), "Copy constructor")
         .def("Add", &Class::Add, py::arg("package_name"),
             py::arg("package_path"), cls_doc.Add.doc)
         .def("AddMap", &Class::AddMap, py::arg("other_map"), cls_doc.AddMap.doc)
+        .def("AddPackageXml", &Class::AddPackageXml, py::arg("filename"),
+            cls_doc.AddPackageXml.doc)
+        .def("AddRemote", &Class::AddRemote, py::arg("package_name"),
+            py::arg("params"))
         .def("Contains", &Class::Contains, py::arg("package_name"),
             cls_doc.Contains.doc)
         .def("Remove", &Class::Remove, py::arg("package_name"),
@@ -52,8 +67,6 @@ PYBIND11_MODULE(parsing, m) {
               return self.GetPath(package_name);
             },
             py::arg("package_name"), cls_doc.GetPath.doc)
-        .def("AddPackageXml", &Class::AddPackageXml, py::arg("filename"),
-            cls_doc.AddPackageXml.doc)
         .def("PopulateFromFolder", &Class::PopulateFromFolder, py::arg("path"),
             cls_doc.PopulateFromFolder.doc)
         .def("PopulateFromEnvironment", &Class::PopulateFromEnvironment,
@@ -62,6 +75,7 @@ PYBIND11_MODULE(parsing, m) {
         .def("PopulateFromRosPackagePath", &Class::PopulateFromRosPackagePath,
             cls_doc.PopulateFromRosPackagePath.doc)
         .def_static("MakeEmpty", &Class::MakeEmpty, cls_doc.MakeEmpty.doc);
+    DefCopyAndDeepCopy(&cls);
   }
 
   // Parser
@@ -109,7 +123,11 @@ PYBIND11_MODULE(parsing, m) {
         .def("AddModelFromFile", &Class::AddModelFromFile, py::arg("file_name"),
             py::arg("model_name") = "", cls_doc.AddModelFromFile.doc)
         .def("SetStrictParsing", &Class::SetStrictParsing,
-            cls_doc.SetStrictParsing.doc);
+            cls_doc.SetStrictParsing.doc)
+        .def("SetAutoRenaming", &Class::SetAutoRenaming, py::arg("value"),
+            cls_doc.SetAutoRenaming.doc)
+        .def("GetAutoRenaming", &Class::GetAutoRenaming,
+            cls_doc.GetAutoRenaming.doc);
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -251,8 +269,14 @@ PYBIND11_MODULE(parsing, m) {
       py::keep_alive<0, 1>(),  // `return` keeps `plant` alive.
       doc.parsing.GetScopedFrameByName.doc);
 
-  m.def("GetScopedFrameName", &parsing::GetScopedFrameName, py::arg("plant"),
-      py::arg("frame"), doc.parsing.GetScopedFrameName.doc);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  m.def("GetScopedFrameName",
+      WrapDeprecated(doc.parsing.GetScopedFrameName.doc_deprecated,
+          &parsing::GetScopedFrameName),
+      py::arg("plant"), py::arg("frame"),
+      doc.parsing.GetScopedFrameName.doc_deprecated);
+#pragma GCC diagnostic push
 }
 
 }  // namespace pydrake

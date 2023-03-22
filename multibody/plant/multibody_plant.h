@@ -1217,17 +1217,6 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
                                        const Joint<T>& joint1,
                                        double gear_ratio, double offset = 0.0);
 
-  template <typename U = T>
-  DRAKE_DEPRECATED("2023-03-01",
-                   "Only gear_ratio and offset of type double are supported.")
-  ConstraintIndex
-      AddCouplerConstraint(const Joint<U>& joint0, const Joint<U>& joint1,
-                           const U& gear_ratio, const U& offset = 0.0) {
-    return this->AddCouplerConstraint(joint0, joint1,
-                                      ExtractDoubleOrThrow(gear_ratio),
-                                      ExtractDoubleOrThrow(offset));
-  }
-
   /// Defines a distance constraint between a point P on a body A and a point Q
   /// on a body B.
   ///
@@ -4054,6 +4043,20 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
     return internal_tree().GetJointIndices(model_instance);
   }
 
+  /// Returns a list of joint actuator indices associated with `model_instance`.
+  /// @throws std::exception if called pre-finalize.
+  std::vector<JointActuatorIndex> GetJointActuatorIndices(
+      ModelInstanceIndex model_instance) const {
+    return internal_tree().GetJointActuatorIndices(model_instance);
+  }
+
+  /// Returns a list of actuated joint indices associated with `model_instance`.
+  /// @throws std::exception if called pre-finalize.
+  std::vector<JointIndex> GetActuatedJointIndices(
+      ModelInstanceIndex model_instance) const {
+    return internal_tree().GetActuatedJointIndices(model_instance);
+  }
+
   /// Returns a constant reference to a joint that is identified
   /// by the string `name` in `this` %MultibodyPlant.  If the optional
   /// template argument is supplied, then the returned value is downcast to
@@ -4147,6 +4150,12 @@ class MultibodyPlant : public internal::MultibodyTreeSystem<T> {
   /// @see AddJointActuator().
   int num_actuators() const {
     return internal_tree().num_actuators();
+  }
+
+  /// Returns the number of actuators for a specific model instance.
+  /// @throws std::exception if called pre-finalize.
+  int num_actuators(ModelInstanceIndex model_instance) const {
+    return internal_tree().num_actuators(model_instance);
   }
 
   /// Returns the total number of actuated degrees of freedom.

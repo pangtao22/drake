@@ -103,7 +103,9 @@ class TestGeometryVisualizers(unittest.TestCase):
         meshcat.SetObject(path="/test/box",
                           shape=mut.Box(1, 1, 1),
                           rgba=mut.Rgba(.5, .5, .5))
-        meshcat.SetTransform(path="/test/box", X_ParentPath=RigidTransform())
+        meshcat.SetTransform(path="/test/box",
+                             X_ParentPath=RigidTransform(),
+                             time_in_recording=0.2)
         meshcat.SetTransform(path="/test/box", matrix=np.eye(4))
         self.assertTrue(meshcat.HasPath("/test/box"))
         cloud = PointCloud(4)
@@ -114,9 +116,12 @@ class TestGeometryVisualizers(unittest.TestCase):
             triangles=[mut.SurfaceTriangle(
                 0, 1, 2), mut.SurfaceTriangle(3, 0, 2)],
             vertices=[[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]])
-        meshcat.SetObject(path="/test/triangle_surface_mesh", mesh=mesh,
-                          rgba=mut.Rgba(0.3, 0.3, 0.3), wireframe=True,
-                          wireframe_line_width=2.0)
+        meshcat.SetObject(path="/test/triangle_surface_mesh",
+                          mesh=mesh,
+                          rgba=mut.Rgba(0.3, 0.3, 0.3),
+                          wireframe=True,
+                          wireframe_line_width=2.0,
+                          side=meshcat.SideOfFaceToRender.kFrontSide)
         meshcat.SetLine(path="/test/line", vertices=np.eye(3),
                         line_width=2.0, rgba=mut.Rgba(.3, .3, .3))
         meshcat.SetLineSegments(path="/test/line_segments", start=np.eye(3),
@@ -128,21 +133,40 @@ class TestGeometryVisualizers(unittest.TestCase):
             faces=np.array([[0, 1, 2], [3, 0, 2]]).T,
             rgba=mut.Rgba(0.3, 0.3, 0.3),
             wireframe=True,
-            wireframe_line_width=2.0)
+            wireframe_line_width=2.0,
+            side=meshcat.SideOfFaceToRender.kBackSide)
         meshcat.SetTriangleColorMesh(
             path="/test/triangle_mesh",
             vertices=np.array([[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]]).T,
             faces=np.array([[0, 1, 2], [3, 0, 2]]).T,
             colors=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0]]).T,
             wireframe=False,
-            wireframe_line_width=2.0)
+            wireframe_line_width=2.0,
+            side=meshcat.SideOfFaceToRender.kDoubleSide)
+        # Plot the six-hump camel
+        xs = np.linspace(-2.2, 2.2, 51)
+        ys = np.linspace(-1.2, 1.2, 51)
+        [X, Y] = np.meshgrid(xs, ys)
+        P = 4 * X**2 + X * Y - 4 * Y**2 - 2.1 * X**4 + 4 * Y**4 + X**6 / 3
+        meshcat.PlotSurface(path="six_hump_camel",
+                            X=X,
+                            Y=Y,
+                            Z=P,
+                            rgba=mut.Rgba(0.3, 0.3, 0.3),
+                            wireframe=True,
+                            wireframe_line_width=2.0)
         meshcat.SetProperty(path="/Background",
                             property="visible",
-                            value=True)
+                            value=True,
+                            time_in_recording=0.2)
         meshcat.SetProperty(path="/Lights/DirectionalLight/<object>",
-                            property="intensity", value=1.0)
-        meshcat.SetProperty(path="/Background", property="top_color",
-                            value=[0, 0, 0])
+                            property="intensity",
+                            value=1.0,
+                            time_in_recording=0.2)
+        meshcat.SetProperty(path="/Background",
+                            property="top_color",
+                            value=[0, 0, 0],
+                            time_in_recording=0.2)
         meshcat.Set2dRenderMode(
             X_WC=RigidTransform(), xmin=-1, xmax=1, ymin=-1, ymax=1)
         meshcat.ResetRenderMode()
@@ -156,6 +180,7 @@ class TestGeometryVisualizers(unittest.TestCase):
                           value=0.5,
                           decrement_keycode="ArrowLeft",
                           increment_keycode="ArrowRight")
+        self.assertEqual(meshcat.GetSliderNames(), ["slider"])
         meshcat.SetSliderValue(name="slider", value=0.7)
         self.assertAlmostEqual(meshcat.GetSliderValue(
             name="slider"), 0.7, delta=1e-14)
@@ -170,6 +195,14 @@ class TestGeometryVisualizers(unittest.TestCase):
         self.assertEqual(len(gamepad.axes), 0)
         meshcat.SetRealtimeRate(1.0)
         meshcat.Flush()
+
+        meshcat.StartRecording(frames_per_second=64.0,
+                               set_visualizations_while_recording=False)
+        ani = meshcat.get_mutable_recording()
+        self.assertEqual(ani.frames_per_second(), 64.0)
+        meshcat.StopRecording()
+        meshcat.PublishRecording()
+        meshcat.DeleteRecording()
 
         # PerspectiveCamera
         camera = mut.Meshcat.PerspectiveCamera(fov=80,

@@ -1,5 +1,3 @@
-# -*- python -*-
-
 load("//tools/skylark:py.bzl", "py_library")
 load("@drake//tools/install:check_licenses.bzl", "check_licenses")
 load("@drake//tools/install:install.bzl", "install")
@@ -89,6 +87,7 @@ _DRAKE_EXTERNAL_PACKAGE_INSTALLS = ["@%s//:install" % p for p in [
     "gz_utils_internal",
     "lcm",
     "meshcat",
+    "models_internal",
     "msgpack_internal",
     "net_sf_jchart2d",
     "nanoflann_internal",

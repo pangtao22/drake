@@ -9,7 +9,7 @@ namespace drake {
 namespace solvers {
 
 IpoptSolver::IpoptSolver()
-    : SolverBase(&id, &is_available, &is_enabled,
+    : SolverBase(id(), &is_available, &is_enabled,
                  &ProgramAttributesSatisfied) {}
 
 IpoptSolver::~IpoptSolver() = default;
@@ -19,7 +19,9 @@ SolverId IpoptSolver::id() {
   return singleton.access();
 }
 
-bool IpoptSolver::is_enabled() { return true; }
+bool IpoptSolver::is_enabled() {
+  return true;
+}
 
 bool IpoptSolver::ProgramAttributesSatisfied(const MathematicalProgram& prog) {
   static const never_destroyed<ProgramAttributes> solver_capabilities(

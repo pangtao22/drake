@@ -51,7 +51,7 @@ class UrdfParserTest : public test::DiagnosticPolicyTestBase {
       const std::string& file_name,
       const std::string& model_name) {
     internal::CollisionFilterGroupResolver resolver{&plant_};
-    ParsingWorkspace w{package_map_, diagnostic_policy_,
+    ParsingWorkspace w{options_, package_map_, diagnostic_policy_,
                        &plant_, &resolver, NoSelect};
     auto result = AddModelFromUrdf(
         {DataSource::kFilename, &file_name}, model_name, {}, w);
@@ -63,7 +63,7 @@ class UrdfParserTest : public test::DiagnosticPolicyTestBase {
       const std::string& file_contents,
       const std::string& model_name) {
     internal::CollisionFilterGroupResolver resolver{&plant_};
-    ParsingWorkspace w{package_map_, diagnostic_policy_,
+    ParsingWorkspace w{options_, package_map_, diagnostic_policy_,
                        &plant_, &resolver, NoSelect};
     auto result = AddModelFromUrdf(
         {DataSource::kContents, &file_contents}, model_name, {}, w);
@@ -78,6 +78,7 @@ class UrdfParserTest : public test::DiagnosticPolicyTestBase {
   }
 
  protected:
+  ParsingOptions options_;
   PackageMap package_map_;
   // Note: We currently use a discrete plant here to be able to test
   // Sap-specific features like the joint 'mimic' element.
@@ -113,6 +114,14 @@ TEST_F(UrdfParserTest, NoName) {
   EXPECT_THAT(TakeError(), MatchesRegex(
                   ".*Your robot must have a name attribute or a model name must"
                   " be specified."));
+}
+
+TEST_F(UrdfParserTest, ModelRenameWithColons) {
+  std::optional<ModelInstanceIndex> index =  AddModelFromUrdfString(R"""(
+    <robot name='to-be-overwritten'>
+    </robot>)""", "left::robot");
+  ASSERT_NE(index, std::nullopt);
+  EXPECT_EQ(plant_.GetModelInstanceName(*index), "left::robot");
 }
 
 TEST_F(UrdfParserTest, ObsoleteLoopJoint) {
@@ -1088,6 +1097,24 @@ TEST_F(UrdfParsedGeometryTest, VisualGeometryParsing) {
       "drake/multibody/parsing/test/urdf_parser_test/"
       "all_geometries_as_visual.urdf",
       geometry::Role::kPerception);
+}
+
+TEST_F(UrdfParserTest, TestVisualAndCollisionNameOverlap) {
+  // The visual and collision namespaces are distinct; you can use the same name
+  // for both without triggering any warnings related to renaming.
+  std::string robot = R"""(
+    <robot name='a'>
+      <link name='b'>
+        <visual name='hello'>
+          <geometry><box size='1 2 3'/></geometry>
+        </visual>
+        <collision name='hello'>
+          <geometry><box size='1 2 3'/></geometry>
+        </collision>
+      </link>
+    </robot>)""";
+  EXPECT_NE(AddModelFromUrdfString(robot, ""), std::nullopt);
+  // The test criterion is no warnings, which is already automatically checked.
 }
 
 TEST_F(UrdfParserTest, EntireInertialTagOmitted) {
