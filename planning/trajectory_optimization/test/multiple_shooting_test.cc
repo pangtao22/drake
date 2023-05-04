@@ -28,27 +28,32 @@ typedef PiecewisePolynomial<double> PiecewisePolynomialType;
 class MyDirectTrajOpt : public MultipleShooting {
  public:
   MyDirectTrajOpt(const int num_inputs, const int num_states,
-                  const int num_time_samples, const double fixed_timestep)
+                  const int num_time_samples, const double fixed_timestep,
+                  solvers::MathematicalProgram* prog = nullptr)
       : MultipleShooting(num_inputs, num_states, num_time_samples,
-                         fixed_timestep) {}
+                         fixed_timestep, prog) {}
 
   MyDirectTrajOpt(const int num_inputs, const int num_states,
                   const int num_time_samples, const double min_timestep,
-                  const double max_timestep)
+                  const double max_timestep,
+                  solvers::MathematicalProgram* prog = nullptr)
       : MultipleShooting(num_inputs, num_states, num_time_samples, min_timestep,
-                         max_timestep) {}
+                         max_timestep, prog) {}
 
   MyDirectTrajOpt(const solvers::VectorXDecisionVariable& input,
                   const solvers::VectorXDecisionVariable& state,
-                  const int num_time_samples, const double fixed_timestep)
-      : MultipleShooting(input, state, num_time_samples, fixed_timestep) {}
+                  const int num_time_samples, const double fixed_timestep,
+                  solvers::MathematicalProgram* prog = nullptr)
+      : MultipleShooting(input, state, num_time_samples, fixed_timestep, prog) {
+  }
 
   MyDirectTrajOpt(const solvers::VectorXDecisionVariable& input,
                   const solvers::VectorXDecisionVariable& state,
                   const symbolic::Variable& time, const int num_time_samples,
-                  const double min_timestep, const double max_timestep)
+                  const double min_timestep, const double max_timestep,
+                  solvers::MathematicalProgram* prog = nullptr)
       : MultipleShooting(input, state, time, num_time_samples, min_timestep,
-                         max_timestep) {}
+                         max_timestep, prog) {}
 
   PiecewisePolynomial<double> ReconstructInputTrajectory(
       const solvers::MathematicalProgramResult&) const override {
@@ -96,6 +101,24 @@ GTEST_TEST(MultipleShootingTest, FixedTimestepTest) {
   EXPECT_THROW(trajopt.AddDurationBounds(0, 1), std::runtime_error);
 }
 
+GTEST_TEST(MultipleShootingTest, FixedTimestepWithProgTest) {
+  const int kNumInputs{1};
+  const int kNumStates{2};
+  const int kNumSampleTimes{2};
+  const double kFixedTimeStep{0.1};
+  solvers::MathematicalProgram prog;
+
+  MyDirectTrajOpt trajopt(kNumInputs, kNumStates, kNumSampleTimes,
+                          kFixedTimeStep, &prog);
+  EXPECT_EQ(&prog, &trajopt.prog());
+  EXPECT_EQ(prog.num_vars(), 6);
+
+  MyDirectTrajOpt trajopt2(kNumInputs, kNumStates, kNumSampleTimes,
+                           kFixedTimeStep, &prog);
+  EXPECT_EQ(&prog, &trajopt2.prog());
+  EXPECT_EQ(prog.num_vars(), 12);
+}
+
 GTEST_TEST(MultipleShootingTest, FixedTimestepTestWithPlaceholderVariables) {
   const VectorX<symbolic::Variable> input{
       symbolic::MakeVectorContinuousVariable(3, "my_input")};
@@ -126,6 +149,12 @@ GTEST_TEST(MultipleShootingTest, FixedTimestepTestWithPlaceholderVariables) {
   EXPECT_THROW(trajopt.AddTimeIntervalBounds(0, .1), std::runtime_error);
   EXPECT_THROW(trajopt.AddEqualTimeIntervalsConstraints(), std::runtime_error);
   EXPECT_THROW(trajopt.AddDurationBounds(0, 1), std::runtime_error);
+
+  // Now use the constructor which takes a prog.
+  MyDirectTrajOpt trajopt2(input, state, kNumSampleTimes, kFixedTimeStep,
+                           &trajopt.prog());
+  EXPECT_EQ(trajopt.prog().num_vars(),
+            2 * (input.size() + state.size()) * kNumSampleTimes);
 }
 
 GTEST_TEST(MultipleShootingTest, VariableTimestepTestWithPlaceholderVariables) {
@@ -160,6 +189,13 @@ GTEST_TEST(MultipleShootingTest, VariableTimestepTestWithPlaceholderVariables) {
   EXPECT_EQ(times.size(), 2);
   EXPECT_NEAR(times[0], 0.0, kSolverTolerance);
   EXPECT_NEAR(times[1], 0.1, kSolverTolerance);
+
+  // Now use the constructor which takes a prog.
+  MyDirectTrajOpt trajopt2(input, state, time, kNumSampleTimes, kMinTimeStep,
+                           kMaxTimeStep, &trajopt.prog());
+  EXPECT_EQ(trajopt.prog().num_vars(),
+            2 * (input.size() + state.size()) * kNumSampleTimes +
+                2 /* time variables */);
 }
 
 GTEST_TEST(MultipleShootingTest, VariableTimestepTest) {
@@ -181,6 +217,11 @@ GTEST_TEST(MultipleShootingTest, VariableTimestepTest) {
   EXPECT_EQ(times.size(), 2);
   EXPECT_NEAR(times[0], 0.0, kSolverTolerance);
   EXPECT_NEAR(times[1], 0.1, kSolverTolerance);
+
+  // Now use the constructor which takes a prog.
+  MyDirectTrajOpt trajopt2(kNumInputs, kNumStates, kNumSampleTimes,
+                           kMinTimeStep, kMaxTimeStep, &trajopt.prog());
+  EXPECT_EQ(trajopt.prog().num_vars(), 14);
 }
 
 GTEST_TEST(MultipleShootingTest, PlaceholderVariableTest) {
@@ -205,8 +246,7 @@ GTEST_TEST(MultipleShootingTest, PlaceholderVariableTest) {
                std::exception);
 
   EXPECT_THROW(prog.AddLinearConstraint(t(0) <= 1.0), std::exception);
-  EXPECT_THROW(prog.AddLinearConstraint(u <= Vector1d(1.0)),
-               std::exception);
+  EXPECT_THROW(prog.AddLinearConstraint(u <= Vector1d(1.0)), std::exception);
 
   EXPECT_THROW(prog.AddLinearConstraint(Eigen::Matrix2d::Identity(),
                                         Eigen::Vector2d::Zero(),
@@ -361,7 +401,7 @@ GTEST_TEST(MultipleShootingTest, ConstraintAllKnotsTest) {
       trajopt.AddConstraintToAllKnotPoints(
           Vector2<symbolic::Formula>{trajopt.state()[0] == state_value[0],
                                      trajopt.state()[1] == state_value[1]});
-  EXPECT_EQ(c2.size(), 2*kNumSampleTimes);
+  EXPECT_EQ(c2.size(), 2 * kNumSampleTimes);
 }
 
 GTEST_TEST(MultipleShootingTest, FinalCostTest) {
@@ -634,7 +674,7 @@ GTEST_TEST(MultipleShootingTest, NewSequentialVariableTest) {
               result.GetSolution(trajopt.h_vars()).sum(), 1e-6);
 }
 
-}  // anonymous namespace
+}  // namespace
 }  // namespace trajectory_optimization
 }  // namespace planning
 }  // namespace drake

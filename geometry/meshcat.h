@@ -126,7 +126,13 @@ in the visualizer.
 - All user objects can easily be cleared by a single, parameter-free call to
 Delete(). You are welcome to use absolute paths to organize your data, but the
 burden on tracking and cleaning them up lie on you.
-*/
+
+@section network_access Network access
+
+See MeshcatParams for options to control the hostname and port to bind to.
+
+See \ref allow_network "DRAKE_ALLOW_NETWORK" for an environment variable
+option to deny %Meshcat entirely. */
 class Meshcat {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(Meshcat)
@@ -321,13 +327,13 @@ class Meshcat {
   constexpr int nx = 15, ny = 11;
   X = RowVector<double, nx>::LinSpaced(0, 1).replicate<ny, 1>();
   Y = Vector<double, ny>::LinSpaced(0, 1).replicate<1, nx>();
-  @code
+  @endcode
   in C++ or e.g.
   @code
   xs = np.linspace(0, 1, 15)
   ys = np.linspace(0, 1, 11)
   [X, Y] = np.meshgrid(xs, ys)
-  @code
+  @endcode
   in Python, and Z is the surface evaluated on each X, Y value.
 
   @pre X, Y, and Z must be the same shape. */

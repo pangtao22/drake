@@ -1,10 +1,11 @@
 import pydrake.geometry.optimization as mut
 
+import os.path
 import unittest
 
 import numpy as np
 
-from pydrake.common import RandomGenerator
+from pydrake.common import RandomGenerator, temp_directory
 from pydrake.common.test_utilities.pickle_compare import assert_pickle
 from pydrake.geometry import (
     Box, Capsule, Cylinder, Ellipsoid, FramePoseVector, GeometryFrame,
@@ -205,6 +206,15 @@ class TestGeometryOptimization(unittest.TestCase):
         self.assertEqual(sum2.num_terms(), 2)
         self.assertIsInstance(sum2.term(0), mut.Point)
 
+    def test_spectrahedron(self):
+        s = mut.Spectrahedron()
+        prog = MathematicalProgram()
+        X = prog.NewSymmetricContinuousVariables(3)
+        prog.AddPositiveSemidefiniteConstraint(X)
+        prog.AddLinearEqualityConstraint(X[0, 0] + X[1, 1] + X[2, 2], 1)
+        s = mut.Spectrahedron(prog=prog)
+        self.assertEqual(s.ambient_dimension(), 6)
+
     def test_v_polytope(self):
         vertices = np.array([[0.0, 1.0, 2.0], [3.0, 7.0, 5.0]])
         vpoly = mut.VPolytope(vertices=vertices)
@@ -263,6 +273,9 @@ class TestGeometryOptimization(unittest.TestCase):
         vpoly = mut.VPolytope(vertices=vertices).GetMinimalRepresentation()
         self.assertAlmostEqual(vpoly.CalcVolume(), a * a * a)
         self.assertEqual(vpoly.vertices().shape[1], 8)
+        temp_file_name = f"{temp_directory()}/vpoly.obj"
+        vpoly.WriteObj(filename=temp_file_name)
+        self.assertTrue(os.path.isfile(temp_file_name))
 
     def _calculate_path_length(self, vertices):
         n = vertices.shape[1]
@@ -374,6 +387,7 @@ class TestGeometryOptimization(unittest.TestCase):
         options.termination_threshold = 0.1
         options.relative_termination_threshold = 0.01
         options.random_seed = 1314
+        options.starting_ellipse = mut.Hyperellipsoid.MakeUnitBall(3)
         self.assertNotIn("object at 0x", repr(options))
         region = mut.Iris(
             obstacles=obstacles, sample=[2, 3.4, 5],
@@ -446,8 +460,12 @@ class TestGeometryOptimization(unittest.TestCase):
         options.solver = ClpSolver()
         options.solver_options = SolverOptions()
         options.solver_options.SetOption(ClpSolver.id(), "scaling", 2)
+        options.rounding_solver_options = SolverOptions()
+        options.rounding_solver_options.SetOption(ClpSolver.id(), "dual", 0)
         self.assertIn("scaling",
                       options.solver_options.GetOptions(ClpSolver.id()))
+        self.assertIn(
+            "dual", options.rounding_solver_options.GetOptions(ClpSolver.id()))
         self.assertIn("convex_relaxation", repr(options))
 
         spp = mut.GraphOfConvexSets()

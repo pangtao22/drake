@@ -10,6 +10,7 @@
 
 #include "drake/common/find_resource.h"
 #include "drake/common/fmt_eigen.h"
+#include "drake/common/test_utilities/diagnostic_policy_test_base.h"
 #include "drake/common/test_utilities/eigen_matrix_compare.h"
 #include "drake/common/test_utilities/expect_no_throw.h"
 #include "drake/common/test_utilities/expect_throws_message.h"
@@ -19,7 +20,6 @@
 #include "drake/multibody/parsing/detail_common.h"
 #include "drake/multibody/parsing/detail_path_utils.h"
 #include "drake/multibody/parsing/package_map.h"
-#include "drake/multibody/parsing/test/diagnostic_policy_test_base.h"
 
 namespace drake {
 namespace multibody {
@@ -738,6 +738,24 @@ TEST_F(UrdfGeometryTest, TestDuplicateVisualName) {
   EXPECT_EQ(visual_instances_[0].name(), "hello");
   EXPECT_EQ(visual_instances_[1].name(), "hello_1");
   EXPECT_THAT(TakeWarning(), ContainsRegex("visual.*hello.*renam.*hello_1"));
+}
+
+TEST_F(UrdfGeometryTest, TestDrakeDiffuseMapError) {
+  // If <drake:diffuse_map> is specified, the parser should report an error. The
+  // URDF snippet models a user that copies <drake:diffuse> from an SDFormat
+  // file verbatim (so it maintains the SDFormat style instead of URDF).
+  std::string robot = R"""(
+    <robot name='a'>
+      <link name='b'>
+        <visual name='hello'>
+          <geometry><box size='1 2 3'/></geometry>
+          <material><drake:diffuse_map>abc.png</drake:diffuse_map></material>
+        </visual>
+      </link>
+    </robot>)""";
+  DRAKE_EXPECT_NO_THROW(ParseUrdfGeometryString(robot));
+  EXPECT_THAT(TakeError(),
+              ContainsRegex("<drake:diffuse_map> is not supported.*"));
 }
 
 TEST_F(UrdfGeometryTest, TestDuplicateCollisionName) {

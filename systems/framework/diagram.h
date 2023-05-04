@@ -47,8 +47,12 @@ class OwnedSystems {
   decltype(auto) begin() const { return vec_.begin(); }
   decltype(auto) end() const { return vec_.end(); }
   decltype(auto) operator[](size_t i) const { return vec_[i]; }
+  decltype(auto) operator[](size_t i) { return vec_[i]; }
   void push_back(std::unique_ptr<System<T>>&& sys) {
     vec_.push_back(std::move(sys));
+  }
+  void pop_back() {
+    vec_.pop_back();
   }
 
  private:
@@ -139,6 +143,10 @@ class Diagram : public System<T>, internal::SystemParentServiceInterface {
   std::unique_ptr<ContinuousState<T>> AllocateTimeDerivatives() const final;
 
   std::unique_ptr<DiscreteValues<T>> AllocateDiscreteVariables() const final;
+
+  /// Returns true iff this contains a subsystem with the given name.
+  /// @see GetSubsystemByName()
+  bool HasSubsystemNamed(std::string_view name) const;
 
   /// Retrieves a const reference to the subsystem with name @p name returned
   /// by get_name().

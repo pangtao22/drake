@@ -16,7 +16,9 @@ namespace planning {
 namespace trajectory_optimization {
 
 // Helper struct holding a time-step value for continuous-time
-// DirectTranscription.
+// DirectTranscription. This is currently needed to disambiguate between the
+// constructors; DirectTranscription(system, context, int, int) could cast the
+// last int into a fixed_timestep or the input_port_index.
 struct TimeStep {
   double value{-1};
   explicit TimeStep(double step) : value(step) {}
@@ -52,6 +54,8 @@ class DirectTranscription : public MultipleShooting {
   /// left disconnected (if they are disconnected in @p context) or will be set
   /// to their current values (if they are connected/fixed in @p context).
   /// @default kUseFirstInputIfItExists.
+  ///
+  /// @throws std::exception if `context.has_only_discrete_state() == false`.
   DirectTranscription(
       const systems::System<double>* system,
       const systems::Context<double>& context, int num_time_samples,
@@ -81,6 +85,8 @@ class DirectTranscription : public MultipleShooting {
   /// left disconnected (if they are disconnected in @p context) or will be set
   /// to their current values (if they are connected/fixed in @p context).
   /// @default kUseFirstInputIfItExists.
+  ///
+  /// @throws std::exception if `context.has_only_discrete_state() == false`.
   ///
   /// @exclude_from_pydrake_mkdoc{This overload is not bound in pydrake.  When
   /// we do bind it, we should probably rename `system` to tv_linear_system` or
@@ -114,6 +120,8 @@ class DirectTranscription : public MultipleShooting {
   /// left disconnected (if they are disconnected in @p context) or will be set
   /// to their current values (if they are connected/fixed in @p context).
   /// @default kUseFirstInputIfItExists.
+  ///
+  /// @throws std::exception if `context.has_only_continuous_state() == false`.
   DirectTranscription(
       const systems::System<double>* system,
       const systems::Context<double>& context, int num_time_samples,

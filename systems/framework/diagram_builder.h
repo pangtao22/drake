@@ -11,6 +11,7 @@
 
 #include "drake/common/default_scalars.h"
 #include "drake/common/drake_copyable.h"
+#include "drake/common/hash.h"
 #include "drake/common/pointer_cast.h"
 #include "drake/systems/framework/diagram.h"
 #include "drake/systems/framework/system.h"
@@ -243,6 +244,18 @@ class DiagramBuilder {
         name, std::make_unique<S<T>>(std::forward<Args>(args)...));
   }
 
+  /// Removes the given system from this builder and disconnects any connections
+  /// or exported ports associated with it.
+  ///
+  /// Note that un-exporting this system's ports might have a ripple effect on
+  /// other exported port index assignments. The relative order will remain
+  /// intact, but any "holes" created by this removal will be filled in by
+  /// decrementing the indices of all higher-numbered ports that remain.
+  ///
+  /// @warning Because a DiagramBuilder owns the objects it contains, the system
+  /// will be deleted.
+  void RemoveSystem(const System<T>& system);
+
   /// Returns whether any Systems have been added yet.
   bool empty() const {
     ThrowIfAlreadyBuilt();
@@ -265,6 +278,10 @@ class DiagramBuilder {
   /// @see GetMutableSubsystemByName()
   /// @see GetSystems()
   std::vector<System<T>*> GetMutableSystems();
+
+  /// Returns true iff this contains a subsystem with the given name.
+  /// @see GetSubsystemByName()
+  bool HasSubsystemNamed(std::string_view name) const;
 
   /// Retrieves a const reference to the subsystem with name @p name returned
   /// by get_name().
@@ -436,6 +453,8 @@ class DiagramBuilder {
 
   void ThrowIfAlgebraicLoopsExist() const;
 
+  void CheckInvariants() const;
+
   // Produces the Blueprint that has been described by the calls to
   // Connect, ExportInput, and ExportOutput. Throws std::exception if the
   // graph is empty or contains algebraic loops.
@@ -453,7 +472,7 @@ class DiagramBuilder {
   std::vector<std::string> output_port_names_;
 
   // For fast membership queries: has this input port already been wired?
-  std::set<InputPortLocator> diagram_input_set_;
+  std::unordered_set<InputPortLocator, DefaultHash> diagram_input_set_;
 
   // A vector of data about exported input ports.
   struct ExportedInputData {

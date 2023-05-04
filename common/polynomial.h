@@ -15,6 +15,7 @@
 #include "drake/common/autodiff.h"
 #include "drake/common/default_scalars.h"
 #include "drake/common/drake_assert.h"
+#include "drake/common/drake_throw.h"
 #include "drake/common/fmt_ostream.h"
 #include "drake/common/symbolic/expression.h"
 
@@ -90,7 +91,7 @@ class Polynomial {
     /// A comparison to allow std::lexicographical_compare on this class; does
     /// not reflect any sort of mathematical total order.
     bool operator<(const Monomial& other) const {
-      return ((coefficient < other.coefficient)  ||
+      return ((coefficient < other.coefficient) ||
               ((coefficient == other.coefficient) && (terms < other.terms)));
     }
 
@@ -144,23 +145,15 @@ class Polynomial {
   /// Construct a single Monomial of the given coefficient and variable.
   Polynomial(const T& coeff, const VarType& v);
 
-  /// A legacy constructor for univariate polynomials:  Takes a vector
-  /// of coefficients for the constant, x, x**2, x**3... Monomials.
+  /// A constructor for univariate polynomials: takes a vector of coefficients
+  /// for the x**0, x**1, x**2, x**3... Monomials. All terms are always added,
+  /// even if a coefficient is zero.
   template <typename Derived>
-  explicit Polynomial(Eigen::MatrixBase<Derived> const& coefficients) {
-    VarType v = VariableNameToId("t");
-    for (int i = 0; i < coefficients.size(); i++) {
-      Monomial m;
-      m.coefficient = coefficients(i);
-      if (i > 0) {
-        Term t;
-        t.var = v;
-        t.power = i;
-        m.terms.push_back(t);
-      }
-      monomials_.push_back(m);
-    }
-    is_univariate_ = true;
+  explicit Polynomial(const Eigen::MatrixBase<Derived>& coefficients) {
+    DRAKE_THROW_UNLESS((coefficients.cols() == 1) ||
+                       (coefficients.rows() == 1) ||
+                       (coefficients.size() == 0));
+    *this = Polynomial(WithCoefficients{coefficients.template cast<T>()});
   }
 
   /// Returns the number of unique Monomials (and thus the number of
@@ -182,7 +175,7 @@ class Polynomial {
 
   const std::vector<Monomial>& GetMonomials() const;
 
-  Eigen::Matrix<T, Eigen::Dynamic, 1> GetCoefficients() const;
+  VectorX<T> GetCoefficients() const;
 
   /// Returns a set of all of the variables present in this Polynomial.
   std::set<VarType> GetVariables() const;
@@ -251,8 +244,8 @@ class Polynomial {
   typename Product<T, U>::type EvaluateMultivariate(
       const std::map<VarType, U>& var_values) const {
     using std::pow;
-    typedef typename std::remove_const_t<
-      typename Product<T, U>::type> ProductType;
+    typedef typename std::remove_const_t<typename Product<T, U>::type>
+        ProductType;
     ProductType value = 0;
     for (const Monomial& monomial : monomials_) {
       ProductType monomial_value = monomial.coefficient;
@@ -275,8 +268,7 @@ class Polynomial {
    * Returns a Polynomial in which each variable in var_values has been
    * replaced with its value and constants appropriately combined.
    */
-  Polynomial EvaluatePartial(
-      const std::map<VarType, T>& var_values) const;
+  Polynomial EvaluatePartial(const std::map<VarType, T>& var_values) const;
 
   /// Replaces all instances of variable orig with replacement.
   void Subs(const VarType& orig, const VarType& replacement);
@@ -308,6 +300,9 @@ class Polynomial {
    */
   Polynomial Integral(const T& integration_constant = 0.0) const;
 
+  /** Returns true if this is a univariate polynomial */
+  bool is_univariate() const;
+
   bool operator==(const Polynomial& other) const;
 
   Polynomial& operator+=(const Polynomial& other);
@@ -332,42 +327,36 @@ class Polynomial {
 
   const Polynomial operator*(const Polynomial& other) const;
 
-  friend const Polynomial operator+(const Polynomial& p,
-                                    const T& scalar) {
+  friend const Polynomial operator+(const Polynomial& p, const T& scalar) {
     Polynomial ret = p;
     ret += scalar;
     return ret;
   }
 
-  friend const Polynomial operator+(const T& scalar,
-                                    const Polynomial& p) {
+  friend const Polynomial operator+(const T& scalar, const Polynomial& p) {
     Polynomial ret = p;
     ret += scalar;
     return ret;
   }
 
-  friend const Polynomial operator-(const Polynomial& p,
-                                    const T& scalar) {
+  friend const Polynomial operator-(const Polynomial& p, const T& scalar) {
     Polynomial ret = p;
     ret -= scalar;
     return ret;
   }
 
-  friend const Polynomial operator-(const T& scalar,
-                                    const Polynomial& p) {
+  friend const Polynomial operator-(const T& scalar, const Polynomial& p) {
     Polynomial ret = -p;
     ret += scalar;
     return ret;
   }
 
-  friend const Polynomial operator*(const Polynomial& p,
-                                    const T& scalar) {
+  friend const Polynomial operator*(const Polynomial& p, const T& scalar) {
     Polynomial ret = p;
     ret *= scalar;
     return ret;
   }
-  friend const Polynomial operator*(const T& scalar,
-                                    const Polynomial& p) {
+  friend const Polynomial operator*(const T& scalar, const Polynomial& p) {
     Polynomial ret = p;
     ret *= scalar;
     return ret;
@@ -459,8 +448,7 @@ class Polynomial {
   /** Variable name/ID conversion facility. */
   static bool IsValidVariableName(const std::string name);
 
-  static VarType VariableNameToId(const std::string name,
-                                  unsigned int m = 1);
+  static VarType VariableNameToId(const std::string name, unsigned int m = 1);
 
   static std::string IdToVariableName(const VarType id);
   //@}
@@ -470,6 +458,13 @@ class Polynomial {
                            typename Polynomial<U>::PowerType n);
 
  private:
+  // A wrapper struct to help guide constructor overload resolution.
+  struct WithCoefficients {
+    Eigen::Ref<const VectorX<T>> value;
+  };
+
+  explicit Polynomial(const WithCoefficients& coefficients);
+
   /// The Monomial atoms of the Polynomial.
   std::vector<Monomial> monomials_;
 
@@ -482,9 +477,8 @@ class Polynomial {
 
 /** Provides power function for Polynomial. */
 template <typename T>
-Polynomial<T> pow(
-    const Polynomial<T>& base,
-    typename Polynomial<T>::PowerType exponent) {
+Polynomial<T> pow(const Polynomial<T>& base,
+                  typename Polynomial<T>::PowerType exponent) {
   DRAKE_DEMAND(exponent >= 0);
   if (exponent == 0) {
     return Polynomial<T>{1.0};
@@ -523,8 +517,7 @@ typedef Eigen::Matrix<Polynomiald, Eigen::Dynamic, 1> VectorXPoly;
 // TODO(jwnimmer-tri) Add a real formatter and deprecate the operator<<.
 namespace fmt {
 template <typename T>
-struct formatter<drake::Polynomial<T>>
-    : drake::ostream_formatter {};
+struct formatter<drake::Polynomial<T>> : drake::ostream_formatter {};
 template <>
 struct formatter<drake::Polynomial<double>::Monomial>
     : drake::ostream_formatter {};

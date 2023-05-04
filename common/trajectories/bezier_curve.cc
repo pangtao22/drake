@@ -1,14 +1,15 @@
 #include "drake/common/trajectories/bezier_curve.h"
 
+#include "drake/common/drake_bool.h"
+#include "drake/common/symbolic/polynomial.h"
 #include "drake/math/binomial_coefficient.h"
 
 namespace drake {
 namespace trajectories {
 
 template <typename T>
-BezierCurve<T>::BezierCurve(
-    double start_time, double end_time,
-    const Eigen::Ref<const MatrixX<T>>& control_points)
+BezierCurve<T>::BezierCurve(double start_time, double end_time,
+                            const Eigen::Ref<const MatrixX<T>>& control_points)
     : start_time_{start_time},
       end_time_{end_time},
       control_points_{control_points},
@@ -35,17 +36,41 @@ std::unique_ptr<Trajectory<T>> BezierCurve<T>::Clone() const {
 template <typename T>
 MatrixX<T> BezierCurve<T>::value(const T& time) const {
   using std::clamp;
-  const T ctime = clamp(time, T{start_time_}, T{end_time_});
-  MatrixX<T> v = VectorX<T>::Zero(rows());
-  for (int i = 0; i < control_points_.cols(); ++i) {
-    v += BernsteinBasis(i, ctime) * control_points_.col(i);
-  }
-  return v;
+  return EvaluateT(clamp(time, T{start_time_}, T{end_time_}));
 }
 
 template <typename T>
-MatrixX<T> BezierCurve<T>::CalcDerivativePoints(
-    int derivative_order) const {
+VectorX<symbolic::Expression> BezierCurve<T>::GetExpression(
+    symbolic::Variable time) const {
+  if constexpr (scalar_predicate<T>::is_bool) {
+    MatrixX<symbolic::Expression> control_points{control_points_.rows(),
+                                                 control_points_.cols()};
+
+    if constexpr (std::is_same_v<T, double>) {
+      control_points = control_points_.template cast<symbolic::Expression>();
+    } else {
+      // AutoDiffXd.
+      for (int r = 0; r < control_points.rows(); ++r) {
+        for (int c = 0; c < control_points.cols(); ++c) {
+          control_points(r, c) =
+              symbolic::Expression(control_points_(r, c).value());
+        }
+      }
+    }
+    return BezierCurve<symbolic::Expression>(start_time_, end_time_,
+                                             control_points)
+        .GetExpression(time);
+  } else {
+    VectorX<symbolic::Expression> ret{EvaluateT(symbolic::Expression(time))};
+    for (int i = 0; i < ret.rows(); ++i) {
+      ret(i) = ret(i).Expand();
+    }
+    return ret;
+  }
+}
+
+template <typename T>
+MatrixX<T> BezierCurve<T>::CalcDerivativePoints(int derivative_order) const {
   DRAKE_DEMAND(derivative_order <= order_);
   int n = order_;
   MatrixX<T> points =
@@ -60,8 +85,8 @@ MatrixX<T> BezierCurve<T>::CalcDerivativePoints(
 }
 
 template <typename T>
-MatrixX<T> BezierCurve<T>::DoEvalDerivative(
-        const T& time, int derivative_order) const {
+MatrixX<T> BezierCurve<T>::DoEvalDerivative(const T& time,
+                                            int derivative_order) const {
   DRAKE_DEMAND(derivative_order >= 0);
   if (derivative_order == 0) {
     return this->value(time);
@@ -77,6 +102,15 @@ MatrixX<T> BezierCurve<T>::DoEvalDerivative(
   MatrixX<T> v = VectorX<T>::Zero(rows());
   for (int i = 0; i < points.cols(); ++i) {
     v += BernsteinBasis(i, ctime, order_ - derivative_order) * points.col(i);
+  }
+  return v;
+}
+
+template <typename T>
+VectorX<T> BezierCurve<T>::EvaluateT(const T& time) const {
+  VectorX<T> v = VectorX<T>::Zero(rows());
+  for (int i = 0; i < control_points_.cols(); ++i) {
+    v += BernsteinBasis(i, time) * control_points_.col(i);
   }
   return v;
 }

@@ -208,16 +208,18 @@ DirectCollocation::DirectCollocation(
     const System<double>* system, const Context<double>& context,
     int num_time_samples, double minimum_timestep, double maximum_timestep,
     std::variant<InputPortSelection, InputPortIndex> input_port_index,
-    bool assume_non_continuous_states_are_fixed)
+    bool assume_non_continuous_states_are_fixed,
+    solvers::MathematicalProgram* prog)
     : MultipleShooting(
           system->get_input_port_selection(input_port_index)
               ? system->get_input_port_selection(input_port_index)->size()
               : 0,
           CheckAndReturnStates(context.num_continuous_states()),
-          num_time_samples, minimum_timestep, maximum_timestep),
+          num_time_samples, minimum_timestep, maximum_timestep, prog),
       system_(system),
       context_(context.Clone()),
-      input_port_index_(input_port_index), sample_contexts_(num_time_samples) {
+      input_port_index_(input_port_index),
+      sample_contexts_(num_time_samples) {
   system->ValidateContext(context);
   if (!assume_non_continuous_states_are_fixed) {
     DRAKE_DEMAND(context.has_only_continuous_state());
@@ -246,7 +248,7 @@ DirectCollocation::DirectCollocation(
         *system_ad_, sample_contexts_[i].get(), sample_contexts_[i + 1].get(),
         context_ad_.get(), input_port_index,
         assume_non_continuous_states_are_fixed);
-    prog()
+    this->prog()
         .AddConstraint(constraint,
                        {h_vars().segment<1>(i),
                         x_vars().segment(i * num_states(), num_states() * 2),
@@ -268,8 +270,8 @@ void DirectCollocation::DoAddRunningCost(const symbolic::Expression& g) {
     prog().AddCost(SubstitutePlaceholderVariables(
         g * (h_vars()(i - 1) + h_vars()(i)) / 2, i));
   }
-  prog().AddCost(SubstitutePlaceholderVariables(
-      g * h_vars()(N() - 2) / 2, N() - 1));
+  prog().AddCost(
+      SubstitutePlaceholderVariables(g * h_vars()(N() - 2) / 2, N() - 1));
 }
 
 PiecewisePolynomial<double> DirectCollocation::ReconstructInputTrajectory(
@@ -304,8 +306,7 @@ PiecewisePolynomial<double> DirectCollocation::ReconstructStateTrajectory(
   FixedInputPortValue* input_port_value{nullptr};
   if (input_port) {
     input_port_value = &input_port->FixValue(
-      context_.get(),
-      system_->AllocateInputVector(*input_port)->get_value());
+        context_.get(), system_->AllocateInputVector(*input_port)->get_value());
   }
 
   for (int i = 0; i < N(); i++) {

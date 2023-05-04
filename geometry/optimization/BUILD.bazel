@@ -35,6 +35,7 @@ drake_cc_library(
         "intersection.cc",
         "minkowski_sum.cc",
         "point.cc",
+        "spectrahedron.cc",
         "vpolytope.cc",
     ],
     hdrs = [
@@ -45,6 +46,7 @@ drake_cc_library(
         "intersection.h",
         "minkowski_sum.h",
         "point.h",
+        "spectrahedron.h",
         "vpolytope.h",
     ],
     interface_deps = [
@@ -55,6 +57,7 @@ drake_cc_library(
     deps = [
         "//geometry:read_obj",
         "//solvers:choose_best_solver",
+        "//solvers:get_program_type",
         "//solvers:gurobi_solver",
         "//solvers:ipopt_solver",
         "//solvers:mosek_solver",
@@ -159,8 +162,14 @@ drake_cc_googletest(
     name = "convex_set_test",
     deps = [
         ":convex_set",
-        "//common/test_utilities:eigen_matrix_compare",
-        "//solvers:clp_solver",
+        "//common/test_utilities:limit_malloc",
+    ],
+)
+
+drake_cc_googletest(
+    name = "convex_set_solving_test",
+    deps = [
+        ":convex_set",
     ],
 )
 
@@ -177,6 +186,9 @@ drake_cc_googletest(
 drake_cc_googletest(
     name = "cspace_free_polytope_with_mosek_test",
     timeout = "long",
+    # Some of these test cases take a very long time to run. Run each test case
+    # in its own process (in parallel) to improve test latency.
+    shard_count = 12,
     # This test launches 2 threads to test both serial and parallel code paths
     # in CspaceFreePolytope.
     tags = mosek_test_tags() + ["cpu:2"] + ["no_memcheck"],
@@ -324,6 +336,16 @@ drake_cc_googletest(
 )
 
 drake_cc_googletest(
+    name = "spectrahedron_test",
+    deps = [
+        ":convex_set",
+        "//common/test_utilities:eigen_matrix_compare",
+        "//common/test_utilities:expect_throws_message",
+        "//solvers:solve",
+    ],
+)
+
+drake_cc_googletest(
     name = "vpolytope_test",
     data = ["//geometry:test_obj_files"],
     deps = [
@@ -334,4 +356,4 @@ drake_cc_googletest(
     ],
 )
 
-add_lint_tests()
+add_lint_tests(enable_clang_format_lint = True)

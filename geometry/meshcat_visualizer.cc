@@ -1,5 +1,6 @@
 #include "drake/geometry/meshcat_visualizer.h"
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
@@ -8,10 +9,16 @@
 #include <fmt/format.h>
 
 #include "drake/common/extract_double.h"
+#include "drake/geometry/proximity/volume_to_surface_mesh.h"
 #include "drake/geometry/utilities.h"
 
 namespace drake {
 namespace geometry {
+namespace {
+// Boilerplate for std::visit.
+template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
+}  // namespace
 
 template <typename T>
 MeshcatVisualizer<T>::MeshcatVisualizer(std::shared_ptr<Meshcat> meshcat,
@@ -100,8 +107,13 @@ MeshcatVisualizer<T>& MeshcatVisualizer<T>::AddToBuilder(
     systems::DiagramBuilder<T>* builder,
     const systems::OutputPort<T>& query_object_port,
     std::shared_ptr<Meshcat> meshcat, MeshcatVisualizerParams params) {
+  const std::string aspirational_name =
+      fmt::format("meshcat_visualizer({})", params.prefix);
   auto& visualizer = *builder->template AddSystem<MeshcatVisualizer<T>>(
       std::move(meshcat), std::move(params));
+  if (!builder->HasSubsystemNamed(aspirational_name)) {
+    visualizer.set_name(aspirational_name);
+  }
   builder->Connect(query_object_port, visualizer.query_object_input_port());
   return visualizer;
 }
@@ -164,27 +176,61 @@ void MeshcatVisualizer<T>::SetObjects(
     while ((pos = frame_path.find("::", pos)) != std::string::npos) {
       frame_path.replace(pos++, 2, "/");
     }
-    if (frame_id != inspector.world_frame_id() &&
-        inspector.NumGeometriesForFrameWithRole(frame_id, params_.role) > 0) {
-      dynamic_frames_[frame_id] = frame_path;
-      frames_to_delete.erase(frame_id);  // Don't delete this one.
-    }
 
+    bool frame_has_any_geometry = false;
     for (GeometryId geom_id : inspector.GetGeometries(frame_id, params_.role)) {
+      const GeometryProperties& properties =
+          *inspector.GetProperties(geom_id, params_.role);
+      if (properties.HasProperty("meshcat", "accepting")) {
+        if (properties.GetProperty<std::string>("meshcat", "accepting") !=
+            params_.prefix) {
+          continue;
+        }
+      } else if (!params_.include_unspecified_accepting) {
+        continue;
+      }
+
       // Note: We use the frame_path/id instead of instance.GetName(geom_id),
       // which is a garbled mess of :: and _ and a memory address by default
       // when coming from MultibodyPlant.
       // TODO(russt): Use the geometry names if/when they are cleaned up.
       const std::string path =
           fmt::format("{}/{}", frame_path, geom_id.get_value());
-      const Rgba rgba = inspector.GetProperties(geom_id, params_.role)
-          ->GetPropertyOrDefault("phong", "diffuse", params_.default_color);
-
-      meshcat_->SetObject(path, inspector.GetShape(geom_id), rgba);
+      const Rgba rgba = properties.GetPropertyOrDefault("phong", "diffuse",
+                                                        params_.default_color);
+      bool used_hydroelastic = false;
+      if constexpr (std::is_same_v<T, double>) {
+        if (params_.show_hydroelastic) {
+          auto maybe_mesh = inspector.maybe_get_hydroelastic_mesh(geom_id);
+          std::visit(
+              overloaded{[](std::monostate) -> void {},
+                         [&](const TriangleSurfaceMesh<double>* mesh) -> void {
+                           DRAKE_DEMAND(mesh != nullptr);
+                           meshcat_->SetObject(path, *mesh, rgba);
+                           used_hydroelastic = true;
+                         },
+                         [&](const VolumeMesh<double>* mesh) -> void {
+                           DRAKE_DEMAND(mesh != nullptr);
+                           meshcat_->SetObject(
+                               path, ConvertVolumeToSurfaceMesh(*mesh), rgba);
+                           used_hydroelastic = true;
+                         }},
+              maybe_mesh);
+        }
+      }
+      if (!used_hydroelastic) {
+        meshcat_->SetObject(path, inspector.GetShape(geom_id), rgba);
+      }
       meshcat_->SetTransform(path, inspector.GetPoseInFrame(geom_id));
       geometries_[geom_id] = path;
       colors_[geom_id] = rgba;
       geometries_to_delete.erase(geom_id);  // Don't delete this one.
+      frame_has_any_geometry = true;
+    }
+
+    if (frame_has_any_geometry && (frame_id != inspector.world_frame_id())) {
+      dynamic_frames_[frame_id] = frame_path;
+      frames_to_delete.erase(frame_id);  // Don't delete this one.
     }
   }
 
@@ -212,11 +258,20 @@ void MeshcatVisualizer<T>::SetTransforms(
 
 template <typename T>
 void MeshcatVisualizer<T>::SetColorAlphas() const {
+  double max_alpha = 0.0;
+  for (const auto& [geom_id, path] : geometries_) {
+    max_alpha = std::max(max_alpha, colors_[geom_id].a());
+  }
+
   for (const auto& [geom_id, path] : geometries_) {
     Rgba color = colors_[geom_id];
-    color.set(color.r(), color.g(), color.b(), alpha_value_ * color.a());
+    if (max_alpha == 0.0) {
+      color.update({}, {}, {}, alpha_value_);
+    } else {
+      color.update({}, {}, {}, alpha_value_ * color.a());
+    }
     meshcat_->SetProperty(path, "color",
-      {color.r(), color.g(), color.b(), alpha_value_ * color.a()});
+                          {color.r(), color.g(), color.b(), color.a()});
   }
 }
 
@@ -224,6 +279,7 @@ template <typename T>
 systems::EventStatus MeshcatVisualizer<T>::OnInitialization(
     const systems::Context<T>&) const {
   Delete();
+  meshcat_->SetProperty(params_.prefix, "visible", params_.visible_by_default);
   return systems::EventStatus::Succeeded();
 }
 

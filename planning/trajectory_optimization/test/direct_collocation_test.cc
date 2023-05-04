@@ -55,8 +55,8 @@ GTEST_TEST(DirectCollocationConstraint, DoubleConstructor) {
 
   // Make sure that the constraint can be constructed and evaluated.
   DirectCollocationConstraint constraint(*system, *context);
-  const Eigen::VectorXd x = Eigen::VectorXd(constraint.num_vars());
-  Eigen::VectorXd y(constraint.num_constraints());
+  const Eigen::VectorXd x = Eigen::VectorXd::Zero(constraint.num_vars());
+  Eigen::VectorXd y = Eigen::VectorXd::Zero(constraint.num_constraints());
   constraint.Eval(x, &y);
 }
 
@@ -70,9 +70,32 @@ GTEST_TEST(DirectCollocationConstraint, AutoDiffXdConstructor) {
   // Make sure that the constraint can be constructed and evaluated.
   DirectCollocationConstraint constraint(*system_ad, context_ad.get(),
                                          context_ad.get(), context_ad.get());
-  const Eigen::VectorXd x = Eigen::VectorXd(constraint.num_vars());
-  Eigen::VectorXd y(constraint.num_constraints());
+  const Eigen::VectorXd x = Eigen::VectorXd::Zero(constraint.num_vars());
+  Eigen::VectorXd y = Eigen::VectorXd::Zero(constraint.num_constraints());
   constraint.Eval(x, &y);
+}
+
+GTEST_TEST(DirectCollocation, PassProgToConstructor) {
+  const std::unique_ptr<LinearSystem<double>> system = MakeSimpleLinearSystem();
+  const std::unique_ptr<Context<double>> context =
+      system->CreateDefaultContext();
+
+  const int kNumSampleTimes = 4;
+  const double kTimeStep = .1;
+  solvers::MathematicalProgram prog;
+  DirectCollocation dircol(
+      system.get(), *context, kNumSampleTimes, kTimeStep, kTimeStep,
+      systems::InputPortSelection::kUseFirstInputIfItExists, false, &prog);
+
+  EXPECT_EQ(&prog, &dircol.prog());
+  const int num_vars = prog.num_vars();
+
+  // Add a second direct collocation problem to the same prog.
+  DirectCollocation dircol2(
+      system.get(), *context, kNumSampleTimes, kTimeStep, kTimeStep,
+      systems::InputPortSelection::kUseFirstInputIfItExists, false, &prog);
+  EXPECT_EQ(&prog, &dircol2.prog());
+  EXPECT_EQ(prog.num_vars(), num_vars * 2);
 }
 
 GTEST_TEST(DirectCollocation, TestAddRunningCost) {
@@ -506,7 +529,7 @@ GTEST_TEST(DirectCollocation, DiscreteTimeSystemThrows) {
       ".*doesn't have any continuous states.*");
 }
 
-}  // anonymous namespace
+}  // namespace
 }  // namespace trajectory_optimization
 }  // namespace planning
 }  // namespace drake
